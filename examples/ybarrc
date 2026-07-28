@@ -1,0 +1,54 @@
+#!/bin/sh
+# Example YBar config. Install:
+#   mkdir -p ~/.config/ybar && cp examples/ybarrc ~/.config/ybar/ybarrc
+# The config is an executable script that configures the running daemon
+# through the CLI — sketchybar users will feel at home.
+
+ybar --bar \
+  height=32 \
+  color=0xdd1e1e2e \
+  topmost=on
+
+# Shared item defaults (a hidden prototype copied into every later --add).
+ybar --default \
+  icon.color=0xffcdd6f4 \
+  label.color=0xffcdd6f4 \
+  icon.padding_left=8 \
+  icon.padding_right=4 \
+  label.padding_right=8
+
+# ── Left ────────────────────────────────────────────────────────────────
+ybar --add item front_app left \
+     --set front_app \
+       icon=sf:macwindow \
+       icon.color=0xff89b4fa \
+       script='ybar --set "$NAME" label="$INFO"' \
+     --subscribe front_app front_app_switched
+
+# ── Center ──────────────────────────────────────────────────────────────
+ybar --add item title center \
+     --set title label="YBar" label.color=0xffa6e3a1
+
+# ── Right ───────────────────────────────────────────────────────────────
+ybar --add item clock right \
+     --set clock \
+       icon=sf:clock \
+       update_freq=10 \
+       script='ybar --set "$NAME" label="$(date "+%a %d %H:%M")"'
+
+ybar --add item battery right \
+     --set battery \
+       icon=sf:battery.75percent \
+       icon.color=0xffa6e3a1 \
+       script='ybar --set "$NAME" label="$INFO%"' \
+     --subscribe battery power_source_change battery_change
+
+ybar --add item volume right \
+     --set volume \
+       icon=sf:speaker.wave.2.fill \
+       icon.color=0xfff9e2af \
+       script='ybar --set "$NAME" label="$INFO%"' \
+     --subscribe volume volume_change
+
+# Kick everything once so the bar is populated immediately.
+ybar --update

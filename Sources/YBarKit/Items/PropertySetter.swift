@@ -1,0 +1,390 @@
+import Foundation
+
+/// The dotted-path property namespace — YBar's primary compatibility surface
+/// with sketchybar configs (`icon.background.shadow.color.alpha`,
+/// `label.font.size`, every color addressable per channel).
+///
+/// Implemented as recursive descent over typed sub-parsers using key paths,
+/// mirroring sketchybar's `bar_item_parse_set_message` structure. Any float or
+/// color leaf is animatable: when the context carries an `--animate` modifier,
+/// the set becomes a scheduled animation instead of a direct assignment.
+@MainActor
+public struct PropertyContext {
+    public let scheduler: AnimationScheduler
+    /// Active `--animate <curve> <frames>` modifier for the rest of the message.
+    public var animation: (curve: AnimationCurve, durationFrames: Int)?
+    public let invalidate: () -> Void
+
+    public init(scheduler: AnimationScheduler,
+                animation: (curve: AnimationCurve, durationFrames: Int)? = nil,
+                invalidate: @escaping () -> Void) {
+        self.scheduler = scheduler
+        self.animation = animation
+        self.invalidate = invalidate
+    }
+}
+
+@MainActor
+public enum PropertySetter {
+    /// Set one `property=value` on an item. Returns an error string or nil on success.
+    public static func set(item: Item, property: String, value: String, context: PropertyContext) -> String? {
+        let path = property.split(separator: ".", omittingEmptySubsequences: false)
+        return setItem(item, path[...], value, context)
+    }
+
+    // MARK: - Item root
+
+    private static func setItem(_ item: Item, _ path: ArraySlice<Substring>,
+                                _ value: String, _ ctx: PropertyContext) -> String? {
+        guard let head = path.first else { return "[!] empty property" }
+        let rest = path.dropFirst()
+        switch head {
+        case "icon":
+            return setText(item, \Item.icon, "icon", rest, value, ctx)
+        case "label":
+            return setText(item, \Item.label, "label", rest, value, ctx)
+        case "background":
+            return setBackground(item, \Item.background, "background", rest, value, ctx)
+        case "position":
+            guard let position = ItemPosition.parse(value) else { return "[!] invalid position: \(value)" }
+            item.position = position
+            ctx.invalidate()
+            return nil
+        case "drawing":
+            return setBool(item, \Item.drawing, value, ctx)
+        case "script":
+            item.script = value
+            return nil
+        case "click_script":
+            item.clickScript = value
+            return nil
+        case "update_freq":
+            guard let frequency = Int(value), frequency >= 0 else { return "[!] invalid update_freq: \(value)" }
+            item.updateFrequency = frequency
+            item.routineCounter = 0
+            return nil
+        case "updates":
+            guard let policy = UpdatePolicy(rawValue: value) ?? parseBool(value).map({ $0 ? .on : .off })
+            else { return "[!] invalid updates: \(value)" }
+            item.updatePolicy = policy
+            return nil
+        case "width":
+            if value == "dynamic" {
+                return setFloat(item, \Item.customWidth, "width", "-1", ctx)
+            }
+            return setFloat(item, \Item.customWidth, "width", value, ctx)
+        case "align":
+            guard let first = value.first, "lcr".contains(first) else { return "[!] invalid align: \(value)" }
+            item.align = first
+            ctx.invalidate()
+            return nil
+        case "y_offset":
+            return setFloat(item, \Item.yOffset, "y_offset", value, ctx)
+        case "padding_left":
+            return setFloat(item, \Item.paddingLeft, "padding_left", value, ctx)
+        case "padding_right":
+            return setFloat(item, \Item.paddingRight, "padding_right", value, ctx)
+        case "display":
+            return setDisplayAssociation(item, value, ctx)
+        default:
+            return "[?] unknown property: \(path.joined(separator: "."))"
+        }
+    }
+
+    // MARK: - Text sub-domain (icon.* / label.*)
+
+    private static func setText(
+        _ item: Item,
+        _ base: ReferenceWritableKeyPath<Item, TextPart>,
+        _ prefix: String,
+        _ path: ArraySlice<Substring>,
+        _ value: String,
+        _ ctx: PropertyContext
+    ) -> String? {
+        guard let head = path.first else {
+            // Bare `icon=...` / `label=...` sets the string.
+            item[keyPath: base.appending(path: \TextPart.string)] = value
+            ctx.invalidate()
+            return nil
+        }
+        let rest = path.dropFirst()
+        switch head {
+        case "string":
+            item[keyPath: base.appending(path: \TextPart.string)] = value
+            ctx.invalidate()
+            return nil
+        case "drawing":
+            return setBool(item, base.appending(path: \TextPart.drawing), value, ctx)
+        case "color":
+            return setColor(item, base.appending(path: \TextPart.color), "\(prefix).color", rest, value, ctx)
+        case "highlight":
+            return setBool(item, base.appending(path: \TextPart.highlight), value, ctx)
+        case "highlight_color":
+            return setColor(item, base.appending(path: \TextPart.highlightColor),
+                            "\(prefix).highlight_color", rest, value, ctx)
+        case "font":
+            return setFont(item, base.appending(path: \TextPart.font), "\(prefix).font", rest, value, ctx)
+        case "padding_left":
+            return setFloat(item, base.appending(path: \TextPart.paddingLeft),
+                            "\(prefix).padding_left", value, ctx)
+        case "padding_right":
+            return setFloat(item, base.appending(path: \TextPart.paddingRight),
+                            "\(prefix).padding_right", value, ctx)
+        case "y_offset":
+            return setFloat(item, base.appending(path: \TextPart.yOffset), "\(prefix).y_offset", value, ctx)
+        case "max_chars":
+            guard let count = Int(value), count >= 0 else { return "[!] invalid max_chars: \(value)" }
+            item[keyPath: base.appending(path: \TextPart.maxChars)] = count
+            ctx.invalidate()
+            return nil
+        case "background":
+            return setBackground(item, base.appending(path: \TextPart.background),
+                                 "\(prefix).background", rest, value, ctx)
+        case "shadow":
+            return setShadow(item, base.appending(path: \TextPart.shadow), "\(prefix).shadow", rest, value, ctx)
+        default:
+            return "[?] unknown property: \(prefix).\(path.joined(separator: "."))"
+        }
+    }
+
+    private static func setFont(
+        _ item: Item,
+        _ base: ReferenceWritableKeyPath<Item, FontSpec>,
+        _ prefix: String,
+        _ path: ArraySlice<Substring>,
+        _ value: String,
+        _ ctx: PropertyContext
+    ) -> String? {
+        guard let head = path.first else {
+            var font = item[keyPath: base]
+            font.apply(value)
+            item[keyPath: base] = font
+            ctx.invalidate()
+            return nil
+        }
+        switch head {
+        case "family":
+            item[keyPath: base.appending(path: \FontSpec.family)] = value
+            ctx.invalidate()
+            return nil
+        case "style":
+            item[keyPath: base.appending(path: \FontSpec.style)] = value
+            ctx.invalidate()
+            return nil
+        case "size":
+            return setFloat(item, base.appending(path: \FontSpec.size), "\(prefix).size", value, ctx)
+        default:
+            return "[?] unknown property: \(prefix).\(path.joined(separator: "."))"
+        }
+    }
+
+    // MARK: - Background sub-domain
+
+    private static func setBackground(
+        _ item: Item,
+        _ base: ReferenceWritableKeyPath<Item, BackgroundStyle>,
+        _ prefix: String,
+        _ path: ArraySlice<Substring>,
+        _ value: String,
+        _ ctx: PropertyContext
+    ) -> String? {
+        guard let head = path.first else { return "[!] \(prefix) needs a sub-property" }
+        let rest = path.dropFirst()
+        switch head {
+        case "drawing":
+            return setBool(item, base.appending(path: \BackgroundStyle.drawing), value, ctx)
+        case "color":
+            return setColor(item, base.appending(path: \BackgroundStyle.color), "\(prefix).color", rest, value, ctx)
+        case "border_color":
+            return setColor(item, base.appending(path: \BackgroundStyle.borderColor),
+                            "\(prefix).border_color", rest, value, ctx)
+        case "border_width":
+            return setFloat(item, base.appending(path: \BackgroundStyle.borderWidth),
+                            "\(prefix).border_width", value, ctx)
+        case "corner_radius":
+            return setFloat(item, base.appending(path: \BackgroundStyle.cornerRadius),
+                            "\(prefix).corner_radius", value, ctx)
+        case "height":
+            return setFloat(item, base.appending(path: \BackgroundStyle.height), "\(prefix).height", value, ctx)
+        case "padding_left":
+            return setFloat(item, base.appending(path: \BackgroundStyle.paddingLeft),
+                            "\(prefix).padding_left", value, ctx)
+        case "padding_right":
+            return setFloat(item, base.appending(path: \BackgroundStyle.paddingRight),
+                            "\(prefix).padding_right", value, ctx)
+        case "x_offset":
+            return setFloat(item, base.appending(path: \BackgroundStyle.xOffset), "\(prefix).x_offset", value, ctx)
+        case "y_offset":
+            return setFloat(item, base.appending(path: \BackgroundStyle.yOffset), "\(prefix).y_offset", value, ctx)
+        case "gradient_color":
+            guard let color = YColor.parse(value) else { return "[!] invalid color: \(value)" }
+            item[keyPath: base.appending(path: \BackgroundStyle.gradientColor)] = color
+            ctx.invalidate()
+            return nil
+        case "gradient_angle":
+            return setFloat(item, base.appending(path: \BackgroundStyle.gradientAngle),
+                            "\(prefix).gradient_angle", value, ctx)
+        case "shadow":
+            return setShadow(item, base.appending(path: \BackgroundStyle.shadow), "\(prefix).shadow",
+                             rest, value, ctx)
+        default:
+            return "[?] unknown property: \(prefix).\(path.joined(separator: "."))"
+        }
+    }
+
+    // MARK: - Shadow sub-domain
+
+    private static func setShadow(
+        _ item: Item,
+        _ base: ReferenceWritableKeyPath<Item, ShadowStyle>,
+        _ prefix: String,
+        _ path: ArraySlice<Substring>,
+        _ value: String,
+        _ ctx: PropertyContext
+    ) -> String? {
+        guard let head = path.first else {
+            // Bare `shadow=on|off` toggles drawing (sketchybar shorthand).
+            return setBool(item, base.appending(path: \ShadowStyle.drawing), value, ctx)
+        }
+        let rest = path.dropFirst()
+        switch head {
+        case "drawing":
+            return setBool(item, base.appending(path: \ShadowStyle.drawing), value, ctx)
+        case "color":
+            return setColor(item, base.appending(path: \ShadowStyle.color), "\(prefix).color", rest, value, ctx)
+        case "distance":
+            return setFloat(item, base.appending(path: \ShadowStyle.distance), "\(prefix).distance", value, ctx)
+        case "angle":
+            return setFloat(item, base.appending(path: \ShadowStyle.angle), "\(prefix).angle", value, ctx)
+        default:
+            return "[?] unknown property: \(prefix).\(path.joined(separator: "."))"
+        }
+    }
+
+    // MARK: - Leaf helpers
+
+    /// Animatable float leaf.
+    private static func setFloat(
+        _ item: Item,
+        _ keyPath: ReferenceWritableKeyPath<Item, Float>,
+        _ key: String,
+        _ value: String,
+        _ ctx: PropertyContext
+    ) -> String? {
+        guard let target = Float(value) else { return "[!] invalid number: \(value)" }
+        let animationKey = "item.\(item.id).\(key)"
+        if let animation = ctx.animation, animation.durationFrames > 0 {
+            let invalidate = ctx.invalidate
+            ctx.scheduler.animate(
+                key: animationKey,
+                from: .float(item[keyPath: keyPath]),
+                to: .float(target),
+                durationFrames: animation.durationFrames,
+                curve: animation.curve
+            ) { [weak item] animValue in
+                guard case .float(let current) = animValue else { return }
+                item?[keyPath: keyPath] = current
+                invalidate()
+            }
+        } else {
+            ctx.scheduler.cancel(key: animationKey)
+            item[keyPath: keyPath] = target
+            ctx.invalidate()
+        }
+        return nil
+    }
+
+    /// Animatable color leaf, with per-channel addressing (`...color.alpha` etc.).
+    private static func setColor(
+        _ item: Item,
+        _ keyPath: ReferenceWritableKeyPath<Item, YColor>,
+        _ key: String,
+        _ path: ArraySlice<Substring>,
+        _ value: String,
+        _ ctx: PropertyContext
+    ) -> String? {
+        if let channel = path.first {
+            switch channel {
+            case "alpha":
+                return setFloat(item, keyPath.appending(path: \YColor.alpha), "\(key).alpha", value, ctx)
+            case "red":
+                return setFloat(item, keyPath.appending(path: \YColor.red), "\(key).red", value, ctx)
+            case "green":
+                return setFloat(item, keyPath.appending(path: \YColor.green), "\(key).green", value, ctx)
+            case "blue":
+                return setFloat(item, keyPath.appending(path: \YColor.blue), "\(key).blue", value, ctx)
+            case "hex":
+                break // fall through to whole-color parse below
+            default:
+                return "[?] unknown color channel: \(channel)"
+            }
+        }
+        guard let target = YColor.parse(value) else { return "[!] invalid color: \(value)" }
+        let animationKey = "item.\(item.id).\(key)"
+        if let animation = ctx.animation, animation.durationFrames > 0 {
+            let invalidate = ctx.invalidate
+            ctx.scheduler.animate(
+                key: animationKey,
+                from: .color(item[keyPath: keyPath]),
+                to: .color(target),
+                durationFrames: animation.durationFrames,
+                curve: animation.curve
+            ) { [weak item] animValue in
+                guard case .color(let current) = animValue else { return }
+                item?[keyPath: keyPath] = current
+                invalidate()
+            }
+        } else {
+            ctx.scheduler.cancel(key: animationKey)
+            item[keyPath: keyPath] = target
+            ctx.invalidate()
+        }
+        return nil
+    }
+
+    private static func setBool(
+        _ item: Item,
+        _ keyPath: ReferenceWritableKeyPath<Item, Bool>,
+        _ value: String,
+        _ ctx: PropertyContext
+    ) -> String? {
+        if value == "toggle" {
+            item[keyPath: keyPath].toggle()
+            ctx.invalidate()
+            return nil
+        }
+        guard let flag = parseBool(value) else { return "[!] invalid boolean: \(value)" }
+        item[keyPath: keyPath] = flag
+        ctx.invalidate()
+        return nil
+    }
+
+    private static func setDisplayAssociation(_ item: Item, _ value: String, _ ctx: PropertyContext) -> String? {
+        if value == "active" {
+            item.associatedToActiveDisplay = true
+            item.associatedDisplayMask = 0
+            ctx.invalidate()
+            return nil
+        }
+        var mask: UInt32 = 0
+        for token in value.split(separator: ",") {
+            guard let index = Int(token), index >= 1, index <= 32 else {
+                return "[!] invalid display list: \(value)"
+            }
+            mask |= 1 << UInt32(index - 1)
+        }
+        item.associatedToActiveDisplay = false
+        item.associatedDisplayMask = mask
+        ctx.invalidate()
+        return nil
+    }
+
+    /// sketchybar-compatible booleans: on/off, true/false, yes/no, 1/0.
+    public static func parseBool(_ value: String) -> Bool? {
+        switch value.lowercased() {
+        case "on", "true", "yes", "1": return true
+        case "off", "false", "no", "0": return false
+        default: return nil
+        }
+    }
+}
