@@ -17,9 +17,13 @@ public final class ScriptRunner: @unchecked Sendable {
 
     public func run(script: String, environment: [String: String]) {
         guard !script.isEmpty else { return }
+        launch(arguments: ["sh", "-c", script], environment: environment)
+    }
+
+    private func launch(arguments: [String], environment: [String: String]) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["sh", "-c", script]
+        process.arguments = arguments
         process.currentDirectoryURL = configDirectory
 
         var mergedEnvironment = ProcessInfo.processInfo.environment
@@ -47,7 +51,9 @@ public final class ScriptRunner: @unchecked Sendable {
         // written from an editor is often missing it.
         try? FileManager.default.setAttributes(
             [.posixPermissions: 0o755], ofItemAtPath: url.path)
-        run(script: "'\(url.path)'", environment: [:])
+        // The path travels as an argv word ($0), immune to quotes/spaces/metachars
+        // in the path; sh's ENOEXEC fallback still runs shebang-less scripts.
+        launch(arguments: ["sh", "-c", "exec \"$0\"", url.path], environment: [:])
     }
 }
 

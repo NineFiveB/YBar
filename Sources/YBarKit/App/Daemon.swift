@@ -144,6 +144,12 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         networkProvider.onEvent = { [weak self] name, info in
             self?.eventBus.trigger(name: name, info: info)
         }
+
+        barManager.onDisplaysChanged = { [weak self] in
+            self?.eventBus.trigger(
+                name: "display_change",
+                info: "\(DisplayManager.screens().count)")
+        }
     }
 
     private func wireMouse() {
@@ -196,7 +202,10 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
             self?.reload(explicitPath: path)
         }
         commandHandler.onExit = {
-            NSApp.terminate(nil)
+            // Deferred so the IPC reply reaches the client before the process dies.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                NSApp.terminate(nil)
+            }
         }
         commandHandler.onHotloadToggle = { [weak self] enabled in
             self?.hotload.enabled = enabled
@@ -207,10 +216,10 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                 self?.audioProvider.publishVolume(forced: true)
             },
             "power_source_change": { [weak self] in
-                self?.powerProvider.refresh(forced: true)
+                self?.powerProvider.publishPowerSource(forced: true)
             },
             "battery_change": { [weak self] in
-                self?.powerProvider.refresh(forced: true)
+                self?.powerProvider.publishBattery(forced: true)
             },
             "wifi_change": { [weak self] in
                 self?.networkProvider.start()
@@ -222,7 +231,21 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                     name: "front_app_switched",
                     info: self.workspaceProvider.currentFrontApp())
             },
+            "display_change": { [weak self] in
+                self?.eventBus.trigger(
+                    name: "display_change",
+                    info: "\(DisplayManager.screens().count)")
+            },
         ]
+        commandHandler.onForcedUpdate = { [weak self] in
+            guard let self else { return }
+            self.powerProvider.refresh(forced: true)
+            self.audioProvider.publishVolume(forced: true)
+            self.networkProvider.refresh()
+            self.eventBus.trigger(
+                name: "front_app_switched",
+                info: self.workspaceProvider.currentFrontApp())
+        }
     }
 
     // MARK: - Routine timer (update_freq polling)
@@ -276,7 +299,8 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         hotload.onReload = { [weak self] in
             self?.reload(explicitPath: nil)
         }
-        hotload.watch(directory: directory)
+        hotload.watch(directory: directory, configFile: url)
+        hotload.noteReloadHappened()
         scriptRunner.runConfigScript(at: url)
     }
 
@@ -300,7 +324,8 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                 "CONFIG_DIR": directory.path,
                 "BAR_NAME": instanceName,
             ]
-            hotload.watch(directory: directory)
+            hotload.watch(directory: directory, configFile: configURL)
+            hotload.noteReloadHappened()
             scriptRunner.runConfigScript(at: configURL)
         }
         barManager.setNeedsRender()

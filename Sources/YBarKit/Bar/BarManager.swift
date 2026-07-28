@@ -24,6 +24,8 @@ public final class BarManager {
     public var onItemClicked: ((Item, MouseEventInfo) -> Void)?
     public var onItemHover: ((Item, _ entered: Bool) -> Void)?
     public var onItemScrolled: ((Item, _ delta: CGFloat, _ modifier: String) -> Void)?
+    /// Fired after surfaces are rebuilt for a display topology change.
+    public var onDisplaysChanged: (() -> Void)?
 
     public init() throws {
         guard let metalDevice = MTLCreateSystemDefaultDevice() else {
@@ -38,6 +40,7 @@ public final class BarManager {
         displayManager.start()
         displayManager.onChange = { [weak self] in
             self?.rebuildSurfaces()
+            self?.onDisplaysChanged?()
         }
         rebuildSurfaces()
     }
@@ -136,6 +139,14 @@ public final class BarManager {
             scale: scale,
             atlas: atlas)
         renderer.render(list: list, layer: surface.hostView.metalLayer, atlas: atlas)
+    }
+
+    /// Measured natural content width of an item (used by `width=dynamic` animations).
+    public func naturalWidth(of item: Item) -> Float {
+        let measured = MeasuredContent(
+            iconSize: fontCache.measure(part: item.icon),
+            labelSize: fontCache.measure(part: item.label))
+        return Float(Layout.naturalLength(item: item, measured: measured))
     }
 
     /// Items associated with a surface's display (mask bit i-1 = display i; 0 = all).

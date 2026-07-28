@@ -28,6 +28,12 @@ public enum Layout {
     /// Length of the item content: icon + label with their paddings (or fixed width).
     public static func contentLength(item: Item, measured: MeasuredContent) -> CGFloat {
         if item.customWidth >= 0 { return CGFloat(item.customWidth) }
+        return naturalLength(item: item, measured: measured)
+    }
+
+    /// Content length ignoring any fixed-width override — the value `width=dynamic`
+    /// animations resolve the -1 sentinel to.
+    public static func naturalLength(item: Item, measured: MeasuredContent) -> CGFloat {
         var length: CGFloat = 0
         if item.icon.drawing, !item.icon.string.isEmpty {
             length += CGFloat(item.icon.paddingLeft) + measured.iconSize.width + CGFloat(item.icon.paddingRight)

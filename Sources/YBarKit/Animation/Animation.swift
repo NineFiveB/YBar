@@ -81,17 +81,21 @@ final class PropertyAnimation {
     let duration: TimeInterval
     let curve: AnimationCurve
     let apply: (AnimValue) -> Void
+    /// Runs once when the animation reaches its final value (not on cancel).
+    let onComplete: (() -> Void)?
     var startTime: TimeInterval?
     var pending: PropertyAnimation?
 
     init(key: String, from: AnimValue, to: AnimValue, duration: TimeInterval,
-         curve: AnimationCurve, apply: @escaping (AnimValue) -> Void) {
+         curve: AnimationCurve, apply: @escaping (AnimValue) -> Void,
+         onComplete: (() -> Void)? = nil) {
         self.key = key
         self.from = from
         self.to = to
         self.duration = duration
         self.curve = curve
         self.apply = apply
+        self.onComplete = onComplete
     }
 
     /// Advance to `now`; returns false when finished (final value applied).
@@ -126,10 +130,12 @@ public final class AnimationScheduler {
 
     func animate(key: String, from: AnimValue, to: AnimValue,
                  durationFrames: Int, curve: AnimationCurve,
-                 apply: @escaping (AnimValue) -> Void) {
+                 apply: @escaping (AnimValue) -> Void,
+                 onComplete: (() -> Void)? = nil) {
         let duration = TimeInterval(durationFrames) / 60.0
         let animation = PropertyAnimation(
-            key: key, from: from, to: to, duration: duration, curve: curve, apply: apply)
+            key: key, from: from, to: to, duration: duration, curve: curve,
+            apply: apply, onComplete: onComplete)
         if let existing = animations[key] {
             // Chain after the last queued animation, starting from its target.
             var tail = existing
@@ -178,6 +184,7 @@ public final class AnimationScheduler {
         var finishedKeys: [String] = []
         for (key, animation) in animations {
             if !animation.tick(now: now) {
+                animation.onComplete?()
                 if let next = animation.pending {
                     animations[key] = next
                 } else {

@@ -14,13 +14,18 @@ public struct PropertyContext {
     /// Active `--animate <curve> <frames>` modifier for the rest of the message.
     public var animation: (curve: AnimationCurve, durationFrames: Int)?
     public let invalidate: () -> Void
+    /// Measured natural content width of an item — resolves the `width=dynamic`
+    /// -1 sentinel to a real value at animation endpoints.
+    public var measureNaturalWidth: ((Item) -> Float)?
 
     public init(scheduler: AnimationScheduler,
                 animation: (curve: AnimationCurve, durationFrames: Int)? = nil,
-                invalidate: @escaping () -> Void) {
+                invalidate: @escaping () -> Void,
+                measureNaturalWidth: ((Item) -> Float)? = nil) {
         self.scheduler = scheduler
         self.animation = animation
         self.invalidate = invalidate
+        self.measureNaturalWidth = measureNaturalWidth
     }
 }
 
@@ -69,10 +74,7 @@ public enum PropertySetter {
             item.updatePolicy = policy
             return nil
         case "width":
-            if value == "dynamic" {
-                return setFloat(item, \Item.customWidth, "width", "-1", ctx)
-            }
-            return setFloat(item, \Item.customWidth, "width", value, ctx)
+            return setWidth(item, value, ctx)
         case "align":
             guard let first = value.first, "lcr".contains(first) else { return "[!] invalid align: \(value)" }
             item.align = first
@@ -259,6 +261,48 @@ public enum PropertySetter {
         default:
             return "[?] unknown property: \(prefix).\(path.joined(separator: "."))"
         }
+    }
+
+    // MARK: - Width (dynamic sentinel handling)
+
+    /// `width=<n>` is a plain animatable float; `width=dynamic` stores the -1
+    /// sentinel. Under `--animate`, the sentinel is resolved to the measured
+    /// natural width at both endpoints so the item never lerps toward -1
+    /// (sketchybar's flagship width animation idiom).
+    private static func setWidth(_ item: Item, _ value: String, _ ctx: PropertyContext) -> String? {
+        let animationKey = "item.\(item.id).width"
+        if value == "dynamic" {
+            if let animation = ctx.animation, animation.durationFrames > 0,
+               item.customWidth >= 0, let measure = ctx.measureNaturalWidth {
+                let invalidate = ctx.invalidate
+                ctx.scheduler.animate(
+                    key: animationKey,
+                    from: .float(item.customWidth),
+                    to: .float(measure(item)),
+                    durationFrames: animation.durationFrames,
+                    curve: animation.curve,
+                    apply: { [weak item] animValue in
+                        guard case .float(let current) = animValue else { return }
+                        item?.customWidth = current
+                        invalidate()
+                    },
+                    onComplete: { [weak item] in
+                        item?.customWidth = -1
+                        invalidate()
+                    })
+                return nil
+            }
+            ctx.scheduler.cancel(key: animationKey)
+            item.customWidth = -1
+            ctx.invalidate()
+            return nil
+        }
+        // Animating dynamic -> fixed: seed from the real rendered width, not -1.
+        if let animation = ctx.animation, animation.durationFrames > 0,
+           item.customWidth < 0, let measure = ctx.measureNaturalWidth {
+            item.customWidth = measure(item)
+        }
+        return setFloat(item, \Item.customWidth, "width", value, ctx)
     }
 
     // MARK: - Leaf helpers

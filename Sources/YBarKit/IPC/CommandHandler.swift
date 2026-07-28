@@ -17,6 +17,9 @@ public final class CommandHandler {
     public var onHotloadToggle: ((Bool) -> Void)?
     /// Forced provider re-queries keyed by event name (`--trigger volume_change` etc.).
     public var forcedQueries: [String: () -> Void] = [:]
+    /// One-shot re-query of every provider for `--update` (the per-event closures
+    /// may overlap; iterating them would double-fire).
+    public var onForcedUpdate: (() -> Void)?
 
     public init(barManager: BarManager, eventBus: EventBus,
                 scriptRunner: ScriptRunner, scheduler: AnimationScheduler) {
@@ -28,9 +31,12 @@ public final class CommandHandler {
 
     public func handle(arguments: [String]) -> String {
         var output = ""
-        var context = PropertyContext(scheduler: scheduler) { [weak barManager] in
-            barManager?.setNeedsRender()
-        }
+        var context = PropertyContext(
+            scheduler: scheduler,
+            invalidate: { [weak barManager] in barManager?.setNeedsRender() },
+            measureNaturalWidth: { [weak barManager] item in
+                barManager?.naturalWidth(of: item) ?? 0
+            })
 
         func emit(_ line: String?) {
             guard let line, !line.isEmpty else { return }
@@ -134,7 +140,7 @@ public final class CommandHandler {
                         "NAME": item.name, "SENDER": "forced", "INFO": "",
                     ])
                 }
-                for forced in forcedQueries.values { forced() }
+                onForcedUpdate?()
                 barManager.setNeedsRender()
 
             case "query":

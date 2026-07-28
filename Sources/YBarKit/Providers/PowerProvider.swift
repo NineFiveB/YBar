@@ -41,12 +41,22 @@ public final class PowerProvider {
 
     /// Read current state, emitting events for changes (or unconditionally when forced).
     public func refresh(forced: Bool) {
-        let snapshot = PowerProvider.snapshot()
+        publishPowerSource(forced: forced)
+        publishBattery(forced: forced)
+    }
 
+    /// Emit only `power_source_change` (forced re-query path for `--trigger`).
+    public func publishPowerSource(forced: Bool) {
+        let snapshot = PowerProvider.snapshot()
         if forced || snapshot.sourceType != lastSourceType {
             lastSourceType = snapshot.sourceType
             onEvent?("power_source_change", snapshot.sourceType)
         }
+    }
+
+    /// Emit only `battery_change` (forced re-query path for `--trigger`).
+    public func publishBattery(forced: Bool) {
+        let snapshot = PowerProvider.snapshot()
         if let percentage = snapshot.percentage, forced || percentage != lastPercentage {
             lastPercentage = percentage
             onEvent?("battery_change", "\(percentage)")
@@ -66,19 +76,36 @@ public final class PowerProvider {
         let providing = IOPSGetProvidingPowerSourceType(info)?.takeRetainedValue() as String?
         let sourceType = providing == kIOPMBatteryPowerKey ? "BATTERY" : "AC"
 
-        var percentage: Int?
-        var isCharging = false
+        var descriptions: [[String: Any]] = []
         if let list = IOPSCopyPowerSourcesList(info)?.takeRetainedValue() as? [CFTypeRef] {
             for source in list {
-                guard let description = IOPSGetPowerSourceDescription(info, source)?
-                    .takeUnretainedValue() as? [String: Any] else { continue }
-                if let current = description[kIOPSCurrentCapacityKey] as? Int,
-                   let max = description[kIOPSMaxCapacityKey] as? Int, max > 0 {
-                    percentage = Int((Double(current) / Double(max) * 100).rounded())
+                if let description = IOPSGetPowerSourceDescription(info, source)?
+                    .takeUnretainedValue() as? [String: Any] {
+                    descriptions.append(description)
                 }
+            }
+        }
+        return reduce(descriptions: descriptions, sourceType: sourceType)
+    }
+
+    /// Pure reduction over IOPS source descriptions: prefer the internal battery;
+    /// never let a UPS or accessory battery mask it. Split out for testability.
+    nonisolated static func reduce(descriptions: [[String: Any]], sourceType: String) -> Snapshot {
+        var percentage: Int?
+        var isCharging = false
+        var foundInternal = false
+        for description in descriptions {
+            let isInternal = (description[kIOPSTypeKey] as? String) == kIOPSInternalBatteryType
+            // The first capacity-bearing source is the fallback when no internal
+            // battery exists (desktop Mac + UPS).
+            guard isInternal || !foundInternal && percentage == nil else { continue }
+            if let current = description[kIOPSCurrentCapacityKey] as? Int,
+               let max = description[kIOPSMaxCapacityKey] as? Int, max > 0 {
+                percentage = Int((Double(current) / Double(max) * 100).rounded())
                 if let charging = description[kIOPSIsChargingKey] as? Bool {
                     isCharging = charging
                 }
+                if isInternal { foundInternal = true }
             }
         }
         return Snapshot(sourceType: sourceType, percentage: percentage, isCharging: isCharging)

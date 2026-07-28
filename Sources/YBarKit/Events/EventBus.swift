@@ -77,16 +77,20 @@ public final class EventBus {
         return nil
     }
 
-    /// Fire an event to all subscribed items' scripts.
+    /// Fire an event to all subscribed items' scripts. The `updates` policy gates
+    /// event-driven runs exactly like routine ones (sketchybar contract); mouse
+    /// events and `--update` intentionally bypass it via their own paths.
     public func trigger(name: String, info: String = "", extraEnvironment: [String: String] = [:]) {
         guard let bit = bit(for: name), let items = itemsProvider?() else { return }
         for item in items where item.updateMask & bit != 0 && !item.script.isEmpty {
-            var environment: [String: String] = [
-                "NAME": item.name,
-                "SENDER": name,
-                "INFO": info,
-            ]
-            for (key, value) in extraEnvironment { environment[key] = value }
+            if item.updatePolicy == .off { continue }
+            if item.updatePolicy == .whenShown, !item.isVisible { continue }
+            // Contract variables are applied last: a `--trigger e NAME=x` payload
+            // must never clobber the receiving item's identity.
+            var environment = extraEnvironment
+            environment["NAME"] = item.name
+            environment["SENDER"] = name
+            environment["INFO"] = info
             runItemScript?(item, environment)
         }
     }
