@@ -90,9 +90,14 @@ public final class SocketServer: @unchecked Sendable {
     }
 
     private func serve(connection: Int32) {
+        // Both directions time out: the accept loop is serial, so a client that
+        // connects and never reads its reply must not wedge all IPC forever.
         var tv = timeval(tv_sec: 2, tv_usec: 0)
         _ = withUnsafeBytes(of: &tv) { raw in
             setsockopt(connection, SOL_SOCKET, SO_RCVTIMEO, raw.baseAddress, socklen_t(MemoryLayout<timeval>.size))
+        }
+        _ = withUnsafeBytes(of: &tv) { raw in
+            setsockopt(connection, SOL_SOCKET, SO_SNDTIMEO, raw.baseAddress, socklen_t(MemoryLayout<timeval>.size))
         }
 
         guard let header = SocketClient.readExactly(fd: connection, count: 4),

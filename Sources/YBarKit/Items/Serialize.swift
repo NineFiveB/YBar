@@ -26,7 +26,7 @@ public enum Serialize {
             guard let item = manager.store.item(named: target) else {
                 return "[!] no item named \(target)"
             }
-            return json(itemDictionary(item))
+            return json(itemDictionary(item, boundingRects: manager.boundingRects(for: item)))
         }
     }
 
@@ -52,7 +52,7 @@ public enum Serialize {
         ]
     }
 
-    static func itemDictionary(_ item: Item) -> [String: Any] {
+    static func itemDictionary(_ item: Item, boundingRects: [String: [String: Any]] = [:]) -> [String: Any] {
         [
             "name": item.name,
             "type": "item",
@@ -76,10 +76,7 @@ public enum Serialize {
                 "update_mask": item.updateMask,
                 "updates": item.updatePolicy.rawValue,
             ] as [String: Any],
-            "bounding_rects": [
-                "origin": [item.frame.origin.x, item.frame.origin.y],
-                "size": [item.frame.size.width, item.frame.size.height],
-            ] as [String: Any],
+            "bounding_rects": boundingRects,
         ]
     }
 

@@ -19,6 +19,7 @@ public final class BarManager {
     public private(set) var surfaces: [BarSurface] = []
     private var atlases: [CGFloat: GlyphAtlas] = [:]
     private var renderScheduled = false
+    private var retryScheduled = false
 
     // Interaction hooks, wired by the daemon (scripts + event bus live there).
     public var onItemClicked: ((Item, MouseEventInfo) -> Void)?
@@ -26,6 +27,9 @@ public final class BarManager {
     public var onItemScrolled: ((Item, _ delta: CGFloat, _ modifier: String) -> Void)?
     /// Fired after surfaces are rebuilt for a display topology change.
     public var onDisplaysChanged: (() -> Void)?
+    /// Fired after ANY surface rebuild (topology or display-policy change) —
+    /// the animation display link is bound to a surface view and must re-attach.
+    public var onSurfacesRebuilt: (() -> Void)?
 
     public init() throws {
         guard let metalDevice = MTLCreateSystemDefaultDevice() else {
@@ -67,6 +71,7 @@ public final class BarManager {
             surface.apply(settings: settings, screen: screen)
             surfaces.append(surface)
         }
+        onSurfacesRebuilt?()
         setNeedsRender()
     }
 
@@ -138,7 +143,21 @@ public final class BarManager {
             barSize: barSize,
             scale: scale,
             atlas: atlas)
-        renderer.render(list: list, layer: surface.hostView.metalLayer, atlas: atlas)
+        if !renderer.render(list: list, layer: surface.hostView.metalLayer, atlas: atlas) {
+            // Frame lost (display asleep / drawables exhausted): the damage flag
+            // was already consumed, so reschedule or the update is never shown.
+            scheduleRetry()
+        }
+    }
+
+    private func scheduleRetry() {
+        guard !retryScheduled else { return }
+        retryScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self else { return }
+            self.retryScheduled = false
+            self.setNeedsRender()
+        }
     }
 
     /// Measured natural content width of an item (used by `width=dynamic` animations).
@@ -150,11 +169,31 @@ public final class BarManager {
     }
 
     /// Items associated with a surface's display (mask bit i-1 = display i; 0 = all).
+    /// `display=active` items appear only on the screen holding keyboard focus
+    /// (public-API approximation of sketchybar's active-display tracking).
     public func visibleItems(on surface: BarSurface) -> [Item] {
-        store.items.filter { item in
-            item.associatedDisplayMask == 0
+        let activeScreen = NSScreen.main
+        return store.items.filter { item in
+            if item.associatedToActiveDisplay {
+                return surface.screen == activeScreen
+            }
+            return item.associatedDisplayMask == 0
                 || item.associatedDisplayMask & (1 << UInt32(surface.arrangementIndex - 1)) != 0
         }
+    }
+
+    /// Per-display hit frames for `--query` (`"display-N"` keyed, bar-local points).
+    public func boundingRects(for item: Item) -> [String: [String: Any]] {
+        var rects: [String: [String: Any]] = [:]
+        for surface in surfaces {
+            guard let frame = surface.itemFrames.first(where: { $0.itemID == item.id })?.frame,
+                  frame != .zero else { continue }
+            rects["display-\(surface.arrangementIndex)"] = [
+                "origin": [frame.origin.x, frame.origin.y],
+                "size": [frame.size.width, frame.size.height],
+            ]
+        }
+        return rects
     }
 
     // MARK: - Mouse

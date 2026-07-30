@@ -40,11 +40,12 @@ ln -sfn "/Library/Developer/CommandLineTools/Library/Developer/usr/lib/lib_Testi
 
 `make test` works normally once these exist (they survive incremental builds). With full Xcode installed none of this is needed.
 
-If macro-resolution errors appear out of nowhere (`plugin for module 'TestingMacros' not found`), wipe the module caches:
+If macro-resolution errors appear (`plugin for module 'TestingMacros' not found`): the CLT build planner intermittently fails to resolve the macro plugin living in the `plugins/testing/` subdirectory. The reliable fix (baked into `make test`) is passing it explicitly:
 
 ```sh
-rm -rf ~/.cache/ybar-build/out/ModuleCache.noindex \
-       ~/.cache/ybar-build/out/Intermediates.noindex/SwiftExplicitPrecompiledModules
+swift test --scratch-path ~/.cache/ybar-build \
+  -Xswiftc -load-plugin-library \
+  -Xswiftc /Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing/libTestingMacros.dylib
 ```
 
 ## Verifying the power story

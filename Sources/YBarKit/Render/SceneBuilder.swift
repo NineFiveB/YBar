@@ -120,17 +120,28 @@ public final class SceneBuilder {
             }
         }
 
+        // Fixed-width items clip their content to the content box: width
+        // animations must be a clipped reveal, never overprint neighbors
+        // (sketchybar had this for free from per-item windows).
+        let clip: CGRect? = item.customWidth >= 0
+            ? CGRect(
+                x: (contentBox.minX * scale).rounded(),
+                y: 0,
+                width: (contentBox.width * scale).rounded(),
+                height: (barSize.height * scale).rounded())
+            : nil
+
         // Icon, then label.
         if item.icon.drawing, !item.icon.string.isEmpty {
             penX += CGFloat(item.icon.paddingLeft)
             emitText(part: item.icon, penX: penX, centerY: centerY,
-                     scale: scale, atlas: atlas, into: &list)
+                     scale: scale, atlas: atlas, clip: clip, into: &list)
             penX += iconSize.width + CGFloat(item.icon.paddingRight)
         }
         if item.label.drawing, !item.label.string.isEmpty {
             penX += CGFloat(item.label.paddingLeft)
             emitText(part: item.label, penX: penX, centerY: centerY,
-                     scale: scale, atlas: atlas, into: &list)
+                     scale: scale, atlas: atlas, clip: clip, into: &list)
         }
         // TODO(v1.5): per-part backgrounds (icon.background.* / label.background.*).
     }
@@ -141,6 +152,7 @@ public final class SceneBuilder {
         centerY: CGFloat,
         scale: CGFloat,
         atlas: GlyphAtlas,
+        clip: CGRect?,
         into list: inout DisplayList
     ) {
         let text = part.displayString
@@ -154,13 +166,11 @@ public final class SceneBuilder {
             else { return }
             let originX = (penX * scale).rounded()
             let originY = (partCenterY * scale - CGFloat(entry.sizePx.y) / 2).rounded()
-            list.glyphs.append(GlyphInstance(
+            if let instance = SceneBuilder.glyphInstance(
                 origin: SIMD2(Float(originX), Float(originY)),
-                size: entry.sizePx,
-                uvOrigin: entry.uvOrigin,
-                uvSize: entry.uvSize,
-                color: color,
-                flags: entry.isColor ? GlyphInstance.flagColorGlyph : 0))
+                entry: entry, color: color, clip: clip) {
+                list.glyphs.append(instance)
+            }
             return
         }
 
@@ -184,16 +194,56 @@ public final class SceneBuilder {
             for index in 0..<count {
                 guard let entry = atlas.entry(glyph: glyphs[index], font: runFont) else { continue }
                 let glyphPenX = ((penX + positions[index].x) * scale).rounded()
-                list.glyphs.append(GlyphInstance(
+                if let instance = SceneBuilder.glyphInstance(
                     origin: SIMD2(Float(glyphPenX) + entry.bearingPx.x,
                                   Float(baselinePx) + entry.bearingPx.y),
-                    size: entry.sizePx,
-                    uvOrigin: entry.uvOrigin,
-                    uvSize: entry.uvSize,
-                    color: color,
-                    flags: entry.isColor ? GlyphInstance.flagColorGlyph : 0))
+                    entry: entry, color: color, clip: clip) {
+                    list.glyphs.append(instance)
+                }
             }
         }
+    }
+
+    /// Build a glyph instance, intersecting the quad with an optional clip rect
+    /// (device px) and remapping UVs proportionally. Axis-aligned quads make
+    /// this exact — no scissor or shader support needed.
+    static func glyphInstance(
+        origin: SIMD2<Float>,
+        entry: GlyphAtlas.Entry,
+        color: SIMD4<Float>,
+        clip: CGRect?
+    ) -> GlyphInstance? {
+        var quadOrigin = origin
+        var quadSize = entry.sizePx
+        var uvOrigin = entry.uvOrigin
+        var uvSize = entry.uvSize
+
+        if let clip {
+            let rect = CGRect(x: CGFloat(origin.x), y: CGFloat(origin.y),
+                              width: CGFloat(entry.sizePx.x), height: CGFloat(entry.sizePx.y))
+            let visible = rect.intersection(clip)
+            guard !visible.isEmpty, rect.width > 0, rect.height > 0 else { return nil }
+            if visible != rect {
+                let cutLeft = Float((visible.minX - rect.minX) / rect.width)
+                let cutTop = Float((visible.minY - rect.minY) / rect.height)
+                let keepX = Float(visible.width / rect.width)
+                let keepY = Float(visible.height / rect.height)
+                uvOrigin.x += uvSize.x * cutLeft
+                uvOrigin.y += uvSize.y * cutTop
+                uvSize.x *= keepX
+                uvSize.y *= keepY
+                quadOrigin = SIMD2(Float(visible.minX), Float(visible.minY))
+                quadSize = SIMD2(Float(visible.width), Float(visible.height))
+            }
+        }
+
+        return GlyphInstance(
+            origin: quadOrigin,
+            size: quadSize,
+            uvOrigin: uvOrigin,
+            uvSize: uvSize,
+            color: color,
+            flags: entry.isColor ? GlyphInstance.flagColorGlyph : 0)
     }
 
     // MARK: - Helpers

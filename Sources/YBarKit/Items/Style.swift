@@ -40,14 +40,25 @@ public struct YColor: Equatable, Sendable {
         return YColor(argb: value)
     }
 
-    /// Straight-alpha RGBA vector for GPU consumption (shader premultiplies).
-    public var simd: SIMD4<Float> { SIMD4(red, green, blue, alpha) }
+    /// Straight-alpha RGBA for GPU consumption, with RGB linearized: the render
+    /// target is `bgra8Unorm_srgb`, so shaders and blending operate in linear
+    /// light and the hardware encodes on store (correct gradient midpoints and
+    /// AA coverage — the artifact class the architecture doc calls out).
+    public var simd: SIMD4<Float> {
+        SIMD4(YColor.toLinear(red), YColor.toLinear(green), YColor.toLinear(blue), alpha)
+    }
 
-    /// Interpolate in (gamma-encoded) sRGB per component with linearized RGB —
-    /// avoids sketchybar's per-byte ARGB lerp with its off-hue midpoints.
+    static func toLinear(_ c: Float) -> Float {
+        c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+    }
+
+    static func toGamma(_ c: Float) -> Float {
+        c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1 / 2.4) - 0.055
+    }
+
+    /// Interpolate in linear light — avoids sketchybar's per-byte ARGB lerp
+    /// with its off-hue midpoints.
     public static func lerp(_ from: YColor, _ to: YColor, _ t: Float) -> YColor {
-        func toLinear(_ c: Float) -> Float { c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
-        func toGamma(_ c: Float) -> Float { c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1 / 2.4) - 0.055 }
         func mix(_ a: Float, _ b: Float) -> Float { a + (b - a) * t }
         return YColor(
             alpha: mix(from.alpha, to.alpha),

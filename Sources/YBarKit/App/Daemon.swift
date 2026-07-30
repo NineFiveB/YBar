@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 
 /// Daemon entry: builds the whole object graph and runs the app.
 @MainActor
@@ -102,6 +103,23 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         scheduler.makeDisplayLink = { [weak self] target, selector in
             self?.barManager.surfaces.first?.hostView.displayLink(target: target, selector: selector)
         }
+        // The link is bound to a surface's view; a rebuild (monitor plug/unplug,
+        // display-policy change) would otherwise strand a running animation clock.
+        barManager.onSurfacesRebuilt = { [weak self] in
+            self?.scheduler.reattachDisplayLink()
+        }
+        // Late-activating fonts (per-user Nerd Fonts registering after login)
+        // resolve to a fallback that would otherwise be cached forever.
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name(kCTFontManagerRegisteredFontsChangedNotification as String),
+            object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                guard let core = DaemonCore.shared else { return }
+                core.barManager.fontCache.clear()
+                core.barManager.setNeedsRender()
+            }
+        }
     }
 
     private func wireEventBus() {
@@ -130,6 +148,10 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         // Workspace + power are always on (cheap; sketchybar does the same).
         workspaceProvider.onEvent = { [weak self] name, info in
             self?.eventBus.trigger(name: name, info: info)
+            if name == "front_app_switched" {
+                // display=active items follow keyboard focus across screens.
+                self?.barManager.setNeedsRender()
+            }
         }
         workspaceProvider.start()
 
@@ -309,6 +331,7 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         scheduler.cancelAll()
         barManager.store.removeAll()
         barManager.settings = BarSettings()
+        barManager.fontCache.clear()
         eventBus.reset()
 
         if let explicitPath {

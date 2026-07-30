@@ -10,8 +10,13 @@ BIN     := $(SCRATCH)/out/Products/Debug/ybar
 build:
 	swift build --scratch-path $(SCRATCH)
 
+# -load-plugin-library: the CLT build planner intermittently misses the
+# TestingMacros plugin in its testing/ subdirectory (docs/BUILDING.md).
+TESTING_MACROS := /Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing/libTestingMacros.dylib
+
 test: build
-	swift test --scratch-path $(SCRATCH)
+	swift test --scratch-path $(SCRATCH) \
+	  $(shell [ -f $(TESTING_MACROS) ] && echo -Xswiftc -load-plugin-library -Xswiftc $(TESTING_MACROS))
 
 run: build
 	$(BIN)

@@ -46,8 +46,10 @@ public final class GlyphAtlas {
             pixelFormat: .r8Unorm,
             width: GlyphAtlas.maskPageSize, height: GlyphAtlas.maskPageSize, mipmapped: false)
         maskDescriptor.storageMode = .shared
+        // _srgb so sampling decodes emoji texels to linear, matching the
+        // linear-light render target.
         let colorDescriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .bgra8Unorm,
+            pixelFormat: .bgra8Unorm_srgb,
             width: GlyphAtlas.colorPageSize, height: GlyphAtlas.colorPageSize, mipmapped: false)
         colorDescriptor.storageMode = .shared
 

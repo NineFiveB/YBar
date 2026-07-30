@@ -51,7 +51,7 @@ public final class Renderer {
             descriptor.vertexFunction = vertexFunction
             descriptor.fragmentFunction = fragmentFunction
             let attachment = descriptor.colorAttachments[0]!
-            attachment.pixelFormat = .bgra8Unorm
+            attachment.pixelFormat = .bgra8Unorm_srgb
             attachment.isBlendingEnabled = true
             attachment.sourceRGBBlendFactor = .one
             attachment.sourceAlphaBlendFactor = .one
@@ -65,11 +65,14 @@ public final class Renderer {
     }
 
     /// Render one frame into the layer. Presents even an empty list (clears the bar).
-    public func render(list: DisplayList, layer: CAMetalLayer, atlas: GlyphAtlas) {
+    /// Returns false when the frame could not be produced (display asleep,
+    /// drawables exhausted) — the caller must reschedule or the update is lost.
+    @discardableResult
+    public func render(list: DisplayList, layer: CAMetalLayer, atlas: GlyphAtlas) -> Bool {
         frameSemaphore.wait()
         guard let drawable = layer.nextDrawable() else {
             frameSemaphore.signal()
-            return
+            return false
         }
 
         let slot = frameIndex % Renderer.framesInFlight
@@ -93,7 +96,7 @@ public final class Renderer {
               let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: passDescriptor)
         else {
             frameSemaphore.signal()
-            return
+            return false
         }
 
         var uniforms = Uniforms(viewportSize: SIMD2(
@@ -121,6 +124,7 @@ public final class Renderer {
         commandBuffer.addCompletedHandler { _ in semaphore.signal() }
         commandBuffer.present(drawable)
         commandBuffer.commit()
+        return true
     }
 
     private func fill<T>(buffer: MTLBuffer?, with instances: [T]) -> MTLBuffer? {

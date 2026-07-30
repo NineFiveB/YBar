@@ -34,7 +34,7 @@ public final class MetalHostView: NSView {
         wantsLayer = true
         layerContentsRedrawPolicy = .duringViewResize
         layerContentsPlacement = .topLeft
-        metalLayer.pixelFormat = .bgra8Unorm
+        metalLayer.pixelFormat = .bgra8Unorm_srgb
         metalLayer.framebufferOnly = true
         metalLayer.isOpaque = false
         metalLayer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
