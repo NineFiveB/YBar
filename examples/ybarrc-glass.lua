@@ -6,9 +6,9 @@
 --           (plus helpers/app_icons.lua next to it for workspace app icons)
 
 local glass = {
-  fill        = "0x59202430",  -- dark glass over the blur
-  fill_hover  = "0x8032384a",
-  fill_active = "0x8c3a4154",
+  fill        = "0x21262b36",  -- barely-there tint: the blur IS the material
+  fill_hover  = "0x4d32384a",
+  fill_active = "0x593a4154",
   text        = "0xffe2e2e3",  -- sonokai white
   dim         = "0xff7f8490",  -- sonokai grey
   red         = "0xfffc5d7c",

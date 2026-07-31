@@ -17,11 +17,13 @@ return {
     border = 0x00000000,
   },
   popup = {
-    bg = 0x8c181c26,         -- glass panel over popup blur
-    border = 0x33ffffff,
+    bg = 0x59161a24,         -- glass panel over popup blur
+    border = 0x2effffff,
   },
-  bg1 = 0x59202430,          -- glass fill (was solid 0xff363944)
-  bg2 = 0x66272c3a,          -- brighter glass fill (was solid 0xff414550)
+  -- True Tahoe glass is mostly backdrop: barely-there neutral tints, the
+  -- blur and the specular rim carry the material.
+  bg1 = 0x21262b36,          -- ~13% (was solid 0xff363944)
+  bg2 = 0x2e303a4a,          -- ~18% (was solid 0xff414550)
 
   with_alpha = function(color, alpha)
     if alpha > 1.0 or alpha < 0.0 then return color end
