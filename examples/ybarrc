@@ -36,6 +36,16 @@ ybar --add item clock right \
        update_freq=10 \
        script='ybar --set "$NAME" label="$(date "+%a %d %H:%M")"'
 
+# Live CPU graph fed by the built-in stats provider (no external helper).
+ybar --add graph cpu right 60 \
+     --set cpu \
+       icon=sf:cpu \
+       icon.color=0xfff9e2af \
+       background.height=16 \
+       graph.color=0xffa6e3a1 \
+       script='ybar --push "$NAME" "$CPU_FRACTION"' \
+     --subscribe cpu system_stats
+
 ybar --add item battery right \
      --set battery \
        icon=sf:battery.75percent \

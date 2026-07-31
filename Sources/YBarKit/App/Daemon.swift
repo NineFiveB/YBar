@@ -53,6 +53,7 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
     let powerProvider = PowerProvider()
     let audioProvider = AudioProvider()
     let networkProvider = NetworkProvider()
+    let statsProvider = SystemStatsProvider()
 
     var routineTimer: Timer?
     var configURL: URL?
@@ -138,6 +139,8 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                 self.audioProvider.start()
             case "wifi_change":
                 self.networkProvider.start()
+            case "system_stats":
+                self.statsProvider.start()
             default:
                 break
             }
@@ -165,6 +168,18 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         }
         networkProvider.onEvent = { [weak self] name, info in
             self?.eventBus.trigger(name: name, info: info)
+        }
+
+        statsProvider.onSample = { [weak self] cpu, memory in
+            self?.eventBus.trigger(
+                name: "system_stats",
+                info: "{\"cpu\": \(Int((cpu * 100).rounded())), \"memory\": \(Int((memory * 100).rounded()))}",
+                extraEnvironment: [
+                    "CPU_USAGE": "\(Int((cpu * 100).rounded()))",
+                    "CPU_FRACTION": String(format: "%.2f", cpu),
+                    "MEMORY_USAGE": "\(Int((memory * 100).rounded()))",
+                    "MEMORY_FRACTION": String(format: "%.2f", memory),
+                ])
         }
 
         barManager.onDisplaysChanged = { [weak self] in
@@ -271,12 +286,17 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                     name: "display_change",
                     info: "\(DisplayManager.screens().count)")
             },
+            "system_stats": { [weak self] in
+                self?.statsProvider.start()
+                self?.statsProvider.sample()
+            },
         ]
         commandHandler.onForcedUpdate = { [weak self] in
             guard let self else { return }
             self.powerProvider.refresh(forced: true)
             self.audioProvider.publishVolume(forced: true)
             self.networkProvider.refresh()
+            if self.statsProvider.isRunning { self.statsProvider.sample() }
             self.eventBus.trigger(
                 name: "front_app_switched",
                 info: self.workspaceProvider.currentFrontApp())
