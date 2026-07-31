@@ -36,7 +36,9 @@ for i = 1, max_items, 1 do
   menu_items[i] = menu
 end
 
-sbar.add("bracket", { '/menu\\..*/' }, {
+-- YBAR PORT: digits-only pattern — the bracket pill must end at the last
+-- menu item, not swallow menu.padding (which is the gap before "Spaces").
+sbar.add("bracket", { '/menu\\.[0-9]+/' }, {
   background = { color = colors.bg1 }
 })
 
