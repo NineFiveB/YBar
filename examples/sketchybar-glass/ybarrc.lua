@@ -29,6 +29,12 @@ sbar.begin_config()
 require("bar")
 require("default")
 require("items")
+
+-- Glass post-pass: the specular rim IS the edge treatment — sketchybar's
+-- border rings (item borders + bracket double-borders) read as outlines
+-- through glass. Strip every stroke the item files applied.
+sbar.set("/.*/", { background = { border_width = 0 } })
+
 sbar.end_config()
 
 sbar.event_loop()

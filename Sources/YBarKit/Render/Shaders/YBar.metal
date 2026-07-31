@@ -129,18 +129,17 @@ fragment float4 quad_fragment(QuadVOut in [[stage_in]]) {
         float2 n = normalize(grad + float2(1e-5, 1e-5));
 
         float band = smoothstep(-3.0, -0.8, d) * outer;      // rim shell (~1.5pt)
-        // Key light upper-left; faint counter-light from below (refraction).
-        float keySpec = pow(max(dot(n, normalize(float2(-0.25, -1.0))), 0.0), 2.5);
-        float lowSpec = pow(max(dot(n, normalize(float2(0.15, 1.0))), 0.0), 4.0);
-        float rimLight = band * (0.40 * keySpec + 0.10 * lowSpec + 0.02);
+        // Purely directional key light: a glint on the top arc that dies out
+        // along the sides — a full-perimeter ring reads as an outline, not glass.
+        float keySpec = pow(max(dot(n, normalize(float2(-0.25, -1.0))), 0.0), 3.0);
+        float rimLight = band * 0.30 * keySpec;
 
-        // Thickness: a soft glow just inside the rim, fading into the body.
-        float innerGlow = (smoothstep(-10.0, -2.5, d) - band) * 0.05 * outer;
-        innerGlow = max(innerGlow, 0.0);
+        // Thickness: a whisper of glow just inside the rim.
+        float innerGlow = max((smoothstep(-10.0, -2.5, d) - band), 0.0) * 0.03 * outer;
 
         // Gentle top-lit sheen across the body, in composed space so it
         // reads even at near-clear fills.
-        float sheen = max((0.5 - in.uv.y) * 0.035, 0.0) * outer;
+        float sheen = max((0.5 - in.uv.y) * 0.025, 0.0) * outer;
         // Glass presence follows the fill: a transparent pill (hover fade-out,
         // invisible-until-hover items) must show no rim/backdrop ghost.
         float presence = smoothstep(0.0, 0.06, fill.a);
