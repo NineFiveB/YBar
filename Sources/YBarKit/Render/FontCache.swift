@@ -12,6 +12,13 @@ public final class FontCache {
         public let width: CGFloat
         public let ascent: CGFloat
         public let descent: CGFloat
+        /// Ink-box left edge in text space: drawing shifts by -inkMinX so the
+        /// ink starts exactly at the pen and left/right paddings are equal.
+        public let inkMinX: CGFloat
+        /// Ink-box vertical extent relative to the baseline (y-up) — used to
+        /// ink-center single-glyph icon parts.
+        public let inkMinY: CGFloat
+        public let inkMaxY: CGFloat
     }
 
     private struct LineKey: Hashable {
@@ -51,7 +58,9 @@ public final class FontCache {
         // with (int)(width + 1.5). Advances run wider and unevenly so.
         let pathBounds = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
         let width = CGFloat(Int(pathBounds.width + 1.5))
-        let shaped = ShapedLine(line: line, width: width, ascent: ascent, descent: descent)
+        let shaped = ShapedLine(
+            line: line, width: width, ascent: ascent, descent: descent,
+            inkMinX: pathBounds.minX, inkMinY: pathBounds.minY, inkMaxY: pathBounds.maxY)
         lines[key] = shaped
         return shaped
     }

@@ -191,12 +191,12 @@ public final class SceneBuilder {
         if item.icon.drawing {
             if item.icon.customWidth >= 0 {
                 emitText(part: item.icon, penX: penX, centerY: centerY,
-                         scale: scale, atlas: atlas, clip: clip, into: &list)
+                         scale: scale, atlas: atlas, clip: clip, centerInk: true, into: &list)
                 penX += CGFloat(item.icon.customWidth)
             } else {
                 penX += CGFloat(item.icon.paddingLeft)
                 emitText(part: item.icon, penX: penX, centerY: centerY,
-                         scale: scale, atlas: atlas, clip: clip, into: &list)
+                         scale: scale, atlas: atlas, clip: clip, centerInk: true, into: &list)
                 penX += iconSize.width + CGFloat(item.icon.paddingRight)
             }
         }
@@ -357,6 +357,7 @@ public final class SceneBuilder {
         scale: CGFloat,
         atlas: GlyphAtlas,
         clip: CGRect?,
+        centerInk: Bool = false,
         into list: inout DisplayList
     ) {
         let text = part.displayString
@@ -405,7 +406,12 @@ public final class SceneBuilder {
         }
 
         let shaped = fontCache.shapedLine(text: text, spec: part.font)
-        let baselineY = partCenterY + (shaped.ascent - shaped.descent) / 2
+        // Icons (single glyphs) center their INK vertically — em-box centering
+        // leaves symbol glyphs visibly off-center. Labels keep em centering so
+        // mixed-case text doesn't jump with its content.
+        let baselineY = centerInk && shaped.inkMaxY > shaped.inkMinY
+            ? partCenterY + (shaped.inkMinY + shaped.inkMaxY) / 2
+            : partCenterY + (shaped.ascent - shaped.descent) / 2
         let baselinePx = (baselineY * scale).rounded()
 
         guard let runs = CTLineGetGlyphRuns(shaped.line) as? [CTRun] else { return }
@@ -423,7 +429,9 @@ public final class SceneBuilder {
 
             for index in 0..<count {
                 guard let entry = atlas.entry(glyph: glyphs[index], font: runFont) else { continue }
-                let glyphPenX = ((penX + positions[index].x) * scale).rounded()
+                // Ink-aligned: shift by -inkMinX so ink starts exactly at the
+                // pen — the measured (ink) width then gives equal paddings.
+                let glyphPenX = ((penX + positions[index].x - shaped.inkMinX) * scale).rounded()
                 if let instance = SceneBuilder.glyphInstance(
                     origin: SIMD2(Float(glyphPenX) + entry.bearingPx.x,
                                   Float(baselinePx) + entry.bearingPx.y),
