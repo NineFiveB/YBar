@@ -10,11 +10,11 @@ local glass = {
   fill_hover  = "0x4d32384a",
   fill_active = "0x593a4154",
   text        = "0xffffffff",
-  dim         = "0xff98989d",  -- systemGray
-  red         = "0xffff453a",  -- systemRed
-  green       = "0xff30d158",  -- systemGreen
-  blue        = "0xff0a84ff",  -- systemBlue
-  yellow      = "0xffffd60a",  -- systemYellow
+  dim         = "0xff8e8e93",
+  red         = "0xffffffff",  -- emphasis (monochrome)
+  green       = "0xffe2e2e6",
+  blue        = "0xffd0d0d6",
+  yellow      = "0xfff0f0f2",
 }
 
 local RADIUS = 25

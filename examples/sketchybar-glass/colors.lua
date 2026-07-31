@@ -2,15 +2,15 @@
 -- Same keys as the port's colors.lua so every item file works unchanged.
 return {
   black = 0x26000000,        -- borders melt into soft shadow lines
-  -- Apple system palette (dark mode): the accents macOS itself uses.
+  -- Monochrome: states read through brightness and glyph shape, not hue.
   white = 0xffffffff,
-  red = 0xffff453a,          -- systemRed
-  green = 0xff30d158,        -- systemGreen
-  blue = 0xff0a84ff,         -- systemBlue
-  yellow = 0xffffd60a,       -- systemYellow
-  orange = 0xffff9f0a,       -- systemOrange
-  magenta = 0xffbf5af2,      -- systemPurple
-  grey = 0xff98989d,         -- systemGray
+  red = 0xffffffff,          -- emphasis / alert -> brightest
+  green = 0xffe2e2e6,        -- positive -> near-white
+  blue = 0xffd0d0d6,         -- info / graphs -> light grey
+  yellow = 0xfff0f0f2,       -- warning -> bright
+  orange = 0xffe6e6ea,
+  magenta = 0xffd6d6dc,
+  grey = 0xff8e8e93,         -- secondary
   transparent = 0x00000000,
 
   bar = {
