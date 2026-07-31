@@ -1,51 +1,57 @@
--- YBar Liquid Glass — a Tahoe-style floating-capsule bar.
+-- YBar Liquid Glass (dark) — the sketchybar-setup layout in Tahoe glass.
+-- Same elements, sizes, and placement as the sketchybar config; every pill is
+-- dark glass (blurred backdrop + in-shader specular rim) with 20pt corners
+-- (clamped to capsule on short pills, as macOS does).
 -- Install:  cp examples/ybarrc-glass.lua ~/.config/ybar/ybarrc.lua
---
--- Every capsule is real glass: a blurred system-material backdrop
--- (blur_radius) under a Metal-rendered pill with an in-shader specular rim
--- and vertical sheen (background.glass). Nothing here is achievable in
--- sketchybar without per-item windows and private blur APIs.
+--           (plus helpers/app_icons.lua next to it for workspace app icons)
 
 local glass = {
-  fill        = "0x30ffffff",  -- 19% white over the blur
-  fill_hover  = "0x55ffffff",
-  fill_active = "0x66ffffff",
-  text        = "0xf2ffffff",
-  text_dim    = "0x8affffff",
-  accent      = "0xffffd60a",  -- battery low / warnings
-  green       = "0xff30d158",
-  blue        = "0xff0a84ff",
+  fill        = "0x59202430",  -- dark glass over the blur
+  fill_hover  = "0x8032384a",
+  fill_active = "0x8c3a4154",
+  text        = "0xffe2e2e3",  -- sonokai white
+  dim         = "0xff7f8490",  -- sonokai grey
+  red         = "0xfffc5d7c",
+  green       = "0xff9ed072",
+  blue        = "0xff76cce0",
+  yellow      = "0xffe7c664",
 }
 
-local CAPSULE_H = 30
-local RADIUS = 99  -- clamps to height/2 = capsule
+local RADIUS = 20         -- macOS 26 corner radius
+local ITEM_H = 28         -- sketchybar default background height
+local paddings = 3        -- sketchybar settings.paddings
+
+-- App icon map for workspace labels (sketchybar-app-font glyphs).
+local ok, app_icons = pcall(require, "helpers.app_icons")
+if not ok then ok, app_icons = pcall(require, "sketchybar-port.helpers.app_icons") end
+if not ok then app_icons = nil end
 
 ybar.bar({
-  height = 42,
-  color = "0x00000000",   -- fully transparent: capsules float
-  padding_left = 6,
-  padding_right = 6,
+  height = 40,
+  color = "0x00000000",
+  padding_left = 2,
+  padding_right = 2,
 })
 
 ybar.default({
-  icon = { color = glass.text, padding_left = 10, padding_right = 5,
-           font = { size = 13 } },
-  label = { color = glass.text, padding_left = 0, padding_right = 10,
-            font = { size = 13 } },
+  updates = "when_shown",
+  icon = { color = glass.text, padding_left = paddings, padding_right = paddings,
+           font = { family = "SF Pro", style = "Bold", size = 14 } },
+  label = { color = glass.text, padding_left = paddings, padding_right = paddings,
+            font = { family = "SF Pro", style = "Semibold", size = 13 } },
   background = {
     drawing = true,
     color = glass.fill,
     corner_radius = RADIUS,
-    height = CAPSULE_H,
+    height = ITEM_H,
     glass = true,
   },
   blur_radius = 30,
-  padding_left = 4,
-  padding_right = 4,
+  padding_left = 5,
+  padding_right = 5,
 })
 
--- Hover glow shared by all interactive capsules.
-local function hoverable(item, base_color)
+local function hoverable(item, base)
   item:subscribe("mouse.entered", function()
     ybar.animate("tanh", 18, function()
       item:set({ background = { color = glass.fill_hover } })
@@ -53,28 +59,56 @@ local function hoverable(item, base_color)
   end)
   item:subscribe("mouse.exited", function()
     ybar.animate("tanh", 18, function()
-      item:set({ background = { color = base_color or glass.fill } })
+      item:set({ background = { color = base or glass.fill } })
     end)
   end)
 end
 
--- ── Workspaces: one glass capsule each ───────────────────────────────────
-local app_icons_ok, app_icons = pcall(require, "helpers.app_icons")
-if not app_icons_ok then app_icons = nil end
+-- ══ LEFT: workspaces ⇄ app menus (sketchybar swap, front_app stays visible) ══
+
+ybar.add_event("aerospace_workspace_change")
+ybar.add_event("glass_refresh_spaces")
 
 local workspaces = {}
-ybar.add_event("aerospace_workspace_change")
+
+local function workspace_icons(sid, ws)
+  ybar.exec("aerospace list-windows --workspace " .. sid ..
+            " --format '%{app-name}' 2>/dev/null", function(windows)
+    local line, seen = "", {}
+    for raw in windows:gmatch("[^\r\n]+") do
+      local app = raw:match("^%s*(.-)%s*$")
+      if app ~= "" and not seen[app] then
+        seen[app] = true
+        local icon = app_icons and (app_icons[app] or app_icons["Default"]) or "•"
+        line = line .. icon .. " "
+      end
+    end
+    if line == "" then
+      ws:set({ label = { drawing = false } })
+    else
+      ws:set({ label = { drawing = true, string = line } })
+    end
+  end)
+end
 
 ybar.exec("aerospace list-workspaces --all 2>/dev/null", function(output)
-  for line in output:gmatch("[^\r\n]+") do
-    local sid = line:match("^%s*(.-)%s*$")
+  for raw in output:gmatch("[^\r\n]+") do
+    local sid = raw:match("^%s*(.-)%s*$")
     if sid ~= "" and not workspaces[sid] then
       local ws = ybar.add("item", "glass.space." .. sid, "left")
       ws:set({
         icon = sid,
-        ["icon.font.size"] = 12,
-        ["icon.padding_right"] = 8,
-        label = { drawing = false },
+        ["icon.font"] = "SF Mono:Bold:12.0",
+        ["icon.padding_left"] = 8,
+        ["icon.padding_right"] = 4,
+        label = {
+          drawing = false,
+          padding_left = 2,
+          padding_right = 8,
+          color = glass.dim,
+          font = "sketchybar-app-font:Regular:16.0",
+          y_offset = -1,
+        },
         drawing = false,
         click_script = "aerospace workspace " .. sid,
       })
@@ -85,16 +119,17 @@ ybar.exec("aerospace list-workspaces --all 2>/dev/null", function(output)
   ybar.trigger("glass_refresh_spaces")
 end)
 
-ybar.add_event("glass_refresh_spaces")
+local observer = ybar.add("item", "glass.observer", "left")
+observer:set({ drawing = false, updates = true })
 
-local spaces_observer = ybar.add("item", "glass.spaces.observer", "left")
-spaces_observer:set({ drawing = false })
+local menus_visible = false
 
 local function refresh_spaces(focused)
+  if menus_visible then return end
   ybar.exec("aerospace list-workspaces --monitor all --empty no 2>/dev/null", function(nonempty)
     local visible = {}
-    for line in nonempty:gmatch("[^\r\n]+") do
-      visible[line:match("^%s*(.-)%s*$")] = true
+    for raw in nonempty:gmatch("[^\r\n]+") do
+      visible[raw:match("^%s*(.-)%s*$")] = true
     end
     if focused and focused ~= "" then visible[focused] = true end
     for sid, ws in pairs(workspaces) do
@@ -102,8 +137,10 @@ local function refresh_spaces(focused)
       ws:set({
         drawing = visible[sid] and "on" or "off",
         background = { color = selected and glass.fill_active or glass.fill },
-        ["icon.color"] = selected and glass.text or glass.text_dim,
+        ["icon.color"] = selected and glass.red or glass.text,
+        ["label.color"] = selected and glass.text or glass.dim,
       })
+      if visible[sid] then workspace_icons(sid, ws) end
     end
   end)
 end
@@ -114,108 +151,136 @@ local function query_focus_and_refresh()
   end)
 end
 
-spaces_observer:subscribe("aerospace_workspace_change", function(env)
+observer:subscribe("aerospace_workspace_change", function(env)
   if env.FOCUSED_WORKSPACE and env.FOCUSED_WORKSPACE ~= "" then
     refresh_spaces(env.FOCUSED_WORKSPACE)
   else
     query_focus_and_refresh()
   end
 end)
-spaces_observer:subscribe("glass_refresh_spaces", query_focus_and_refresh)
-spaces_observer:subscribe("front_app_switched", query_focus_and_refresh)
+observer:subscribe("glass_refresh_spaces", query_focus_and_refresh)
 
--- ── Front app ────────────────────────────────────────────────────────────
+-- ── Front app: always visible, click toggles workspaces ⇄ app menus ──────
 local front = ybar.add("item", "glass.front", "left")
 front:set({
-  icon = "sf:macwindow",
-  ["icon.color"] = glass.blue,
-  padding_left = 10,
+  icon = { drawing = false },
+  ["label.font"] = "SF Pro:Black:12.0",
+  updates = true,
 })
 front:subscribe("front_app_switched", function(env)
   front:set({ label = env.INFO })
+  if menus_visible then ybar.trigger("glass_update_menus") end
+  query_focus_and_refresh()
+end)
+hoverable(front)
+
+-- ── App menus (populated from the sketchybar menus helper when present) ──
+ybar.add_event("glass_update_menus")
+local MENUS_BIN = os.getenv("HOME")
+  .. "/Documents/Development/sketchybar-setup/config/helpers/menus/bin/menus"
+local max_menus = 12
+local menu_items = {}
+for i = 1, max_menus do
+  local m = ybar.add("item", "glass.menu." .. i, "left")
+  m:set({
+    drawing = false,
+    icon = { drawing = false },
+    ["label.font"] = (i == 1) and "SF Pro:Heavy:13.0" or "SF Pro:Semibold:13.0",
+    ["label.padding_left"] = 6,
+    ["label.padding_right"] = 6,
+    click_script = "'" .. MENUS_BIN:gsub("'", "'\\''") .. "' -s " .. i,
+  })
+  hoverable(m)
+  menu_items[i] = m
+end
+
+local menus_observer = ybar.add("item", "glass.menus.observer", "left")
+menus_observer:set({ drawing = false, updates = true })
+menus_observer:subscribe("glass_update_menus", function()
+  ybar.exec("'" .. MENUS_BIN:gsub("'", "'\\''") .. "' -l 2>/dev/null", function(menus)
+    ybar.set("/glass\\.menu\\..*/", { drawing = false })
+    local i = 1
+    for menu in menus:gmatch("[^\r\n]+") do
+      if i > max_menus then break end
+      menu_items[i]:set({ label = menu, drawing = true })
+      i = i + 1
+    end
+  end)
 end)
 
--- ── Center clock ─────────────────────────────────────────────────────────
-local clock = ybar.add("item", "glass.clock", "center")
-clock:set({
-  icon = { drawing = false },
-  label = os.date("%a %d %b  %H:%M"),
-  ["label.padding_left"] = 12,
-  ["label.padding_right"] = 12,
-  ["label.font.size"] = 13,
-  update_freq = 20,
+front:subscribe("mouse.clicked", function()
+  menus_visible = not menus_visible
+  if menus_visible then
+    ybar.set("/glass\\.space\\..*/", { drawing = false })
+    ybar.trigger("glass_update_menus")
+  else
+    ybar.set("/glass\\.menu\\..*/", { drawing = false })
+    query_focus_and_refresh()
+  end
+end)
+
+-- ══ RIGHT (sketchybar order, rightmost first): calendar+time, wifi, cpu ══
+
+-- Calendar: icon = date (Black), label = time (SF Mono) — sketchybar's item.
+local cal = ybar.add("item", "glass.calendar", "right")
+cal:set({
+  ["icon.font"] = "SF Pro:Black:12.0",
+  ["icon.padding_left"] = 8,
+  label = { width = 75, align = "right", padding_right = 8 },
+  ["label.font"] = "SF Mono:Regular:13.0",
+  update_freq = 30,
+  icon = os.date("%a. %d %b."),
 })
-clock:subscribe("routine", function()
-  clock:set({ label = os.date("%a %d %b  %H:%M") })
+cal:subscribe({ "routine", "forced", "system_woke" }, function()
+  cal:set({ icon = os.date("%a. %d %b."), label = os.date("%I:%M %p") })
 end)
-hoverable(clock)
+cal:subscribe("mouse.clicked", function(env)
+  if env.BUTTON == "right" then ybar.exec("open -a Calendar") end
+end)
+hoverable(cal)
 
--- ── Right cluster ────────────────────────────────────────────────────────
--- Wi-Fi
+-- Wi-Fi connection
 local wifi = ybar.add("item", "glass.wifi", "right")
-wifi:set({ icon = "sf:wifi", ["icon.padding_right"] = 10, label = { drawing = false } })
+wifi:set({
+  icon = "sf:wifi",
+  ["icon.padding_left"] = 9,
+  ["icon.padding_right"] = 9,
+  label = { drawing = false },
+})
 wifi:subscribe("wifi_change", function(env)
-  wifi:set({ icon = (env.INFO ~= "" and "sf:wifi" or "sf:wifi.slash") })
+  local connected = env.INFO ~= ""
+  wifi:set({
+    icon = connected and "sf:wifi" or "sf:wifi.slash",
+    ["icon.color"] = connected and glass.text or glass.red,
+  })
 end)
 hoverable(wifi)
 
--- Battery
-local battery = ybar.add("item", "glass.battery", "right")
-battery:set({ icon = "sf:battery.100percent", ["icon.color"] = glass.green })
-battery:subscribe({ "battery_change", "power_source_change", "forced" }, function(env)
-  local pct = tonumber(env.INFO)
-  if not pct then return end
-  local icon, color = "sf:battery.100percent", glass.green
-  if pct <= 20 then icon, color = "sf:battery.25percent", glass.accent
-  elseif pct <= 50 then icon = "sf:battery.50percent"
-  elseif pct <= 75 then icon = "sf:battery.75percent" end
-  battery:set({ icon = icon, ["icon.color"] = color, label = pct .. "%" })
-end)
-hoverable(battery)
-
--- Volume: glass capsule with an inline slider
-local vol = ybar.add("slider", "glass.volume", "right", 70)
-vol:set({
-  icon = "sf:speaker.wave.2.fill",
-  ["icon.padding_right"] = 8,
-  label = { drawing = false },
-  ["label.padding_right"] = 4,
-  slider = {
-    highlight_color = glass.text,
-    background = { color = "0x33ffffff", height = 4, corner_radius = 2 },
-    knob = { drawing = false },
-  },
-  padding_right = 6,
-})
-vol:subscribe("volume_change", function(env)
-  vol:set({ slider = { percentage = env.INFO } })
-end)
-vol:subscribe("mouse.clicked", function(env)
-  if env.PERCENTAGE then
-    ybar.exec("osascript -e 'set volume output volume " .. env.PERCENTAGE .. "'")
-  end
-end)
-hoverable(vol)
-
--- CPU graph in glass
-local cpu = ybar.add("graph", "glass.cpu", "right", 46)
+-- CPU monitor: graph + tiny label, sketchybar sizing.
+local cpu = ybar.add("graph", "glass.cpu", "right", 42)
 cpu:set({
   icon = "sf:cpu",
-  ["icon.padding_right"] = 6,
-  ["label.font.size"] = 10,
-  ["label.color"] = glass.text_dim,
+  ["icon.font.size"] = 13,
+  ["icon.padding_left"] = 8,
+  ["icon.padding_right"] = 4,
+  ["label.font"] = "SF Mono:Bold:9.0",
+  ["label.color"] = glass.dim,
+  ["label.padding_right"] = 8,
   graph = { color = glass.blue },
-  background = { height = CAPSULE_H },
+  background = { height = ITEM_H },
 })
 cpu:subscribe("system_stats", function(env)
-  cpu:push({ (tonumber(env.CPU_FRACTION) or 0) })
-  cpu:set({ label = env.CPU_USAGE .. "%" })
+  local load = tonumber(env.CPU_USAGE) or 0
+  cpu:push({ load / 100 })
+  local color = glass.blue
+  if load > 80 then color = glass.red
+  elseif load > 60 then color = glass.yellow
+  elseif load > 30 then color = glass.green end
+  cpu:set({ graph = { color = color }, label = "cpu " .. load .. "%" })
 end)
 hoverable(cpu)
 
--- Boot: populate everything once (update runs forced/routine handlers;
--- the triggers force provider re-queries so event-driven capsules fill in).
+-- ── Boot population ──────────────────────────────────────────────────────
 ybar.update()
-ybar.trigger("battery_change")
-ybar.trigger("volume_change")
 ybar.trigger("wifi_change")
+ybar.exec("true", function() query_focus_and_refresh() end)
