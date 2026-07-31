@@ -337,15 +337,33 @@ public final class BarManager {
         surface.itemFrames = items.map { ($0.id, $0.frame) }
 
         // Glass backdrops: blurred material views placed exactly under the
-        // painted pill of every item with blur_radius > 0.
+        // painted pill of every glass item (background.glass implies the
+        // backdrop; blur_radius > 0 forces one explicitly).
         var glassSpecs: [(itemID: Int, rect: CGRect, cornerRadius: CGFloat)] = []
-        for item in items where item.blurRadius > 0 && item.isVisible {
-            guard let contentBox = result.contentBoxes[item.id], contentBox.width > 0 else { continue }
-            let contentHeight = max(
-                fontCache.measure(part: item.icon).height,
-                fontCache.measure(part: item.label).height)
-            let rect = SceneBuilder.backgroundRect(
-                item: item, contentBox: contentBox, contentHeight: contentHeight)
+        for item in items
+        where (item.blurRadius > 0 || (item.background.glass && item.background.drawing))
+            && item.isVisible {
+            let rect: CGRect
+            if item.kind == .bracket {
+                // Bracket pill rect mirrors the SceneBuilder bracket pass.
+                guard item.frame != .zero else { continue }
+                let height = item.background.height > 0
+                    ? CGFloat(item.background.height)
+                    : barSize.height - 4
+                rect = CGRect(
+                    x: item.frame.minX + CGFloat(item.background.xOffset),
+                    y: barSize.height / 2 - height / 2
+                        - CGFloat(item.yOffset) - CGFloat(item.background.yOffset),
+                    width: item.frame.width,
+                    height: height)
+            } else {
+                guard let contentBox = result.contentBoxes[item.id], contentBox.width > 0 else { continue }
+                let contentHeight = max(
+                    fontCache.measure(part: item.icon).height,
+                    fontCache.measure(part: item.label).height)
+                rect = SceneBuilder.backgroundRect(
+                    item: item, contentBox: contentBox, contentHeight: contentHeight)
+            }
             glassSpecs.append((item.id, rect, CGFloat(item.background.cornerRadius)))
         }
         surface.syncGlassBackdrops(glassSpecs)

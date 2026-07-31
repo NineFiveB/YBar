@@ -259,6 +259,11 @@ public enum PropertySetter {
                 return setFloatValue(key: "item.\(item.id).popup.background.border_width",
                                      current: item.popup.background.borderWidth,
                                      value: value, ctx: ctx) { [weak item] in item?.popup.background.borderWidth = $0 }
+            case "glass":
+                guard let flag = parseBool(value) else { return "[!] invalid boolean: \(value)" }
+                item.popup.background.glass = flag
+                ctx.invalidate()
+                return nil
             case "shadow", "image":
                 // Panel shadow comes from the window; images unsupported. Ignore.
                 return nil
@@ -429,6 +434,8 @@ public enum PropertySetter {
         case "drawing":
             return setBool(item, base.appending(path: \BackgroundStyle.drawing), value, ctx)
         case "color":
+            // sketchybar parity: setting a background color enables drawing.
+            item[keyPath: base.appending(path: \BackgroundStyle.drawing)] = true
             return setColor(item, base.appending(path: \BackgroundStyle.color), "\(prefix).color", rest, value, ctx)
         case "border_color":
             return setColor(item, base.appending(path: \BackgroundStyle.borderColor),
@@ -462,6 +469,7 @@ public enum PropertySetter {
         case "gradient_color":
             guard let color = YColor.parse(value) else { return "[!] invalid color: \(value)" }
             item[keyPath: base.appending(path: \BackgroundStyle.gradientColor)] = color
+            item[keyPath: base.appending(path: \BackgroundStyle.drawing)] = true
             ctx.invalidate()
             return nil
         case "gradient_angle":
