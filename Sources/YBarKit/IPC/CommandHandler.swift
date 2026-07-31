@@ -20,6 +20,8 @@ public final class CommandHandler {
     /// One-shot re-query of every provider for `--update` (the per-event closures
     /// may overlap; iterating them would double-fire).
     public var onForcedUpdate: (() -> Void)?
+    /// Lua-first item dispatch (wired by the daemon; falls back to shell scripts).
+    public var dispatchItem: ((Item, [String: String]) -> Void)?
 
     public init(barManager: BarManager, eventBus: EventBus,
                 scriptRunner: ScriptRunner, scheduler: AnimationScheduler) {
@@ -135,10 +137,14 @@ public final class CommandHandler {
                 context.animation = (AnimationCurve.parse(batch.args[0]), frames)
 
             case "update":
-                for item in barManager.store.items where !item.script.isEmpty {
-                    scriptRunner.run(script: item.script, environment: [
-                        "NAME": item.name, "SENDER": "forced", "INFO": "",
-                    ])
+                for item in barManager.store.items
+                where !item.script.isEmpty || item.hasLuaHandlers {
+                    let environment = ["NAME": item.name, "SENDER": "forced", "INFO": ""]
+                    if let dispatchItem {
+                        dispatchItem(item, environment)
+                    } else {
+                        scriptRunner.run(script: item.script, environment: environment)
+                    }
                 }
                 onForcedUpdate?()
                 barManager.setNeedsRender()

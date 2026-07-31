@@ -144,3 +144,105 @@ import Testing
         #expect(error?.contains("lua") == true)
     }
 }
+
+@MainActor
+@Suite(.serialized) struct LuaReviewFixTests {
+    /// Holds every dependency: LuaRuntime's references are unowned, so the
+    /// fixture must keep them alive for the whole test.
+    private struct Fixture {
+        let barManager: BarManager
+        let eventBus: EventBus
+        let scheduler: AnimationScheduler
+        let runtime: LuaRuntime
+    }
+
+    private func makeRuntime() throws -> Fixture {
+        let barManager = try BarManager()
+        let eventBus = EventBus()
+        eventBus.itemsProvider = { [weak barManager] in barManager?.store.items ?? [] }
+        let scheduler = AnimationScheduler()
+        let runtime = LuaRuntime(barManager: barManager, eventBus: eventBus,
+                                 scheduler: scheduler)
+        return Fixture(barManager: barManager, eventBus: eventBus,
+                       scheduler: scheduler, runtime: runtime)
+    }
+
+    private func run(_ code: String, _ runtime: LuaRuntime) -> String? {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ybar-lua-fix-\(UUID().uuidString).lua")
+        try? code.write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+        return runtime.runConfig(at: url)
+    }
+
+    @Test func triggerSurvivesNumericTableKeys() throws {
+        let fixture = try makeRuntime()
+        let runtime = fixture.runtime
+        defer { withExtendedLifetime(fixture) { runtime.shutdown() } }
+        var received: [String: String] = [:]
+        fixture.eventBus.runItemScript = { _, env in received = env }
+        // Numeric keys previously corrupted lua_next traversal and aborted the config.
+        let error = run("""
+        local i = ybar.add("item", "t", "left")
+        i:subscribe("system_woke", function(env) end)
+        ybar.trigger("system_woke", { "positional", FOO = "bar" })
+        """, runtime)
+        #expect(error == nil)
+        #expect(received["FOO"] == "bar")
+        #expect(received["1"] == "positional")
+    }
+
+    @Test func badArgumentsReportInsteadOfRaising() throws {
+        let fixture = try makeRuntime()
+        let barManager = fixture.barManager
+        let runtime = fixture.runtime
+        defer { withExtendedLifetime(fixture) { runtime.shutdown() } }
+        // Previously luaL_check* longjmp'd through Swift frames (UB + leaks);
+        // now bad raw calls report and the rest of the config still runs.
+        let error = run("""
+        ybar.subscribe("nonexistent", "system_woke", function() end)
+        ybar.subscribe(nil, nil, "not a function")
+        ybar.bar({ height = 30 })
+        """, runtime)
+        #expect(error == nil)
+        #expect(barManager.settings.height == 30)
+    }
+
+    @Test func integralFloatsFlattenWithoutDecimalSuffix() throws {
+        let fixture = try makeRuntime()
+        let barManager = fixture.barManager
+        let runtime = fixture.runtime
+        defer { withExtendedLifetime(fixture) { runtime.shutdown() } }
+        let error = run("""
+        local i = ybar.add("item", "f", "left")
+        i:set({ update_freq = 60 / 2, ["label.max_chars"] = 10.0 })
+        """, runtime)
+        #expect(error == nil)
+        let item = barManager.store.item(named: "f")
+        #expect(item?.updateFrequency == 30)
+        #expect(item?.label.maxChars == 10)
+    }
+
+    @Test func staleGenerationCompletionIsDropped() throws {
+        let fixture = try makeRuntime()
+        let barManager = fixture.barManager
+        let bus = fixture.eventBus
+        let runtime = fixture.runtime
+        defer { withExtendedLifetime(fixture) { runtime.shutdown() } }
+        bus.runItemScript = { [weak runtime] item, env in
+            _ = runtime?.handleEvent(item: item, environment: env)
+        }
+        _ = run("""
+        local i = ybar.add("item", "g", "left")
+        i:subscribe("system_woke", function(env) i:set({ label = "generation-two" }) end)
+        """, runtime)
+
+        // A completion minted before the (implicit) reload carries generation 0;
+        // the current state is generation >= 1. It must be dropped without
+        // touching the live registry — the subscription keeps working after.
+        runtime.completeExec(ref: 3, generation: 0, output: "stale", exitCode: 0)
+
+        bus.trigger(name: "system_woke")
+        #expect(barManager.store.item(named: "g")?.label.string == "generation-two")
+    }
+}

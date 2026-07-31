@@ -8,6 +8,7 @@ private let registryIndex: Int32 = -1_001_000
 private let luaOK: Int32 = 0
 private let luaTypeNil: Int32 = 0
 private let luaTypeNumber: Int32 = 3
+private let luaTypeString: Int32 = 4
 private let luaTypeTable: Int32 = 5
 private let luaTypeFunction: Int32 = 6
 private let luaRefNil: Int32 = -1
@@ -21,8 +22,14 @@ private func toString(_ state: OpaquePointer?, _ index: Int32) -> String? {
     return String(cString: cString)
 }
 
-private func checkString(_ state: OpaquePointer?, _ index: Int32) -> String {
-    String(cString: luaL_checklstring(state, index, nil))
+/// Non-raising argument accessor. The luaL_check* family raises Lua errors via
+/// longjmp, which would unwind straight through Swift frames (skipping ARC
+/// releases — formally UB). Trampolines therefore never call raising APIs:
+/// bad arguments surface as error strings/stderr instead.
+private func argString(_ state: OpaquePointer?, _ index: Int32) -> String? {
+    let type = lua_type(state, index)
+    guard type == luaTypeString || type == luaTypeNumber else { return nil }
+    return toString(state, index)
 }
 
 private func optString(_ state: OpaquePointer?, _ index: Int32) -> String? {
@@ -48,6 +55,11 @@ public final class LuaRuntime {
     private var subscriptions: [Int: [String: Int32]] = [:]
     /// Active `ybar.animate` context for property sets.
     var animationContext: (curve: AnimationCurve, durationFrames: Int)?
+    /// Registry refs are small integers scoped to ONE lua_State; a completion
+    /// crossing a reload would index the NEW state's registry and invoke an
+    /// unrelated callback. Bumped on every state teardown; async completions
+    /// carry the generation they were minted in and bail on mismatch.
+    private var stateGeneration: UInt64 = 0
 
     public init(barManager: BarManager, eventBus: EventBus, scheduler: AnimationScheduler) {
         self.barManager = barManager
@@ -57,9 +69,7 @@ public final class LuaRuntime {
     }
 
     public func shutdown() {
-        if let state { lua_close(state) }
-        state = nil
-        subscriptions.removeAll()
+        shutdownStateOnly()
         if LuaRuntime.current === self { LuaRuntime.current = nil }
     }
 
@@ -94,6 +104,7 @@ public final class LuaRuntime {
         state = nil
         subscriptions.removeAll()
         animationContext = nil
+        stateGeneration += 1
     }
 
     private func run(code: String, name: String) -> String? {
@@ -144,8 +155,9 @@ public final class LuaRuntime {
     }
 
     /// Async exec completion — called back on main with captured output.
-    fileprivate func completeExec(ref: Int32, output: String, exitCode: Int32) {
-        guard let state else { return }
+    /// The generation gate drops completions that outlived their lua_State.
+    func completeExec(ref: Int32, generation: UInt64, output: String, exitCode: Int32) {
+        guard generation == stateGeneration, let state else { return }
         lua_rawgeti(state, registryIndex, lua_Integer(ref))
         luaL_unref(state, registryIndex, ref)
         lua_pushstring(state, output)
@@ -200,8 +212,10 @@ public final class LuaRuntime {
         register("bar") { L in
             MainActor.assumeIsolated {
                 guard let runtime = LuaRuntime.current else { return 0 }
-                let key = checkString(L, 1)
-                let value = checkString(L, 2)
+                guard let key = argString(L, 1), let value = argString(L, 2) else {
+                    lua_pushstring(L, "[!] bar(key, value) expects strings")
+                    return 1
+                }
                 pushOptionalError(L, BarPropertySetter.set(
                     manager: runtime.barManager, property: key, value: value,
                     context: runtime.propertyContext()))
@@ -211,8 +225,10 @@ public final class LuaRuntime {
         register("default") { L in
             MainActor.assumeIsolated {
                 guard let runtime = LuaRuntime.current else { return 0 }
-                let key = checkString(L, 1)
-                let value = checkString(L, 2)
+                guard let key = argString(L, 1), let value = argString(L, 2) else {
+                    lua_pushstring(L, "[!] default(key, value) expects strings")
+                    return 1
+                }
                 var context = runtime.propertyContext()
                 context.animation = nil
                 pushOptionalError(L, PropertySetter.set(
@@ -224,9 +240,13 @@ public final class LuaRuntime {
         register("add") { L in
             MainActor.assumeIsolated {
                 guard let runtime = LuaRuntime.current else { return 0 }
-                let kind = checkString(L, 1)
-                let name = checkString(L, 2)
-                let position = checkString(L, 3)
+                guard let kind = argString(L, 1), let name = argString(L, 2),
+                      let position = argString(L, 3) else {
+                    lua_pushboolean(L, 0)
+                    FileHandle.standardError.write(
+                        Data("[ybar] lua: add(kind, name, position) expects strings\n".utf8))
+                    return 1
+                }
                 let width = lua_type(L, 4) == luaTypeNumber ? Float(lua_tonumberx(L, 4, nil)) : nil
                 let error = runtime.addItem(kind: kind, name: name, position: position, width: width)
                 lua_pushboolean(L, error == nil ? 1 : 0)
@@ -239,9 +259,11 @@ public final class LuaRuntime {
         register("set") { L in
             MainActor.assumeIsolated {
                 guard let runtime = LuaRuntime.current else { return 0 }
-                let name = checkString(L, 1)
-                let key = checkString(L, 2)
-                let value = checkString(L, 3)
+                guard let name = argString(L, 1), let key = argString(L, 2),
+                      let value = argString(L, 3) else {
+                    lua_pushstring(L, "[!] set(name, key, value) expects strings")
+                    return 1
+                }
                 guard let item = runtime.barManager.store.item(named: name) else {
                     lua_pushstring(L, "[!] no item named \(name)")
                     return 1
@@ -255,9 +277,11 @@ public final class LuaRuntime {
         register("subscribe") { L in
             MainActor.assumeIsolated {
                 guard let runtime = LuaRuntime.current else { return 0 }
-                let name = checkString(L, 1)
-                let event = checkString(L, 2)
-                luaL_checktype(L, 3, luaTypeFunction)
+                guard let name = argString(L, 1), let event = argString(L, 2),
+                      lua_type(L, 3) == luaTypeFunction else {
+                    lua_pushstring(L, "[!] subscribe(name, event, fn) expects (string, string, function)")
+                    return 1
+                }
                 lua_pushvalue(L, 3)
                 let ref = Int32(luaL_ref(L, registryIndex))
                 pushOptionalError(L, runtime.subscribe(itemName: name, event: event, ref: ref))
@@ -267,12 +291,22 @@ public final class LuaRuntime {
         register("trigger") { L in
             MainActor.assumeIsolated {
                 guard let runtime = LuaRuntime.current else { return 0 }
-                let event = checkString(L, 1)
+                guard let event = argString(L, 1) else {
+                    FileHandle.standardError.write(Data("[ybar] lua: trigger(event) expects a string\n".utf8))
+                    return 0
+                }
                 var extra: [String: String] = [:]
                 if lua_type(L, 2) == luaTypeTable {
                     lua_pushnil(L)
                     while lua_next(L, 2) != 0 {
-                        if let key = optString(L, -2), let value = optString(L, -1) {
+                        // NEVER lua_tolstring the key slot in place: converting a
+                        // number key corrupts lua_next traversal ("invalid key to
+                        // 'next'"). Stringify a copy instead.
+                        lua_pushvalue(L, -2)
+                        let key = argString(L, -1)
+                        pop(L, 1)
+                        let value = optString(L, -1)
+                        if let key, let value {
                             extra[key] = value
                         }
                         pop(L, 1)
@@ -286,11 +320,14 @@ public final class LuaRuntime {
         register("push") { L in
             MainActor.assumeIsolated {
                 guard let runtime = LuaRuntime.current else { return 0 }
-                let name = checkString(L, 1)
-                luaL_checktype(L, 2, LUA_TTABLE)
+                guard let name = argString(L, 1), lua_type(L, 2) == luaTypeTable else {
+                    FileHandle.standardError.write(Data("[ybar] lua: push(name, values) expects (string, table)\n".utf8))
+                    return 0
+                }
                 guard let graph = runtime.barManager.store.item(named: name)?.graph else { return 0 }
                 let count = lua_rawlen(L, 2)
-                for index in 1...max(1, count) {
+                guard count > 0 else { return 0 }
+                for index in 1...count {
                     lua_rawgeti(L, 2, lua_Integer(index))
                     if lua_type(L, -1) == luaTypeNumber {
                         graph.push(Float(lua_tonumberx(L, -1, nil)))
@@ -304,8 +341,11 @@ public final class LuaRuntime {
         register("animate_begin") { L in
             MainActor.assumeIsolated {
                 guard let runtime = LuaRuntime.current else { return 0 }
-                let curve = checkString(L, 1)
-                let frames = Int(luaL_checkinteger(L, 2))
+                guard let curve = argString(L, 1), lua_type(L, 2) == luaTypeNumber else {
+                    FileHandle.standardError.write(Data("[ybar] lua: animate(curve, frames, fn) expects (string, number)\n".utf8))
+                    return 0
+                }
+                let frames = Int(lua_tointegerx(L, 2, nil))
                 runtime.animationContext = (AnimationCurve.parse(curve), frames)
                 return 0
             }
@@ -319,7 +359,10 @@ public final class LuaRuntime {
         register("exec") { L in
             MainActor.assumeIsolated {
                 guard let runtime = LuaRuntime.current else { return 0 }
-                let command = checkString(L, 1)
+                guard let command = argString(L, 1) else {
+                    FileHandle.standardError.write(Data("[ybar] lua: exec(cmd, fn?) expects a string\n".utf8))
+                    return 0
+                }
                 var ref: Int32 = luaRefNil
                 if lua_type(L, 2) == luaTypeFunction {
                     lua_pushvalue(L, 2)
@@ -332,7 +375,10 @@ public final class LuaRuntime {
         register("add_event") { L in
             MainActor.assumeIsolated {
                 guard let runtime = LuaRuntime.current else { return 0 }
-                let name = checkString(L, 1)
+                guard let name = argString(L, 1) else {
+                    lua_pushstring(L, "[!] add_event(name) expects a string")
+                    return 1
+                }
                 let notification = optString(L, 2)
                 pushOptionalError(L, runtime.eventBus.addEvent(
                     name: name, notificationName: notification))
@@ -342,7 +388,10 @@ public final class LuaRuntime {
         register("query") { L in
             MainActor.assumeIsolated {
                 guard let runtime = LuaRuntime.current else { return 0 }
-                let target = checkString(L, 1)
+                guard let target = argString(L, 1) else {
+                    lua_pushstring(L, "[!] query(target) expects a string")
+                    return 1
+                }
                 lua_pushstring(L, Serialize.query(
                     target: target, manager: runtime.barManager, eventBus: runtime.eventBus))
                 return 1
@@ -351,7 +400,7 @@ public final class LuaRuntime {
         register("remove") { L in
             MainActor.assumeIsolated {
                 guard let runtime = LuaRuntime.current else { return 0 }
-                let name = checkString(L, 1)
+                guard let name = argString(L, 1) else { return 0 }
                 _ = runtime.barManager.store.remove(name: name)
                 runtime.barManager.setNeedsRender()
                 return 0
@@ -412,25 +461,39 @@ public final class LuaRuntime {
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.standardError
+        let generation = stateGeneration
 
-        process.terminationHandler = { finished in
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            var output = String(decoding: data, as: UTF8.self)
-            if output.hasSuffix("\n") { output.removeLast() }
-            let code = finished.terminationStatus
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated {
-                    guard ref != luaRefNil else { return }
-                    LuaRuntime.current?.completeExec(ref: ref, output: output, exitCode: code)
-                }
-            }
-        }
         do {
             try process.run()
         } catch {
             FileHandle.standardError.write(Data("[ybar] lua exec failed: \(error)\n".utf8))
             if ref != luaRefNil, let state {
                 luaL_unref(state, registryIndex, ref)
+            }
+            return
+        }
+
+        // Same watchdog as shell plugin scripts: a hung child must not linger.
+        let box = ProcessBox(process: process)
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 60) {
+            box.terminateIfRunning()
+        }
+
+        // Drain the pipe CONCURRENTLY with the child — reading only after
+        // termination deadlocks any child writing more than the ~64KB pipe
+        // buffer (it blocks in write(2) and never exits).
+        DispatchQueue.global(qos: .utility).async {
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            var output = String(decoding: data, as: UTF8.self)
+            if output.hasSuffix("\n") { output.removeLast() }
+            let code = process.terminationStatus
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard ref != luaRefNil else { return }
+                    LuaRuntime.current?.completeExec(
+                        ref: ref, generation: generation, output: output, exitCode: code)
+                }
             }
         }
     }
@@ -454,6 +517,12 @@ public final class LuaRuntime {
 
     local function valstr(v)
       if type(v) == "boolean" then return v and "on" or "off" end
+      if type(v) == "number" then
+        -- 60/2 is a FLOAT in Lua 5.4 and tostring gives "30.0", which
+        -- integer-parsed properties (update_freq, max_chars...) reject.
+        local i = math.tointeger(v)
+        if i then return tostring(i) end
+      end
       return tostring(v)
     end
 

@@ -57,7 +57,7 @@ public final class ScriptRunner: @unchecked Sendable {
     }
 }
 
-private final class ProcessBox: @unchecked Sendable {
+final class ProcessBox: @unchecked Sendable {
     private let process: Process
     init(process: Process) { self.process = process }
     func terminateIfRunning() {

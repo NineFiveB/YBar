@@ -305,6 +305,9 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                 self?.statsProvider.sample()
             },
         ]
+        commandHandler.dispatchItem = { [weak self] item, environment in
+            self?.dispatchItemScript(item: item, environment: environment)
+        }
         commandHandler.onForcedUpdate = { [weak self] in
             guard let self else { return }
             self.powerProvider.refresh(forced: true)
