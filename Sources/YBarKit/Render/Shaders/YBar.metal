@@ -141,7 +141,10 @@ fragment float4 quad_fragment(QuadVOut in [[stage_in]]) {
         // Gentle top-lit sheen across the body, in composed space so it
         // reads even at near-clear fills.
         float sheen = max((0.5 - in.uv.y) * 0.035, 0.0) * outer;
-        float light = rimLight + innerGlow + sheen;
+        // Glass presence follows the fill: a transparent pill (hover fade-out,
+        // invisible-until-hover items) must show no rim/backdrop ghost.
+        float presence = smoothstep(0.0, 0.06, fill.a);
+        float light = (rimLight + innerGlow + sheen) * presence;
         rgb = clamp(rgb + float3(light), 0.0, 1.0);
         alpha = clamp(alpha + light * 0.85, 0.0, 1.0);
     }

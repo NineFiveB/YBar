@@ -341,7 +341,9 @@ public final class BarManager {
         // backdrop; blur_radius > 0 forces one explicitly).
         var glassSpecs: [(itemID: Int, rect: CGRect, cornerRadius: CGFloat)] = []
         for item in items
-        where (item.blurRadius > 0 || (item.background.glass && item.background.drawing))
+        where (item.blurRadius > 0
+               || (item.background.glass && item.background.drawing
+                   && item.background.color.alpha > 0.02))
             && item.isVisible {
             let rect: CGRect
             if item.kind == .bracket {
