@@ -216,11 +216,17 @@ public final class BarSurface {
         return CGRect(x: x, y: y, width: width, height: height)
     }
 
-    /// Is "Automatically hide and show the menu bar" enabled? (`_HIHideMenuBar`
-    /// in the global defaults domain — the public equivalent of sketchybar's
-    /// SLSGetMenuBarAutohideEnabled.)
+    /// Is "Automatically hide and show the menu bar" enabled?
+    /// macOS 26+ moved the setting (System Settings > Control Center) to
+    /// com.apple.controlcenter's AutoHideMenuBarOption (1 = Always); after the
+    /// migration the legacy global-domain `_HIHideMenuBar` is a stale mirror,
+    /// so trust the modern key whenever it exists.
     static func menuBarAutohides() -> Bool {
-        UserDefaults.standard
+        if let option = UserDefaults(suiteName: "com.apple.controlcenter")?
+            .object(forKey: "AutoHideMenuBarOption") as? Int {
+            return option == 1
+        }
+        return UserDefaults.standard
             .persistentDomain(forName: UserDefaults.globalDomain)?["_HIHideMenuBar"] as? Bool ?? false
     }
 }
