@@ -41,6 +41,7 @@ sbar.default({
       glass = true,
     },
   },
-  padding_left = 5,
-  padding_right = 5,
+  -- Tight outer paddings: 4pt between adjacent pills (was 10).
+  padding_left = 2,
+  padding_right = 2,
 })
