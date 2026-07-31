@@ -42,7 +42,7 @@ public final class SceneBuilder {
             barQuad.gradientDir = SceneBuilder.gradientDirection(angleDegrees: settings.gradientAngle)
             barQuad.flags |= QuadInstance.flagGradient
         }
-        if settings.glass {
+        if settings.glass && !SceneBuilder.nativeGlassBackdrops {
             barQuad.flags |= QuadInstance.flagGlass
         }
         list.quads.append(barQuad)
@@ -342,11 +342,20 @@ public final class SceneBuilder {
             quad.gradientDir = SceneBuilder.gradientDirection(angleDegrees: background.gradientAngle)
             quad.flags |= QuadInstance.flagGradient
         }
-        if background.glass {
+        if background.glass && !SceneBuilder.nativeGlassBackdrops {
             quad.flags |= QuadInstance.flagGlass
         }
         list.quads.append(quad)
     }
+
+    /// Real Liquid Glass (NSGlassEffectView) exists on macOS 26+: the backdrop
+    /// itself refracts and glints, so the shader's painted rim/sheen imitation
+    /// stays off there — layered on the true material it reads as a glow
+    /// outline, not glass. Pre-26 systems keep the shader approximation.
+    public static let nativeGlassBackdrops: Bool = {
+        if #available(macOS 26.0, *) { return true }
+        return false
+    }()
 
     // MARK: - Text
 
@@ -427,11 +436,15 @@ public final class SceneBuilder {
             CTRunGetGlyphs(run, CFRange(location: 0, length: count), &glyphs)
             CTRunGetPositions(run, CFRange(location: 0, length: count), &positions)
 
+            let roundingSlack = max(shaped.width - shaped.inkWidth, 0) / 2
             for index in 0..<count {
                 guard let entry = atlas.entry(glyph: glyphs[index], font: runFont) else { continue }
-                // Ink-aligned: shift by -inkMinX so ink starts exactly at the
-                // pen — the measured (ink) width then gives equal paddings.
-                let glyphPenX = ((penX + positions[index].x - shaped.inkMinX) * scale).rounded()
+                // Ink-aligned (-inkMinX: ink starts at the pen) with the
+                // measurement's rounding slack split evenly — otherwise up to
+                // 1.5pt of slack pools on the right and single glyphs (the
+                // apple symbol) sit visibly left of center in their pill.
+                let glyphPenX = ((penX + positions[index].x - shaped.inkMinX + roundingSlack)
+                                 * scale).rounded()
                 if let instance = SceneBuilder.glyphInstance(
                     origin: SIMD2(Float(glyphPenX) + entry.bearingPx.x,
                                   Float(baselinePx) + entry.bearingPx.y),

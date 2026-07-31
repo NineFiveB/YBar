@@ -119,12 +119,20 @@ end
 
 -- Refresh which workspaces are visible/highlighted. Visible = non-empty OR the
 -- focused workspace; highlighted = focused.
-local function update_spaces(focused)
+-- YBAR PORT: right after wake (or login) the AeroSpace server can take a few
+-- seconds to answer, and an empty reply means "not ready", not "no
+-- workspaces" — hiding every space on it would blank the bar until the next
+-- manual switch. Retry a few times instead.
+local function update_spaces(focused, attempt)
   sbar.exec("aerospace list-workspaces --monitor all --empty no 2>/dev/null", function(nonempty)
     local visible = {}
     for raw_ws in nonempty:gmatch("[^\r\n]+") do
       local ws = raw_ws:match("^%s*(.-)%s*$")
       if ws ~= "" then visible[ws] = true end
+    end
+    if next(visible) == nil and (attempt or 0) < 5 then
+      sbar.exec("sleep 2", function() update_spaces(focused, (attempt or 0) + 1) end)
+      return
     end
     if focused and focused ~= "" then visible[focused] = true end
 
@@ -152,14 +160,34 @@ local space_observer = sbar.add("item", {
 })
 
 -- AeroSpace passes FOCUSED_WORKSPACE through the triggered event.
+-- MENUS_VISIBLE (set by menus.lua) guards every refresh path so a resync
+-- can't resurrect the workspace pills while the app menus are shown.
 space_observer:subscribe("aerospace_workspace_change", function(env)
+  if MENUS_VISIBLE then return end
   update_spaces(env.FOCUSED_WORKSPACE)
 end)
 
--- Initial paint at config load: query the currently focused workspace.
-sbar.exec("aerospace list-workspaces --focused 2>/dev/null", function(focused)
-  update_spaces((focused:gsub("%s+", "")))
-end)
+-- Query the focused workspace and repaint — used for the initial paint and
+-- the post-wake resync, with retries while AeroSpace is still starting up.
+local function query_and_update(attempt)
+  sbar.exec("aerospace list-workspaces --focused 2>/dev/null", function(focused)
+    focused = focused:gsub("%s+", "")
+    if focused == "" and (attempt or 0) < 5 then
+      sbar.exec("sleep 2", function() query_and_update((attempt or 0) + 1) end)
+      return
+    end
+    if MENUS_VISIBLE then return end
+    update_spaces(focused)
+  end)
+end
+
+-- YBAR PORT: AeroSpace only fires exec-on-workspace-change on real switches,
+-- so nothing repaints after sleep and the pills stay stale or hidden —
+-- resync on the daemon's system_woke event.
+space_observer:subscribe("system_woke", function() query_and_update() end)
+
+-- Initial paint at config load.
+query_and_update()
 
 local spaces_indicator = sbar.add("item", {
   padding_left = -3,

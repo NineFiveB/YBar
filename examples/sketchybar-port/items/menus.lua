@@ -15,6 +15,10 @@ local space_menu_swap = sbar.add("item", {
 })
 sbar.add("event", "swap_menus_and_spaces")
 
+-- YBAR PORT: spaces.lua checks this on workspace-change/wake resyncs so they
+-- can't re-show the workspace pills while the app menus occupy the bar.
+MENUS_VISIBLE = false
+
 local max_items = 15
 local menu_items = {}
 for i = 1, max_items, 1 do
@@ -66,6 +70,7 @@ menu_watcher:subscribe("front_app_switched", update_menus)
 space_menu_swap:subscribe("swap_menus_and_spaces", function(env)
   local drawing = menu_items[1]:query().geometry.drawing == "on"
   if drawing then
+    MENUS_VISIBLE = false
     menu_watcher:set( { updates = false })
     sbar.set("/menu\\..*/", { drawing = false })
     -- YBAR PORT: a blanket show resurrects every configured workspace
@@ -77,6 +82,7 @@ space_menu_swap:subscribe("swap_menus_and_spaces", function(env)
     end)
     sbar.set("front_app", { drawing = true })
   else
+    MENUS_VISIBLE = true
     menu_watcher:set( { updates = true })
     sbar.set("/space\\..*/", { drawing = false })
     sbar.set("front_app", { drawing = false })

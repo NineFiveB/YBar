@@ -12,6 +12,9 @@ public final class FontCache {
         public let width: CGFloat
         public let ascent: CGFloat
         public let descent: CGFloat
+        /// Raw (unrounded) ink width — the rounding slack (width - inkWidth)
+        /// is distributed evenly so glyphs sit dead-center in their box.
+        public let inkWidth: CGFloat
         /// Ink-box left edge in text space: drawing shifts by -inkMinX so the
         /// ink starts exactly at the pen and left/right paddings are equal.
         public let inkMinX: CGFloat
@@ -60,6 +63,7 @@ public final class FontCache {
         let width = CGFloat(Int(pathBounds.width + 1.5))
         let shaped = ShapedLine(
             line: line, width: width, ascent: ascent, descent: descent,
+            inkWidth: pathBounds.width,
             inkMinX: pathBounds.minX, inkMinY: pathBounds.minY, inkMaxY: pathBounds.maxY)
         lines[key] = shaped
         return shaped

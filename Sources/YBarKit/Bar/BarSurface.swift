@@ -24,8 +24,13 @@ public final class BarSurface {
     /// Item hit-test frames for this surface (bar-local, top-left origin), set after layout.
     public var itemFrames: [(itemID: Int, frame: CGRect)] = []
     public var hoveredItemID: Int?
-    /// Per-item blurred backdrops (the glass substrate), keyed by item id.
-    private var glassViews: [Int: NSVisualEffectView] = [:]
+    /// Per-item glass backdrops keyed by item id: NSGlassEffectView (real
+    /// Liquid Glass) on macOS 26+, NSVisualEffectView blur before that.
+    private var glassViews: [Int: NSView] = [:]
+    /// Host for the native glass views — the contentView of an
+    /// NSGlassEffectContainerView, which batches the glass passes and merges
+    /// pills that drift within `spacing` of each other. nil pre-26.
+    private let glassHost: NSView?
 
     public var onMouse: ((MouseEventInfo, BarSurface) -> Void)?
 
@@ -61,6 +66,19 @@ public final class BarSurface {
         effectView.frame = container.bounds
         hostView.frame = container.bounds
         container.addSubview(effectView)
+        if #available(macOS 26.0, *) {
+            let merger = NSGlassEffectContainerView()
+            merger.frame = container.bounds
+            merger.autoresizingMask = [.width, .height]
+            let content = NSView()
+            content.frame = merger.bounds
+            content.autoresizingMask = [.width, .height]
+            merger.contentView = content
+            container.addSubview(merger)
+            glassHost = content
+        } else {
+            glassHost = nil
+        }
         container.addSubview(hostView)
         panel.contentView = container
 
@@ -107,24 +125,43 @@ public final class BarSurface {
         var live = Set<Int>()
         for spec in specs {
             live.insert(spec.itemID)
-            let view: NSVisualEffectView
-            if let existing = glassViews[spec.itemID] {
-                view = existing
-            } else {
-                view = NSVisualEffectView()
-                view.blendingMode = .behindWindow
-                view.material = .hudWindow
-                view.state = .active
-                container.addSubview(view, positioned: .below, relativeTo: hostView)
-                glassViews[spec.itemID] = view
-            }
             // Container is unflipped (AppKit y-up); layout rects are y-down.
-            view.frame = CGRect(
+            let frame = CGRect(
                 x: spec.rect.minX,
                 y: containerHeight - spec.rect.maxY,
                 width: spec.rect.width,
                 height: spec.rect.height)
-            view.maskImage = BarSurface.roundedMask(radius: spec.cornerRadius)
+            if #available(macOS 26.0, *), let glassHost {
+                let glass: NSGlassEffectView
+                if let existing = glassViews[spec.itemID] as? NSGlassEffectView {
+                    glass = existing
+                } else {
+                    glass = NSGlassEffectView()
+                    // Clear glass: fully transparent + refractive (regular's
+                    // adaptive frost reads as an opaque dark slab in a bar);
+                    // the item's own fill tint supplies the darkness.
+                    glass.style = .clear
+                    glass.appearance = NSAppearance(named: .darkAqua)
+                    glassHost.addSubview(glass)
+                    glassViews[spec.itemID] = glass
+                }
+                glass.frame = frame
+                glass.cornerRadius = spec.cornerRadius
+            } else {
+                let view: NSVisualEffectView
+                if let existing = glassViews[spec.itemID] as? NSVisualEffectView {
+                    view = existing
+                } else {
+                    view = NSVisualEffectView()
+                    view.blendingMode = .behindWindow
+                    view.material = .hudWindow
+                    view.state = .active
+                    container.addSubview(view, positioned: .below, relativeTo: hostView)
+                    glassViews[spec.itemID] = view
+                }
+                view.frame = frame
+                view.maskImage = BarSurface.roundedMask(radius: spec.cornerRadius)
+            }
         }
         for (itemID, view) in glassViews where !live.contains(itemID) {
             view.removeFromSuperview()

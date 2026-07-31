@@ -7,7 +7,8 @@ import Metal
 public final class PopupSurface {
     public let hostItemID: Int
     let panel: BarPanel
-    let effectView: NSVisualEffectView
+    /// NSGlassEffectView (real Liquid Glass) on macOS 26+, blur fallback before.
+    let backdropView: NSView
     public let hostView: MetalHostView
 
     /// Popup-local hit frames (top-left origin, points).
@@ -32,12 +33,20 @@ public final class PopupSurface {
         panel.level = .popUpMenu
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
 
-        effectView = NSVisualEffectView()
-        effectView.blendingMode = .behindWindow
-        effectView.material = .hudWindow
-        effectView.state = .active
-        effectView.autoresizingMask = [.width, .height]
-        effectView.isHidden = true
+        if #available(macOS 26.0, *) {
+            let glass = NSGlassEffectView()
+            glass.style = .clear
+            glass.appearance = NSAppearance(named: .darkAqua)
+            backdropView = glass
+        } else {
+            let effect = NSVisualEffectView()
+            effect.blendingMode = .behindWindow
+            effect.material = .hudWindow
+            effect.state = .active
+            backdropView = effect
+        }
+        backdropView.autoresizingMask = [.width, .height]
+        backdropView.isHidden = true
 
         hostView = MetalHostView(frame: .zero)
         hostView.autoresizingMask = [.width, .height]
@@ -45,7 +54,7 @@ public final class PopupSurface {
 
         let container = NSView()
         container.autoresizesSubviews = true
-        container.addSubview(effectView)
+        container.addSubview(backdropView)
         container.addSubview(hostView)
         panel.contentView = container
 
@@ -75,17 +84,20 @@ public final class PopupSurface {
         case .bottom: y = anchor.maxY + yOffset
         }
         panel.setFrame(CGRect(x: x, y: y, width: size.width, height: size.height), display: true)
-        effectView.frame = panel.contentView?.bounds ?? .zero
+        backdropView.frame = panel.contentView?.bounds ?? .zero
         hostView.frame = panel.contentView?.bounds ?? .zero
         hostView.updateDrawableSize()
         panel.orderFrontRegardless()
     }
 
-    /// Blurred glass behind the whole panel (popup.blur_radius > 0).
+    /// Glass behind the whole panel (popup.blur_radius > 0).
     public func setGlass(enabled: Bool, cornerRadius: CGFloat) {
-        effectView.isHidden = !enabled
-        if enabled {
-            effectView.maskImage = BarSurface.roundedMask(radius: cornerRadius)
+        backdropView.isHidden = !enabled
+        guard enabled else { return }
+        if #available(macOS 26.0, *), let glass = backdropView as? NSGlassEffectView {
+            glass.cornerRadius = cornerRadius
+        } else if let effect = backdropView as? NSVisualEffectView {
+            effect.maskImage = BarSurface.roundedMask(radius: cornerRadius)
         }
     }
 
