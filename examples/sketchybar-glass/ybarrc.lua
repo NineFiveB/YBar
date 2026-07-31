@@ -35,6 +35,10 @@ require("items")
 -- through glass. Strip every stroke the item files applied.
 sbar.set("/.*/", { background = { border_width = 0 } })
 
+-- Focused-workspace highlight in the macOS selection color (system blue),
+-- not the port's red.
+sbar.set("/space\\..*/", { icon = { highlight_color = 0xff0a84ff } })
+
 sbar.end_config()
 
 sbar.event_loop()

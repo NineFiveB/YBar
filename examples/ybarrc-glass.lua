@@ -9,15 +9,15 @@ local glass = {
   fill        = "0x21262b36",  -- barely-there tint: the blur IS the material
   fill_hover  = "0x4d32384a",
   fill_active = "0x593a4154",
-  text        = "0xffe2e2e3",  -- sonokai white
-  dim         = "0xff7f8490",  -- sonokai grey
-  red         = "0xfffc5d7c",
-  green       = "0xff9ed072",
-  blue        = "0xff76cce0",
-  yellow      = "0xffe7c664",
+  text        = "0xffffffff",
+  dim         = "0xff98989d",  -- systemGray
+  red         = "0xffff453a",  -- systemRed
+  green       = "0xff30d158",  -- systemGreen
+  blue        = "0xff0a84ff",  -- systemBlue
+  yellow      = "0xffffd60a",  -- systemYellow
 }
 
-local RADIUS = 20         -- macOS 26 corner radius
+local RADIUS = 25
 local ITEM_H = 28         -- sketchybar default background height
 local paddings = 3        -- sketchybar settings.paddings
 
@@ -137,7 +137,7 @@ local function refresh_spaces(focused)
       ws:set({
         drawing = visible[sid] and "on" or "off",
         background = { color = selected and glass.fill_active or glass.fill },
-        ["icon.color"] = selected and glass.red or glass.text,
+        ["icon.color"] = selected and glass.blue or glass.text,
         ["label.color"] = selected and glass.text or glass.dim,
       })
       if visible[sid] then workspace_icons(sid, ws) end
