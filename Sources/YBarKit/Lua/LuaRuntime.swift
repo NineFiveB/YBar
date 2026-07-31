@@ -55,6 +55,10 @@ public final class LuaRuntime {
     private var subscriptions: [Int: [String: Int32]] = [:]
     /// Active `ybar.animate` context for property sets.
     var animationContext: (curve: AnimationCurve, durationFrames: Int)?
+    /// CLI parity for ybar.trigger: built-in event names route through the
+    /// daemon's forced provider re-queries (wired by the daemon; returns true
+    /// when the name was handled).
+    public var forcedTrigger: ((String) -> Bool)?
     /// Registry refs are small integers scoped to ONE lua_State; a completion
     /// crossing a reload would index the NEW state's registry and invoke an
     /// unrelated callback. Bumped on every state teardown; async completions
@@ -325,6 +329,9 @@ public final class LuaRuntime {
                         }
                         pop(L, 1)
                     }
+                }
+                if extra.isEmpty, runtime.forcedTrigger?(event) == true {
+                    return 0
                 }
                 runtime.eventBus.trigger(name: event, info: extra["INFO"] ?? "",
                                          extraEnvironment: extra)

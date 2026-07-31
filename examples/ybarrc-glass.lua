@@ -213,5 +213,9 @@ cpu:subscribe("system_stats", function(env)
 end)
 hoverable(cpu)
 
--- Boot: populate everything once.
+-- Boot: populate everything once (update runs forced/routine handlers;
+-- the triggers force provider re-queries so event-driven capsules fill in).
 ybar.update()
+ybar.trigger("battery_change")
+ybar.trigger("volume_change")
+ybar.trigger("wifi_change")

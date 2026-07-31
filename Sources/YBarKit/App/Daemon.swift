@@ -385,8 +385,14 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
     private func runConfig(at url: URL) {
         if url.pathExtension == "lua" {
             if luaRuntime == nil {
-                luaRuntime = LuaRuntime(
+                let runtime = LuaRuntime(
                     barManager: barManager, eventBus: eventBus, scheduler: scheduler)
+                runtime.forcedTrigger = { [weak self] name in
+                    guard let forced = self?.commandHandler.forcedQueries[name] else { return false }
+                    forced()
+                    return true
+                }
+                luaRuntime = runtime
             }
             if let error = luaRuntime?.runConfig(at: url) {
                 FileHandle.standardError.write(Data("\(error)\n".utf8))
