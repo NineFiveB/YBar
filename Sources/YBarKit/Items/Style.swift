@@ -156,11 +156,13 @@ public struct FontSpec: Equatable, Hashable, Sendable {
 }
 
 /// Position slots along the bar. `centerLeft`/`centerRight` (sketchybar `q`/`e`)
-/// flow away from the notch dead zone.
+/// flow away from the notch dead zone. `.popup` items live in a host item's
+/// popup panel (the host name is `Item.popupHost`).
 public enum ItemPosition: String, Sendable {
     case left, right, center
     case centerLeft = "q"
     case centerRight = "e"
+    case popup = "p"
 
     public static func parse(_ text: String) -> ItemPosition? {
         switch text {

@@ -16,11 +16,13 @@ public final class Renderer {
     public let device: MTLDevice
     private let commandQueue: MTLCommandQueue
     private let quadPipeline: MTLRenderPipelineState
+    private let shapePipeline: MTLRenderPipelineState
     private let glyphPipeline: MTLRenderPipelineState
 
     private static let framesInFlight = 3
     private let frameSemaphore = DispatchSemaphore(value: Renderer.framesInFlight)
     private var quadBuffers = [MTLBuffer?](repeating: nil, count: Renderer.framesInFlight)
+    private var shapeBuffers = [MTLBuffer?](repeating: nil, count: Renderer.framesInFlight)
     private var glyphBuffers = [MTLBuffer?](repeating: nil, count: Renderer.framesInFlight)
     private var frameIndex = 0
 
@@ -61,6 +63,7 @@ public final class Renderer {
         }
 
         quadPipeline = try makePipeline(vertex: "quad_vertex", fragment: "quad_fragment")
+        shapePipeline = try makePipeline(vertex: "shape_vertex", fragment: "shape_fragment")
         glyphPipeline = try makePipeline(vertex: "glyph_vertex", fragment: "glyph_fragment")
     }
 
@@ -80,6 +83,9 @@ public final class Renderer {
 
         if !list.quads.isEmpty {
             quadBuffers[slot] = fill(buffer: quadBuffers[slot], with: list.quads)
+        }
+        if !list.triangles.isEmpty {
+            shapeBuffers[slot] = fill(buffer: shapeBuffers[slot], with: list.triangles)
         }
         if !list.glyphs.isEmpty {
             glyphBuffers[slot] = fill(buffer: glyphBuffers[slot], with: list.glyphs)
@@ -108,6 +114,12 @@ public final class Renderer {
             encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
             encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4,
                                    instanceCount: list.quads.count)
+        }
+        if !list.triangles.isEmpty, let buffer = shapeBuffers[slot] {
+            encoder.setRenderPipelineState(shapePipeline)
+            encoder.setVertexBuffer(buffer, offset: 0, index: 0)
+            encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: list.triangles.count)
         }
         if !list.glyphs.isEmpty, let buffer = glyphBuffers[slot] {
             encoder.setRenderPipelineState(glyphPipeline)

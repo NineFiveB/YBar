@@ -2,6 +2,8 @@ import AppKit
 import QuartzCore
 
 public enum MouseEventKind {
+    case down
+    case dragged
     case clicked
     case moved
     case exited
@@ -81,6 +83,8 @@ public final class MetalHostView: NSView {
             userInfo: nil))
     }
 
+    public override func mouseDown(with event: NSEvent) { forward(event, kind: .down, button: "left") }
+    public override func mouseDragged(with event: NSEvent) { forward(event, kind: .dragged, button: "left") }
     public override func mouseUp(with event: NSEvent) { forward(event, kind: .clicked, button: "left") }
     public override func rightMouseUp(with event: NSEvent) { forward(event, kind: .clicked, button: "right") }
     public override func otherMouseUp(with event: NSEvent) { forward(event, kind: .clicked, button: "other") }

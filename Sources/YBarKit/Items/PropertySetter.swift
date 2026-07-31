@@ -88,9 +88,192 @@ public enum PropertySetter {
             return setFloat(item, \Item.paddingRight, "padding_right", value, ctx)
         case "display":
             return setDisplayAssociation(item, value, ctx)
+        case "graph":
+            return setGraph(item, rest, value, ctx)
+        case "slider":
+            return setSlider(item, rest, value, ctx)
+        case "popup":
+            return setPopup(item, rest, value, ctx)
         default:
             return "[?] unknown property: \(path.joined(separator: "."))"
         }
+    }
+
+    // MARK: - Component sub-domains
+
+    private static func setGraph(_ item: Item, _ path: ArraySlice<Substring>,
+                                 _ value: String, _ ctx: PropertyContext) -> String? {
+        guard let graph = item.graph else { return "[!] \(item.name) is not a graph" }
+        switch path.first {
+        case "color":
+            return setColorValue(key: "item.\(item.id).graph.color", current: graph.lineColor,
+                                 value: value, ctx: ctx) { graph.lineColor = $0 }
+        case "fill_color":
+            return setColorValue(key: "item.\(item.id).graph.fill_color",
+                                 current: graph.fillColor ?? graph.effectiveFillColor,
+                                 value: value, ctx: ctx) { graph.fillColor = $0 }
+        case "line_width":
+            return setFloatValue(key: "item.\(item.id).graph.line_width", current: graph.lineWidth,
+                                 value: value, ctx: ctx) { graph.lineWidth = $0 }
+        default:
+            return "[?] unknown property: graph.\(path.joined(separator: "."))"
+        }
+    }
+
+    private static func setSlider(_ item: Item, _ path: ArraySlice<Substring>,
+                                  _ value: String, _ ctx: PropertyContext) -> String? {
+        guard let slider = item.slider else { return "[!] \(item.name) is not a slider" }
+        let rest = path.dropFirst()
+        switch path.first {
+        case "percentage":
+            // Live drags own the visual position; a concurrent --set must not fight them.
+            guard !slider.isDragged else { return nil }
+            return setFloatValue(key: "item.\(item.id).slider.percentage", current: slider.percentage,
+                                 value: value, ctx: ctx) { slider.percentage = min(100, max(0, $0)) }
+        case "width":
+            return setFloatValue(key: "item.\(item.id).slider.width", current: slider.width,
+                                 value: value, ctx: ctx) { slider.width = max(1, $0) }
+        case "highlight_color":
+            return setColorValue(key: "item.\(item.id).slider.highlight_color",
+                                 current: slider.highlightColor,
+                                 value: value, ctx: ctx) { slider.highlightColor = $0 }
+        case "knob":
+            if rest.isEmpty {
+                slider.knob.string = value
+                ctx.invalidate()
+                return nil
+            }
+            switch rest.first {
+            case "color":
+                return setColorValue(key: "item.\(item.id).slider.knob.color",
+                                     current: slider.knob.color,
+                                     value: value, ctx: ctx) { slider.knob.color = $0 }
+            case "font":
+                slider.knob.font.apply(value)
+                ctx.invalidate()
+                return nil
+            case "y_offset":
+                return setFloatValue(key: "item.\(item.id).slider.knob.y_offset",
+                                     current: slider.knob.yOffset,
+                                     value: value, ctx: ctx) { slider.knob.yOffset = $0 }
+            default:
+                return "[?] unknown property: slider.knob.\(rest.joined(separator: "."))"
+            }
+        case "background":
+            switch rest.first {
+            case "color":
+                return setColorValue(key: "item.\(item.id).slider.background.color",
+                                     current: slider.background.color,
+                                     value: value, ctx: ctx) { slider.background.color = $0 }
+            case "height":
+                return setFloatValue(key: "item.\(item.id).slider.background.height",
+                                     current: slider.background.height,
+                                     value: value, ctx: ctx) { slider.background.height = $0 }
+            case "corner_radius":
+                return setFloatValue(key: "item.\(item.id).slider.background.corner_radius",
+                                     current: slider.background.cornerRadius,
+                                     value: value, ctx: ctx) { slider.background.cornerRadius = $0 }
+            default:
+                return "[?] unknown property: slider.background.\(rest.joined(separator: "."))"
+            }
+        default:
+            return "[?] unknown property: slider.\(path.joined(separator: "."))"
+        }
+    }
+
+    private static func setPopup(_ item: Item, _ path: ArraySlice<Substring>,
+                                 _ value: String, _ ctx: PropertyContext) -> String? {
+        let rest = path.dropFirst()
+        switch path.first {
+        case "drawing":
+            if value == "toggle" {
+                item.popup.isOpen.toggle()
+            } else if let flag = parseBool(value) {
+                item.popup.isOpen = flag
+            } else {
+                return "[!] invalid boolean: \(value)"
+            }
+            ctx.invalidate()
+            return nil
+        case "horizontal":
+            guard let flag = parseBool(value) else { return "[!] invalid boolean: \(value)" }
+            item.popup.horizontal = flag
+            ctx.invalidate()
+            return nil
+        case "height":
+            return setFloatValue(key: "item.\(item.id).popup.height", current: item.popup.cellHeight,
+                                 value: value, ctx: ctx) { [weak item] in item?.popup.cellHeight = $0 }
+        case "y_offset":
+            return setFloatValue(key: "item.\(item.id).popup.y_offset", current: item.popup.yOffset,
+                                 value: value, ctx: ctx) { [weak item] in item?.popup.yOffset = $0 }
+        case "background":
+            switch rest.first {
+            case "color":
+                return setColorValue(key: "item.\(item.id).popup.background.color",
+                                     current: item.popup.background.color,
+                                     value: value, ctx: ctx) { [weak item] in item?.popup.background.color = $0 }
+            case "corner_radius":
+                return setFloatValue(key: "item.\(item.id).popup.background.corner_radius",
+                                     current: item.popup.background.cornerRadius,
+                                     value: value, ctx: ctx) { [weak item] in item?.popup.background.cornerRadius = $0 }
+            case "border_color":
+                return setColorValue(key: "item.\(item.id).popup.background.border_color",
+                                     current: item.popup.background.borderColor,
+                                     value: value, ctx: ctx) { [weak item] in item?.popup.background.borderColor = $0 }
+            case "border_width":
+                return setFloatValue(key: "item.\(item.id).popup.background.border_width",
+                                     current: item.popup.background.borderWidth,
+                                     value: value, ctx: ctx) { [weak item] in item?.popup.background.borderWidth = $0 }
+            default:
+                return "[?] unknown property: popup.background.\(rest.joined(separator: "."))"
+            }
+        default:
+            return "[?] unknown property: popup.\(path.joined(separator: "."))"
+        }
+    }
+
+    // MARK: - Closure-based animatable leaves (for state not reachable by key path)
+
+    static func setFloatValue(key: String, current: Float, value: String,
+                              ctx: PropertyContext, assign: @escaping (Float) -> Void) -> String? {
+        guard let target = Float(value) else { return "[!] invalid number: \(value)" }
+        if let animation = ctx.animation, animation.durationFrames > 0 {
+            let invalidate = ctx.invalidate
+            ctx.scheduler.animate(
+                key: key, from: .float(current), to: .float(target),
+                durationFrames: animation.durationFrames, curve: animation.curve
+            ) { animValue in
+                guard case .float(let now) = animValue else { return }
+                assign(now)
+                invalidate()
+            }
+        } else {
+            ctx.scheduler.cancel(key: key)
+            assign(target)
+            ctx.invalidate()
+        }
+        return nil
+    }
+
+    static func setColorValue(key: String, current: YColor, value: String,
+                              ctx: PropertyContext, assign: @escaping (YColor) -> Void) -> String? {
+        guard let target = YColor.parse(value) else { return "[!] invalid color: \(value)" }
+        if let animation = ctx.animation, animation.durationFrames > 0 {
+            let invalidate = ctx.invalidate
+            ctx.scheduler.animate(
+                key: key, from: .color(current), to: .color(target),
+                durationFrames: animation.durationFrames, curve: animation.curve
+            ) { animValue in
+                guard case .color(let now) = animValue else { return }
+                assign(now)
+                invalidate()
+            }
+        } else {
+            ctx.scheduler.cancel(key: key)
+            assign(target)
+            ctx.invalidate()
+        }
+        return nil
     }
 
     // MARK: - Text sub-domain (icon.* / label.*)

@@ -150,6 +150,23 @@ public final class CommandHandler {
                 }
                 emit(Serialize.query(target: target, manager: barManager, eventBus: eventBus))
 
+            case "push":
+                guard let name = batch.args.first,
+                      let item = barManager.store.item(named: name),
+                      let graph = item.graph
+                else {
+                    emit("[!] --push needs a graph item name")
+                    continue
+                }
+                for token in batch.args.dropFirst() {
+                    guard let value = Float(token) else {
+                        emit("[!] invalid graph value: \(token)")
+                        continue
+                    }
+                    graph.push(value)
+                }
+                barManager.setNeedsRender()
+
             case "remove":
                 guard let name = batch.args.first else {
                     emit("[!] --remove needs an item name")
@@ -185,19 +202,71 @@ public final class CommandHandler {
         switch kind {
         case "item":
             guard args.count >= 3 else { return "[!] usage: --add item <name> <position>" }
-            guard let position = ItemPosition.parse(args[2]) else {
-                return "[!] invalid position: \(args[2])"
+            guard let item = addItem(name: args[1], positionToken: args[2]) else {
+                return "[!] invalid position or duplicate name: \(args[1]) \(args[2])"
             }
-            guard barManager.store.add(name: args[1], position: position) != nil else {
-                return "[!] item \(args[1]) already exists"
-            }
+            _ = item
             barManager.setNeedsRender()
             return nil
+
+        case "graph":
+            guard args.count >= 4, let width = Int(args[3]), width > 0 else {
+                return "[!] usage: --add graph <name> <position> <width>"
+            }
+            guard let item = addItem(name: args[1], positionToken: args[2]) else {
+                return "[!] invalid position or duplicate name: \(args[1]) \(args[2])"
+            }
+            item.kind = .graph
+            item.graph = GraphState(capacity: width)
+            barManager.setNeedsRender()
+            return nil
+
+        case "slider":
+            guard args.count >= 4, let width = Float(args[3]), width > 0 else {
+                return "[!] usage: --add slider <name> <position> <width>"
+            }
+            guard let item = addItem(name: args[1], positionToken: args[2]) else {
+                return "[!] invalid position or duplicate name: \(args[1]) \(args[2])"
+            }
+            item.kind = .slider
+            item.slider = SliderState(width: width)
+            barManager.setNeedsRender()
+            return nil
+
+        case "bracket":
+            guard args.count >= 3 else { return "[!] usage: --add bracket <name> <member>..." }
+            let members = Array(args.dropFirst(2))
+            let missing = members.filter { barManager.store.item(named: $0) == nil }
+            guard missing.isEmpty else { return "[!] unknown bracket members: \(missing.joined(separator: ", "))" }
+            guard let item = barManager.store.add(name: args[1], position: .left) else {
+                return "[!] item \(args[1]) already exists"
+            }
+            item.kind = .bracket
+            item.members = members
+            item.background.drawing = true
+            barManager.setNeedsRender()
+            return nil
+
         case "event":
             guard args.count >= 2 else { return "[!] usage: --add event <name> [notification]" }
             return eventBus.addEvent(name: args[1], notificationName: args.count >= 3 ? args[2] : nil)
+
         default:
-            return "[!] unknown --add type: \(kind) (v1 supports: item, event)"
+            return "[!] unknown --add type: \(kind) (supported: item, graph, slider, bracket, event)"
         }
+    }
+
+    /// Resolve a position token, including `popup.<host>` placements.
+    private func addItem(name: String, positionToken: String) -> Item? {
+        if positionToken.hasPrefix("popup.") {
+            let host = String(positionToken.dropFirst("popup.".count))
+            guard barManager.store.item(named: host) != nil,
+                  let item = barManager.store.add(name: name, position: .popup)
+            else { return nil }
+            item.popupHost = host
+            return item
+        }
+        guard let position = ItemPosition.parse(positionToken) else { return nil }
+        return barManager.store.add(name: name, position: position)
     }
 }

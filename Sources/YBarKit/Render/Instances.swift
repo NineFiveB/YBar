@@ -78,6 +78,19 @@ public struct GlyphInstance {
     }
 }
 
+/// Raw colored triangle vertex for CPU-tessellated shapes (graph fills/lines).
+public struct ShapeVertex {
+    public var position: SIMD2<Float>
+    var _pad: SIMD2<Float> = .zero
+    /// Straight-alpha linear color (shader premultiplies).
+    public var color: SIMD4<Float>
+
+    public init(position: SIMD2<Float>, color: SIMD4<Float>) {
+        self.position = position
+        self.color = color
+    }
+}
+
 public struct Uniforms {
     public var viewportSize: SIMD2<Float>
 
@@ -90,22 +103,27 @@ public struct Uniforms {
 /// for one frame of one bar, in device pixels.
 public struct DisplayList {
     public var quads: [QuadInstance] = []
+    /// Triangles drawn between quads and glyphs (graph fills/lines).
+    public var triangles: [ShapeVertex] = []
     public var glyphs: [GlyphInstance] = []
 
     public init() {}
 
-    public var isEmpty: Bool { quads.isEmpty && glyphs.isEmpty }
+    public var isEmpty: Bool { quads.isEmpty && triangles.isEmpty && glyphs.isEmpty }
 }
 
 enum InstanceLayout {
     /// Strides expected by the Metal-side structs; asserted at renderer init.
     static let quadStride = 112
     static let glyphStride = 64
+    static let shapeStride = 32
 
     static func validate() {
         assert(MemoryLayout<QuadInstance>.stride == quadStride,
                "QuadInstance stride \(MemoryLayout<QuadInstance>.stride) != Metal \(quadStride)")
         assert(MemoryLayout<GlyphInstance>.stride == glyphStride,
                "GlyphInstance stride \(MemoryLayout<GlyphInstance>.stride) != Metal \(glyphStride)")
+        assert(MemoryLayout<ShapeVertex>.stride == shapeStride,
+               "ShapeVertex stride \(MemoryLayout<ShapeVertex>.stride) != Metal \(shapeStride)")
     }
 }

@@ -7,11 +7,22 @@ public final class Item {
     public let id: Int
     public var name: String
     public var position: ItemPosition
+    public var kind: ItemKind = .item
 
     public var drawing: Bool = true
     public var icon = TextPart()
     public var label = TextPart()
     public var background = BackgroundStyle()
+
+    // Component state ("sandwich" content between icon and label).
+    public var graph: GraphState?
+    public var slider: SliderState?
+    /// Bracket member item names (kind == .bracket).
+    public var members: [String] = []
+    /// Host item name for `position == .popup`.
+    public var popupHost: String?
+    /// Every item can host a popup panel.
+    public var popup = PopupState()
 
     /// Fixed width override (-1 = dynamic width from content).
     public var customWidth: Float = -1
@@ -68,7 +79,21 @@ public final class Item {
 
     public var isVisible: Bool {
         drawing && (icon.drawing && !icon.string.isEmpty || label.drawing && !label.string.isEmpty
-                    || background.drawing || customWidth >= 0)
+                    || background.drawing || customWidth >= 0
+                    || graph != nil || slider != nil)
+    }
+
+    /// Participates in the bar's cursor flow (brackets derive their geometry
+    /// from members; popup items live in popup panels).
+    public var isInBarFlow: Bool {
+        kind != .bracket && position != .popup
+    }
+
+    /// Width of the sandwich content between icon and label (points).
+    public var contentWidth: CGFloat {
+        if let graph { return CGFloat(graph.capacity) }
+        if let slider { return CGFloat(slider.width) }
+        return 0
     }
 }
 

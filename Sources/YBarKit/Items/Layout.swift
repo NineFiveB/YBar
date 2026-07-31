@@ -38,6 +38,7 @@ public enum Layout {
         if item.icon.drawing, !item.icon.string.isEmpty {
             length += CGFloat(item.icon.paddingLeft) + measured.iconSize.width + CGFloat(item.icon.paddingRight)
         }
+        length += item.contentWidth
         if item.label.drawing, !item.label.string.isEmpty {
             length += CGFloat(item.label.paddingLeft) + measured.labelSize.width + CGFloat(item.label.paddingRight)
         }
@@ -69,7 +70,7 @@ public enum Layout {
 
         // Left: flows right from the bar's left padding.
         var cursor = CGFloat(settings.paddingLeft)
-        for item in items where item.position == .left && item.isVisible {
+        for item in items where item.position == .left && item.isVisible && item.isInBarFlow {
             let measured = measure(item)
             cursor += CGFloat(item.paddingLeft)
             place(item, x: cursor, measured: measured)
@@ -78,7 +79,7 @@ public enum Layout {
 
         // Right: flows left from the bar's right padding.
         cursor = width - CGFloat(settings.paddingRight)
-        for item in items where item.position == .right && item.isVisible {
+        for item in items where item.position == .right && item.isVisible && item.isInBarFlow {
             let measured = measure(item)
             cursor -= CGFloat(item.paddingRight)
             let length = contentLength(item: item, measured: measured)
@@ -88,7 +89,7 @@ public enum Layout {
         }
 
         // Center: pre-pass sums the block, then flows right from the centered origin.
-        let centerItems = items.filter { $0.position == .center && $0.isVisible }
+        let centerItems = items.filter { $0.position == .center && $0.isVisible && $0.isInBarFlow }
         if !centerItems.isEmpty {
             var measures: [Int: MeasuredContent] = [:]
             var total: CGFloat = 0
@@ -109,7 +110,7 @@ public enum Layout {
 
         // centerLeft (q): flows left, starting at the notch's left edge.
         cursor = width / 2 - notchHalf
-        for item in items where item.position == .centerLeft && item.isVisible {
+        for item in items where item.position == .centerLeft && item.isVisible && item.isInBarFlow {
             let measured = measure(item)
             cursor -= CGFloat(item.paddingRight)
             let length = contentLength(item: item, measured: measured)
@@ -120,7 +121,7 @@ public enum Layout {
 
         // centerRight (e): flows right, starting at the notch's right edge.
         cursor = width / 2 + notchHalf
-        for item in items where item.position == .centerRight && item.isVisible {
+        for item in items where item.position == .centerRight && item.isVisible && item.isInBarFlow {
             let measured = measure(item)
             cursor += CGFloat(item.paddingLeft)
             place(item, x: cursor, measured: measured)
@@ -128,7 +129,7 @@ public enum Layout {
         }
 
         // Invisible items get an empty frame so hit testing skips them.
-        for item in items where !item.isVisible {
+        for item in items where !item.isVisible || !item.isInBarFlow {
             item.frame = .zero
             result.contentBoxes[item.id] = .zero
         }

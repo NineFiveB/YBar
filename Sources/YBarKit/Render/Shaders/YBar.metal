@@ -122,6 +122,36 @@ fragment float4 quad_fragment(QuadVOut in [[stage_in]]) {
     return float4(rgb, alpha);
 }
 
+// ---------------------------------------------------------------- shapes
+
+// Raw CPU-tessellated triangles (graph fills and polylines).
+struct ShapeVertexIn {
+    float2 position;
+    float2 _pad;
+    float4 color;      // straight-alpha linear
+};
+
+struct ShapeVOut {
+    float4 position [[position]];
+    float4 color;
+};
+
+vertex ShapeVOut shape_vertex(
+    uint vid [[vertex_id]],
+    const device ShapeVertexIn *vertices [[buffer(0)]],
+    constant Uniforms &uniforms [[buffer(1)]]
+) {
+    ShapeVertexIn v = vertices[vid];
+    ShapeVOut out;
+    out.position = to_clip(v.position, uniforms.viewportSize);
+    out.color = v.color;
+    return out;
+}
+
+fragment float4 shape_fragment(ShapeVOut in [[stage_in]]) {
+    return float4(in.color.rgb * in.color.a, in.color.a);
+}
+
 // ---------------------------------------------------------------- glyphs
 
 struct GlyphVOut {

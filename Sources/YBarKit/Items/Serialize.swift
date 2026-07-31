@@ -55,7 +55,7 @@ public enum Serialize {
     static func itemDictionary(_ item: Item, boundingRects: [String: [String: Any]] = [:]) -> [String: Any] {
         [
             "name": item.name,
-            "type": "item",
+            "type": item.kind.rawValue,
             "geometry": [
                 "drawing": item.drawing ? "on" : "off",
                 "position": item.position.rawValue,

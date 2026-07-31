@@ -17,9 +17,12 @@ public final class BarManager {
     let displayManager = DisplayManager()
 
     public private(set) var surfaces: [BarSurface] = []
+    private var popupSurfaces: [Int: PopupSurface] = [:]
     private var atlases: [CGFloat: GlyphAtlas] = [:]
     private var renderScheduled = false
     private var retryScheduled = false
+    /// Item id of a slider currently being dragged.
+    private var draggingSliderID: Int?
 
     // Interaction hooks, wired by the daemon (scripts + event bus live there).
     public var onItemClicked: ((Item, MouseEventInfo) -> Void)?
@@ -30,6 +33,8 @@ public final class BarManager {
     /// Fired after ANY surface rebuild (topology or display-policy change) —
     /// the animation display link is bound to a surface view and must re-attach.
     public var onSurfacesRebuilt: (() -> Void)?
+    /// A slider drag ended at the given percentage.
+    public var onSliderChanged: ((Item, Float) -> Void)?
 
     public init() throws {
         guard let metalDevice = MTLCreateSystemDefaultDevice() else {
@@ -53,6 +58,8 @@ public final class BarManager {
         displayManager.stop()
         surfaces.forEach { $0.close() }
         surfaces.removeAll()
+        popupSurfaces.values.forEach { $0.close() }
+        popupSurfaces.removeAll()
     }
 
     // MARK: - Surfaces
@@ -111,22 +118,88 @@ public final class BarManager {
         for surface in surfaces {
             render(surface: surface)
         }
+        updatePopups()
+    }
+
+    // MARK: - Popups
+
+    private func updatePopups() {
+        // Open popups render on the surface showing their host; closed or
+        // orphaned popup panels are torn down.
+        var liveHostIDs: Set<Int> = []
+        for host in store.items where host.popup.isOpen {
+            let members = store.items.filter { $0.position == .popup && $0.popupHost == host.name }
+            guard !members.isEmpty,
+                  let surface = surfaces.first(where: { surface in
+                      surface.itemFrames.contains { $0.itemID == host.id && $0.frame != .zero }
+                  }),
+                  let atlas = atlas(for: surface.scale)
+            else { continue }
+            liveHostIDs.insert(host.id)
+
+            let popupSurface: PopupSurface
+            if let existing = popupSurfaces[host.id] {
+                popupSurface = existing
+            } else {
+                popupSurface = PopupSurface(hostItemID: host.id, device: device)
+                popupSurface.onMouse = { [weak self] info, popup in
+                    self?.handlePopupMouse(info, on: popup)
+                }
+                popupSurfaces[host.id] = popupSurface
+            }
+
+            let scene = sceneBuilder.buildPopup(
+                host: host, members: members, scale: popupSurface.scale, atlas: atlas)
+            guard scene.sizePoints.width > 0 else { continue }
+            popupSurface.itemFrames = scene.itemFrames
+
+            // Host frame (bar-local, y-down) -> global AppKit coords (y-up).
+            let barFrame = surface.panelFrame
+            guard let hostFrame = surface.itemFrames.first(where: { $0.itemID == host.id })?.frame
+            else { continue }
+            let anchor = CGRect(
+                x: barFrame.minX + hostFrame.minX,
+                y: barFrame.maxY - hostFrame.maxY,
+                width: hostFrame.width,
+                height: hostFrame.height)
+            popupSurface.present(
+                anchor: anchor,
+                size: scene.sizePoints,
+                barPosition: settings.position,
+                yOffset: CGFloat(host.popup.yOffset))
+            renderer.render(list: scene.list, layer: popupSurface.hostView.metalLayer, atlas: atlas)
+        }
+
+        for (hostID, popupSurface) in popupSurfaces where !liveHostIDs.contains(hostID) {
+            popupSurface.close()
+            popupSurfaces.removeValue(forKey: hostID)
+        }
+    }
+
+    private func handlePopupMouse(_ info: MouseEventInfo, on popup: PopupSurface) {
+        switch info.kind {
+        case .clicked:
+            if let (itemID, _) = popup.itemFrames.first(where: { $0.frame.contains(info.point) }),
+               let item = store.items.first(where: { $0.id == itemID }) {
+                onItemClicked?(item, info)
+            }
+        default:
+            break
+        }
+    }
+
+    private func atlas(for scale: CGFloat) -> GlyphAtlas? {
+        if let existing = atlases[scale] { return existing }
+        guard let created = GlyphAtlas(device: device, scale: scale) else { return nil }
+        atlases[scale] = created
+        return created
     }
 
     private func render(surface: BarSurface) {
         let barSize = surface.barSize
         guard barSize.width > 0, barSize.height > 0 else { return }
         let scale = surface.scale
-
-        let atlas: GlyphAtlas
-        if let existing = atlases[scale] {
-            atlas = existing
-        } else if let created = GlyphAtlas(device: device, scale: scale) {
-            atlases[scale] = created
-            atlas = created
-        } else {
-            return
-        }
+        guard let atlas = atlas(for: scale) else { return }
 
         let items = visibleItems(on: surface)
         let result = Layout.perform(items: items, barSize: barSize, settings: settings) { [fontCache] item in
@@ -200,7 +273,27 @@ public final class BarManager {
 
     private func handleMouse(_ info: MouseEventInfo, on surface: BarSurface) {
         switch info.kind {
+        case .down:
+            if let item = hitTest(point: info.point, on: surface), item.slider != nil {
+                draggingSliderID = item.id
+                updateSlider(item: item, localX: info.point.x)
+            }
+        case .dragged:
+            if let id = draggingSliderID,
+               let item = store.items.first(where: { $0.id == id }) {
+                item.slider?.isDragged = true
+                updateSlider(item: item, localX: info.point.x)
+            }
         case .clicked:
+            if let id = draggingSliderID,
+               let item = store.items.first(where: { $0.id == id }),
+               let slider = item.slider {
+                draggingSliderID = nil
+                slider.isDragged = false
+                updateSlider(item: item, localX: info.point.x)
+                onSliderChanged?(item, slider.percentage)
+                return
+            }
             if let item = hitTest(point: info.point, on: surface) {
                 onItemClicked?(item, info)
             }
@@ -214,6 +307,20 @@ public final class BarManager {
         case .exited:
             updateHover(surface: surface, to: nil)
         }
+    }
+
+    /// Map a bar-local x to the slider's percentage (track spans the sandwich
+    /// slot between icon and label inside the item's content box).
+    private func updateSlider(item: Item, localX: CGFloat) {
+        guard let slider = item.slider else { return }
+        var trackX = item.frame.minX + CGFloat(item.paddingLeft)
+        if item.icon.drawing, !item.icon.string.isEmpty {
+            trackX += CGFloat(item.icon.paddingLeft)
+                + fontCache.measure(part: item.icon).width
+                + CGFloat(item.icon.paddingRight)
+        }
+        slider.percentage = slider.percentage(forLocalX: localX - trackX)
+        setNeedsRender()
     }
 
     private func updateHover(surface: BarSurface, to item: Item?) {

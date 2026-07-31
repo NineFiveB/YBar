@@ -70,6 +70,8 @@ public final class BarSurface {
 
     public var scale: CGFloat { panel.backingScaleFactor }
     public var barSize: CGSize { panel.frame.size }
+    /// Panel frame in global AppKit coordinates (for popup anchoring).
+    public var panelFrame: CGRect { panel.frame }
 
     /// Recompute the window frame and appearance from bar settings.
     public func apply(settings: BarSettings, screen: NSScreen) {

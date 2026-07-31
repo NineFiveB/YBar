@@ -3,9 +3,10 @@ import CoreText
 import simd
 
 /// Traverses the item tree + layout result into a flat, paint-ordered DisplayList
-/// in device pixels. Paint order: bar background → per item (shadow, background,
-/// icon, label). Re-encoding the full bar every dirty frame is microseconds; damage
-/// tracking gates *whether* a frame renders, never what is drawn.
+/// in device pixels. Paint order: bar background → bracket backgrounds (behind
+/// members) → per item (shadow, background, icon, sandwich content, label).
+/// Re-encoding the full bar every dirty frame is microseconds; damage tracking
+/// gates *whether* a frame renders, never what is drawn.
 @MainActor
 public final class SceneBuilder {
     let fontCache: FontCache
@@ -13,6 +14,8 @@ public final class SceneBuilder {
     public init(fontCache: FontCache) {
         self.fontCache = fontCache
     }
+
+    // MARK: - Bar scene
 
     public func build(
         items: [Item],
@@ -41,18 +44,103 @@ public final class SceneBuilder {
         }
         list.quads.append(barQuad)
 
+        // Brackets: derived backgrounds spanning their members, painted first so
+        // they sit behind member content (paint order replaces window z-order).
+        for item in items where item.kind == .bracket && item.drawing {
+            let memberBoxes = item.members.compactMap { name -> CGRect? in
+                guard let member = items.first(where: { $0.name == name }) else { return nil }
+                return contentBoxes[member.id]
+            }
+            guard let union = ComponentGeometry.bracketUnion(
+                memberBoxes: memberBoxes,
+                paddingLeft: CGFloat(item.paddingLeft),
+                paddingRight: CGFloat(item.paddingRight))
+            else { continue }
+            item.frame = union
+            let height = item.background.height > 0
+                ? CGFloat(item.background.height)
+                : barSize.height - 4
+            let rect = CGRect(
+                x: union.minX + CGFloat(item.background.xOffset),
+                y: barSize.height / 2 - height / 2 - CGFloat(item.yOffset) - CGFloat(item.background.yOffset),
+                width: union.width,
+                height: height)
+            emitBackground(item.background, rect: rect, scale: scale, into: &list)
+        }
+
         for item in items {
-            guard item.isVisible, let contentBox = contentBoxes[item.id], contentBox.width > 0 || item.customWidth >= 0 else { continue }
-            emit(item: item, contentBox: contentBox, barSize: barSize, scale: scale, atlas: atlas, into: &list)
+            guard item.kind != .bracket, item.isVisible, item.isInBarFlow,
+                  let contentBox = contentBoxes[item.id],
+                  contentBox.width > 0 || item.customWidth >= 0 else { continue }
+            emit(item: item, contentBox: contentBox, scale: scale, atlas: atlas, into: &list)
         }
 
         return list
     }
 
+    // MARK: - Popup scene
+
+    public struct PopupScene {
+        public var list = DisplayList()
+        /// Popup-local hit frames.
+        public var itemFrames: [(itemID: Int, frame: CGRect)] = []
+        /// Panel content size in points.
+        public var sizePoints: CGSize = .zero
+    }
+
+    /// Vertical (or horizontal) stack of the host's popup members.
+    public func buildPopup(
+        host: Item,
+        members: [Item],
+        scale: CGFloat,
+        atlas: GlyphAtlas
+    ) -> PopupScene {
+        var scene = PopupScene()
+        let visible = members.filter { $0.drawing }
+        guard !visible.isEmpty else { return scene }
+
+        let rows = visible.map { member -> (itemID: Int, size: CGSize, paddingLeft: CGFloat, paddingRight: CGFloat) in
+            let iconSize = fontCache.measure(part: member.icon)
+            let labelSize = fontCache.measure(part: member.label)
+            let measured = MeasuredContent(iconSize: iconSize, labelSize: labelSize)
+            let width = Layout.contentLength(item: member, measured: measured)
+            let contentHeight = max(iconSize.height, labelSize.height, CGFloat(member.background.height))
+            return (member.id, CGSize(width: width, height: max(contentHeight + 8, 22)),
+                    CGFloat(member.paddingLeft), CGFloat(member.paddingRight))
+        }
+
+        let layout = ComponentGeometry.popupLayout(
+            rows: rows,
+            cellHeight: CGFloat(host.popup.cellHeight),
+            horizontal: host.popup.horizontal,
+            inset: 6)
+        scene.sizePoints = layout.contentSize
+
+        // Panel background.
+        emitBackground(
+            host.popup.background,
+            rect: CGRect(origin: .zero, size: layout.contentSize),
+            scale: scale,
+            forceHeight: true,
+            into: &scene.list)
+
+        for member in visible {
+            guard let box = layout.boxes[member.id] else { continue }
+            scene.itemFrames.append((member.id, CGRect(
+                x: box.minX - CGFloat(member.paddingLeft),
+                y: box.minY,
+                width: box.width + CGFloat(member.paddingLeft) + CGFloat(member.paddingRight),
+                height: box.height)))
+            emit(item: member, contentBox: box, scale: scale, atlas: atlas, into: &scene.list)
+        }
+        return scene
+    }
+
+    // MARK: - Item emission
+
     private func emit(
         item: Item,
         contentBox: CGRect,
-        barSize: CGSize,
         scale: CGFloat,
         atlas: GlyphAtlas,
         into list: inout DisplayList
@@ -61,57 +149,26 @@ public final class SceneBuilder {
         let labelSize = fontCache.measure(part: item.label)
         let contentHeight = max(iconSize.height, labelSize.height)
         // y_offset is positive-up (sketchybar convention); our coordinates are y-down.
-        let centerY = barSize.height / 2 - CGFloat(item.yOffset)
+        let centerY = contentBox.midY - CGFloat(item.yOffset)
 
         // Background + shadow.
         if item.background.drawing {
             let backgroundHeight = item.background.height > 0
                 ? CGFloat(item.background.height)
-                : min(barSize.height, contentHeight + 8)
+                : min(contentBox.height, contentHeight + 8)
             let backgroundRect = CGRect(
                 x: contentBox.minX + CGFloat(item.background.xOffset),
                 y: centerY - backgroundHeight / 2 - CGFloat(item.background.yOffset),
                 width: contentBox.width,
                 height: backgroundHeight)
-            let radius = Float(item.background.cornerRadius) * Float(scale)
-            let radii = SIMD4<Float>(repeating: radius)
-
-            if item.background.shadow.drawing {
-                let offset = item.background.shadow.offset
-                let shadowRect = backgroundRect.offsetBy(dx: offset.width, dy: -offset.height)
-                list.quads.append(QuadInstance(
-                    origin: SceneBuilder.pixelOrigin(shadowRect, scale: scale),
-                    size: SceneBuilder.pixelSize(shadowRect, scale: scale),
-                    radii: radii,
-                    fill: item.background.shadow.color.simd))
-            }
-
-            var quad = QuadInstance(
-                origin: SceneBuilder.pixelOrigin(backgroundRect, scale: scale),
-                size: SceneBuilder.pixelSize(backgroundRect, scale: scale),
-                radii: radii,
-                fill: item.background.color.simd,
-                borderWidth: item.background.borderWidth * Float(scale),
-                cornerExponent: item.background.cornerExponent,
-                borderColor: item.background.borderColor.simd)
-            if let gradient = item.background.gradientColor {
-                quad.fill2 = gradient.simd
-                quad.gradientDir = SceneBuilder.gradientDirection(angleDegrees: item.background.gradientAngle)
-                quad.flags |= QuadInstance.flagGradient
-            }
-            list.quads.append(quad)
+            emitBackground(item.background, rect: backgroundRect, scale: scale, into: &list)
         }
 
         // Fixed-width alignment slack.
         var penX = contentBox.minX
         if item.customWidth >= 0 {
-            var natural: CGFloat = 0
-            if item.icon.drawing, !item.icon.string.isEmpty {
-                natural += CGFloat(item.icon.paddingLeft) + iconSize.width + CGFloat(item.icon.paddingRight)
-            }
-            if item.label.drawing, !item.label.string.isEmpty {
-                natural += CGFloat(item.label.paddingLeft) + labelSize.width + CGFloat(item.label.paddingRight)
-            }
+            let natural = Layout.naturalLength(
+                item: item, measured: MeasuredContent(iconSize: iconSize, labelSize: labelSize))
             let slack = max(0, CGFloat(item.customWidth) - natural)
             switch item.align {
             case "c": penX += slack / 2
@@ -121,22 +178,31 @@ public final class SceneBuilder {
         }
 
         // Fixed-width items clip their content to the content box: width
-        // animations must be a clipped reveal, never overprint neighbors
-        // (sketchybar had this for free from per-item windows).
+        // animations must be a clipped reveal, never overprint neighbors.
         let clip: CGRect? = item.customWidth >= 0
             ? CGRect(
                 x: (contentBox.minX * scale).rounded(),
-                y: 0,
+                y: (contentBox.minY * scale).rounded(),
                 width: (contentBox.width * scale).rounded(),
-                height: (barSize.height * scale).rounded())
+                height: (contentBox.height * scale).rounded())
             : nil
 
-        // Icon, then label.
+        // Icon, sandwich content, then label.
         if item.icon.drawing, !item.icon.string.isEmpty {
             penX += CGFloat(item.icon.paddingLeft)
             emitText(part: item.icon, penX: penX, centerY: centerY,
                      scale: scale, atlas: atlas, clip: clip, into: &list)
             penX += iconSize.width + CGFloat(item.icon.paddingRight)
+        }
+        if let graph = item.graph {
+            emitGraph(graph, item: item, penX: penX, contentBox: contentBox,
+                      centerY: centerY, scale: scale, into: &list)
+            penX += CGFloat(graph.capacity)
+        }
+        if let slider = item.slider {
+            emitSlider(slider, penX: penX, centerY: centerY,
+                       scale: scale, atlas: atlas, clip: clip, into: &list)
+            penX += CGFloat(slider.width)
         }
         if item.label.drawing, !item.label.string.isEmpty {
             penX += CGFloat(item.label.paddingLeft)
@@ -145,6 +211,116 @@ public final class SceneBuilder {
         }
         // TODO(v1.5): per-part backgrounds (icon.background.* / label.background.*).
     }
+
+    // MARK: - Components
+
+    private func emitGraph(
+        _ graph: GraphState,
+        item: Item,
+        penX: CGFloat,
+        contentBox: CGRect,
+        centerY: CGFloat,
+        scale: CGFloat,
+        into list: inout DisplayList
+    ) {
+        let height = item.background.height > 0
+            ? CGFloat(item.background.height)
+            : contentBox.height - 2
+        let box = CGRect(
+            x: penX * scale,
+            y: (centerY - height / 2) * scale,
+            width: CGFloat(graph.capacity) * scale,
+            height: height * scale)
+        let rightToLeft = item.position == .right || item.position == .centerLeft
+        let tessellation = ComponentGeometry.tessellateGraph(
+            samples: graph.ordered(),
+            box: box,
+            lineWidth: CGFloat(graph.lineWidth) * scale,
+            rightToLeft: rightToLeft)
+
+        let fillColor = graph.effectiveFillColor.simd
+        let lineColor = graph.lineColor.simd
+        list.triangles.append(contentsOf: tessellation.fill.map { ShapeVertex(position: $0, color: fillColor) })
+        list.triangles.append(contentsOf: tessellation.line.map { ShapeVertex(position: $0, color: lineColor) })
+    }
+
+    private func emitSlider(
+        _ slider: SliderState,
+        penX: CGFloat,
+        centerY: CGFloat,
+        scale: CGFloat,
+        atlas: GlyphAtlas,
+        clip: CGRect?,
+        into list: inout DisplayList
+    ) {
+        let trackHeight = CGFloat(slider.background.height > 0 ? slider.background.height : 6)
+        let track = CGRect(
+            x: penX,
+            y: centerY - trackHeight / 2,
+            width: CGFloat(slider.width),
+            height: trackHeight)
+        emitBackground(slider.background, rect: track, scale: scale, forceHeight: true, into: &list)
+
+        let fraction = CGFloat(min(100, max(0, slider.percentage))) / 100
+        if fraction > 0 {
+            let highlight = CGRect(x: track.minX, y: track.minY,
+                                   width: track.width * fraction, height: track.height)
+            list.quads.append(QuadInstance(
+                origin: SceneBuilder.pixelOrigin(highlight, scale: scale),
+                size: SceneBuilder.pixelSize(highlight, scale: scale),
+                radii: SIMD4(repeating: slider.background.cornerRadius * Float(scale)),
+                fill: slider.highlightColor.simd))
+        }
+
+        if !slider.knob.string.isEmpty {
+            let knobSize = fontCache.measure(part: slider.knob)
+            let knobCenterX = track.minX + track.width * fraction
+            let knobX = min(max(knobCenterX - knobSize.width / 2, track.minX),
+                            track.maxX - knobSize.width)
+            emitText(part: slider.knob, penX: knobX, centerY: centerY,
+                     scale: scale, atlas: atlas, clip: clip, into: &list)
+        }
+    }
+
+    /// Shared rounded-rect background + hard shadow emission.
+    private func emitBackground(
+        _ background: BackgroundStyle,
+        rect: CGRect,
+        scale: CGFloat,
+        forceHeight: Bool = false,
+        into list: inout DisplayList
+    ) {
+        guard background.drawing || forceHeight else { return }
+        let radius = background.cornerRadius * Float(scale)
+        let radii = SIMD4<Float>(repeating: radius)
+
+        if background.shadow.drawing {
+            let offset = background.shadow.offset
+            let shadowRect = rect.offsetBy(dx: offset.width, dy: -offset.height)
+            list.quads.append(QuadInstance(
+                origin: SceneBuilder.pixelOrigin(shadowRect, scale: scale),
+                size: SceneBuilder.pixelSize(shadowRect, scale: scale),
+                radii: radii,
+                fill: background.shadow.color.simd))
+        }
+
+        var quad = QuadInstance(
+            origin: SceneBuilder.pixelOrigin(rect, scale: scale),
+            size: SceneBuilder.pixelSize(rect, scale: scale),
+            radii: radii,
+            fill: background.color.simd,
+            borderWidth: background.borderWidth * Float(scale),
+            cornerExponent: background.cornerExponent,
+            borderColor: background.borderColor.simd)
+        if let gradient = background.gradientColor {
+            quad.fill2 = gradient.simd
+            quad.gradientDir = SceneBuilder.gradientDirection(angleDegrees: background.gradientAngle)
+            quad.flags |= QuadInstance.flagGradient
+        }
+        list.quads.append(quad)
+    }
+
+    // MARK: - Text
 
     private func emitText(
         part: TextPart,

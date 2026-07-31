@@ -204,6 +204,19 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                     "MODIFIER": modifier,
                 ])
         }
+        barManager.onSliderChanged = { [weak self] item, percentage in
+            guard let self else { return }
+            let environment = [
+                "NAME": item.name,
+                "PERCENTAGE": "\(Int(percentage.rounded()))",
+                "BUTTON": "left",
+                "MODIFIER": "none",
+            ]
+            if !item.clickScript.isEmpty {
+                self.scriptRunner.run(script: item.clickScript, environment: environment)
+            }
+            self.triggerTargeted(item: item, eventName: "mouse.clicked", environment: environment)
+        }
     }
 
     /// Mouse events route only to the involved item (sketchybar semantics),
