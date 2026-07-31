@@ -122,6 +122,12 @@ public struct TextPart: Equatable, Sendable {
     public var paddingRight: Float = 0
     public var yOffset: Float = 0
     public var maxChars: Int = 0
+    /// Fixed width override (-1 = natural width). Content aligns per `align`
+    /// and clips to the box — the substrate of sketchybar's hover-reveal idiom
+    /// (`label.width` animating 0 ↔ dynamic).
+    public var customWidth: Float = -1
+    /// Content alignment within a fixed width: l/c/r.
+    public var align: Character = "l"
     public var background = BackgroundStyle()
     public var shadow = ShadowStyle()
 

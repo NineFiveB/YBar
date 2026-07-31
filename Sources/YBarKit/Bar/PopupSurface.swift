@@ -46,24 +46,22 @@ public final class PopupSurface {
 
     /// Place and show the panel. `anchor` is the host item's frame in global
     /// AppKit coordinates (bottom-left origin, y-up); the popup hangs below it
-    /// for a top bar and sits above it for a bottom bar.
-    public func present(anchor: CGRect, size: CGSize, barPosition: BarPosition, yOffset: CGFloat) {
-        let frame: CGRect
-        switch barPosition {
-        case .top:
-            frame = CGRect(
-                x: anchor.minX,
-                y: anchor.minY - size.height - yOffset,
-                width: size.width,
-                height: size.height)
-        case .bottom:
-            frame = CGRect(
-                x: anchor.minX,
-                y: anchor.maxY + yOffset,
-                width: size.width,
-                height: size.height)
+    /// for a top bar and sits above it for a bottom bar. `align` anchors the
+    /// panel's left/center/right edge against the host.
+    public func present(anchor: CGRect, size: CGSize, barPosition: BarPosition,
+                        yOffset: CGFloat, align: Character) {
+        let x: CGFloat
+        switch align {
+        case "c": x = anchor.midX - size.width / 2
+        case "r": x = anchor.maxX - size.width
+        default: x = anchor.minX
         }
-        panel.setFrame(frame, display: true)
+        let y: CGFloat
+        switch barPosition {
+        case .top: y = anchor.minY - size.height - yOffset
+        case .bottom: y = anchor.maxY + yOffset
+        }
+        panel.setFrame(CGRect(x: x, y: y, width: size.width, height: size.height), display: true)
         hostView.updateDrawableSize()
         panel.orderFrontRegardless()
     }

@@ -47,9 +47,8 @@ public final class SceneBuilder {
         // Brackets: derived backgrounds spanning their members, painted first so
         // they sit behind member content (paint order replaces window z-order).
         for item in items where item.kind == .bracket && item.drawing {
-            let memberBoxes = item.members.compactMap { name -> CGRect? in
-                guard let member = items.first(where: { $0.name == name }) else { return nil }
-                return contentBoxes[member.id]
+            let memberBoxes = ComponentGeometry.expandMembers(item.members, in: items).compactMap {
+                contentBoxes[$0.id]
             }
             guard let union = ComponentGeometry.bracketUnion(
                 memberBoxes: memberBoxes,
@@ -336,6 +335,28 @@ public final class SceneBuilder {
         guard !text.isEmpty else { return }
         let color = part.effectiveColor.simd
         let partCenterY = centerY - CGFloat(part.yOffset)
+
+        // Fixed-width parts align their content in the box and clip to it —
+        // the substrate of the hover-reveal idiom (width animating 0↔natural).
+        var penX = penX
+        var clip = clip
+        if part.customWidth >= 0 {
+            let natural = fontCache.naturalMeasure(part: part).width
+            let slack = CGFloat(part.customWidth) - natural
+            let boxOrigin = penX
+            switch part.align {
+            case "c": penX += max(0, slack) / 2
+            case "r": penX += max(0, slack)
+            default: break
+            }
+            let partBox = CGRect(
+                x: (boxOrigin * scale).rounded(),
+                y: 0,
+                width: (CGFloat(part.customWidth) * scale).rounded(),
+                height: .greatestFiniteMagnitude / 2)
+            clip = clip.map { $0.intersection(partBox) } ?? partBox
+            if clip?.isEmpty == true { return }
+        }
 
         if let symbolName = FontCache.sfSymbolName(in: text) {
             guard let image = fontCache.symbolImage(name: symbolName, pointSize: CGFloat(part.font.size)),

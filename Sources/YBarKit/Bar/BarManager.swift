@@ -46,6 +46,9 @@ public final class BarManager {
     public var onSliderChanged: ((Item, Float) -> Void)?
     /// A slider drag began (the daemon cancels in-flight percentage animations).
     public var onSliderDragStarted: ((Item) -> Void)?
+    /// The pointer left every YBar window (bar + popups) — `mouse.exited.global`.
+    public var onGlobalMouseExit: (() -> Void)?
+    private var pointerInsideSurfaces = Set<ObjectIdentifier>()
 
     public init() throws {
         guard let metalDevice = MTLCreateSystemDefaultDevice() else {
@@ -183,7 +186,8 @@ public final class BarManager {
                 anchor: anchor,
                 size: scene.sizePoints,
                 barPosition: settings.position,
-                yOffset: CGFloat(host.popup.yOffset))
+                yOffset: CGFloat(host.popup.yOffset),
+                align: host.popup.align)
             if renderer.render(list: scene.list, layer: popupSurface.hostView.metalLayer, atlas: atlas) {
                 liveHostIDs.insert(host.id)
             } else {
@@ -192,6 +196,7 @@ public final class BarManager {
         }
 
         for (hostID, popupSurface) in popupSurfaces where !liveHostIDs.contains(hostID) {
+            pointerInsideSurfaces.remove(ObjectIdentifier(popupSurface))
             popupSurface.close()
             popupSurfaces.removeValue(forKey: hostID)
         }
@@ -210,6 +215,7 @@ public final class BarManager {
                 onItemClicked?(item, info)
             }
         case .moved:
+            pointerInsideSurfaces.insert(ObjectIdentifier(popup))
             let hovered = member(at: info.point)
             guard popup.hoveredItemID != hovered?.id else { return }
             if let previousID = popup.hoveredItemID,
@@ -223,12 +229,14 @@ public final class BarManager {
                 onItemHover?(hovered, true)
             }
         case .exited:
+            pointerInsideSurfaces.remove(ObjectIdentifier(popup))
             if let previousID = popup.hoveredItemID,
                let previous = store.items.first(where: { $0.id == previousID }) {
                 previous.mouseOver = false
                 onItemHover?(previous, false)
             }
             popup.hoveredItemID = nil
+            scheduleGlobalExitCheck()
         default:
             break
         }
@@ -327,6 +335,11 @@ public final class BarManager {
         return Float(Layout.naturalLength(item: item, measured: measured))
     }
 
+    /// Natural width of one text part (`icon.width=dynamic` / `label.width=dynamic`).
+    public func naturalTextWidth(of item: Item, icon: Bool) -> Float {
+        Float(fontCache.naturalMeasure(part: icon ? item.icon : item.label).width)
+    }
+
     /// Items associated with a surface's display (mask bit i-1 = display i; 0 = all).
     /// `display=active` items appear only on the screen holding keyboard focus
     /// (public-API approximation of sketchybar's active-display tracking).
@@ -393,10 +406,22 @@ public final class BarManager {
                 onItemScrolled?(item, info.scrollDelta, info.modifier)
             }
         case .moved:
+            pointerInsideSurfaces.insert(ObjectIdentifier(surface))
             let hovered = hitTest(point: info.point, on: surface)
             updateHover(surface: surface, to: hovered)
         case .exited:
+            pointerInsideSurfaces.remove(ObjectIdentifier(surface))
             updateHover(surface: surface, to: nil)
+            scheduleGlobalExitCheck()
+        }
+    }
+
+    /// Debounced: crossing from the bar into its popup must not fire a global
+    /// exit — only the pointer leaving every YBar window does.
+    private func scheduleGlobalExitCheck() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self, self.pointerInsideSurfaces.isEmpty else { return }
+            self.onGlobalMouseExit?()
         }
     }
 

@@ -38,6 +38,9 @@ public final class CommandHandler {
             invalidate: { [weak barManager] in barManager?.setNeedsRender() },
             measureNaturalWidth: { [weak barManager] item in
                 barManager?.naturalWidth(of: item) ?? 0
+            },
+            measureTextNaturalWidth: { [weak barManager] item, icon in
+                barManager?.naturalTextWidth(of: item, icon: icon) ?? 0
             })
 
         func emit(_ line: String?) {
@@ -86,8 +89,9 @@ public final class CommandHandler {
                     emit("[!] --set needs an item name")
                     continue
                 }
-                guard let item = barManager.store.item(named: name) else {
-                    emit("[!] no item named \(name)")
+                let targets = barManager.store.items(matching: name)
+                guard !targets.isEmpty else {
+                    emit("[!] no item matching \(name)")
                     continue
                 }
                 for token in batch.args.dropFirst() {
@@ -95,7 +99,9 @@ public final class CommandHandler {
                         emit("[!] expected key=value, got: \(token)")
                         continue
                     }
-                    emit(PropertySetter.set(item: item, property: key, value: value, context: context))
+                    for item in targets {
+                        emit(PropertySetter.set(item: item, property: key, value: value, context: context))
+                    }
                 }
 
             case "subscribe":
@@ -178,8 +184,12 @@ public final class CommandHandler {
                     emit("[!] --remove needs an item name")
                     continue
                 }
-                if !barManager.store.remove(name: name) {
-                    emit("[!] no item named \(name)")
+                let targets = barManager.store.items(matching: name)
+                if targets.isEmpty {
+                    emit("[!] no item matching \(name)")
+                }
+                for item in targets {
+                    _ = barManager.store.remove(name: item.name)
                 }
                 barManager.setNeedsRender()
 
@@ -242,7 +252,9 @@ public final class CommandHandler {
         case "bracket":
             guard args.count >= 3 else { return "[!] usage: --add bracket <name> <member>..." }
             let members = Array(args.dropFirst(2))
-            let missing = members.filter { barManager.store.item(named: $0) == nil }
+            let missing = members.filter {
+                !$0.hasPrefix("/") && barManager.store.item(named: $0) == nil
+            }
             guard missing.isEmpty else { return "[!] unknown bracket members: \(missing.joined(separator: ", "))" }
             guard let item = barManager.store.add(name: args[1], position: .left) else {
                 return "[!] item \(args[1]) already exists"

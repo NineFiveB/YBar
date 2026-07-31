@@ -31,7 +31,7 @@ import Testing
         #expect(ran)
     }
 
-    @Test func whenShownSuppressesHiddenItems() {
+    @Test func whenShownGatesOnDrawingNotContent() {
         let bus = EventBus()
         let item = makeSubscribedItem(bus)
         bus.itemsProvider = { [item] }
@@ -43,7 +43,10 @@ import Testing
         bus.trigger(name: "volume_change", info: "50")
         #expect(!ran)
 
+        // Empty content but drawing=on must still receive updates (the update
+        // is what populates the item — sketchybar semantics).
         item.drawing = true
+        item.label.string = ""
         bus.trigger(name: "volume_change", info: "50")
         #expect(ran)
     }

@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 /// What an item fundamentally is. sketchybar's one-char type tags, typed.
 public enum ItemKind: String, Sendable {
@@ -80,6 +81,8 @@ public struct PopupState: Sendable {
     /// Close when the user clicks anywhere outside YBar (YBar extension;
     /// `popup.auto_close=off` restores sketchybar's script-only lifecycle).
     public var autoClose = true
+    /// Horizontal anchoring against the host item: l/c/r.
+    public var align: Character = "l"
     public var background = BackgroundStyle()
 
     public init() {
@@ -100,9 +103,8 @@ public enum ComponentGeometry {
     ) -> [Int: CGRect] {
         var frames: [Int: CGRect] = [:]
         for item in items where item.kind == .bracket && item.drawing {
-            let memberBoxes = item.members.compactMap { name -> CGRect? in
-                guard let member = items.first(where: { $0.name == name }) else { return nil }
-                return contentBoxes[member.id]
+            let memberBoxes = expandMembers(item.members, in: items).compactMap {
+                contentBoxes[$0.id]
             }
             if let union = bracketUnion(
                 memberBoxes: memberBoxes,
@@ -114,6 +116,30 @@ public enum ComponentGeometry {
             }
         }
         return frames
+    }
+
+    /// Expand bracket member entries (names or sketchybar `/regex/` patterns).
+    @MainActor
+    public static func expandMembers(_ members: [String], in items: [Item]) -> [Item] {
+        var seen = Set<Int>()
+        var result: [Item] = []
+        for entry in members {
+            if entry.count > 2, entry.hasPrefix("/"), entry.hasSuffix("/") {
+                let pattern = String(entry.dropFirst().dropLast())
+                guard let regex = try? NSRegularExpression(pattern: "^(\(pattern))$") else { continue }
+                for item in items where !seen.contains(item.id) {
+                    let range = NSRange(item.name.startIndex..., in: item.name)
+                    if regex.firstMatch(in: item.name, options: [], range: range) != nil {
+                        seen.insert(item.id)
+                        result.append(item)
+                    }
+                }
+            } else if let item = items.first(where: { $0.name == entry }), !seen.contains(item.id) {
+                seen.insert(item.id)
+                result.append(item)
+            }
+        }
+        return result
     }
 
     /// Bracket background box: the union of member content boxes, expanded by

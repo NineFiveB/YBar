@@ -17,15 +17,19 @@ public struct PropertyContext {
     /// Measured natural content width of an item — resolves the `width=dynamic`
     /// -1 sentinel to a real value at animation endpoints.
     public var measureNaturalWidth: ((Item) -> Float)?
+    /// Same for one text part (`icon.width` / `label.width`); second arg = isIcon.
+    public var measureTextNaturalWidth: ((Item, Bool) -> Float)?
 
     public init(scheduler: AnimationScheduler,
                 animation: (curve: AnimationCurve, durationFrames: Int)? = nil,
                 invalidate: @escaping () -> Void,
-                measureNaturalWidth: ((Item) -> Float)? = nil) {
+                measureNaturalWidth: ((Item) -> Float)? = nil,
+                measureTextNaturalWidth: ((Item, Bool) -> Float)? = nil) {
         self.scheduler = scheduler
         self.animation = animation
         self.invalidate = invalidate
         self.measureNaturalWidth = measureNaturalWidth
+        self.measureTextNaturalWidth = measureTextNaturalWidth
     }
 }
 
@@ -45,9 +49,9 @@ public enum PropertySetter {
         let rest = path.dropFirst()
         switch head {
         case "icon":
-            return setText(item, \Item.icon, "icon", rest, value, ctx)
+            return setText(item, \Item.icon, "icon", rest, value, ctx, isIcon: true)
         case "label":
-            return setText(item, \Item.label, "label", rest, value, ctx)
+            return setText(item, \Item.label, "label", rest, value, ctx, isIcon: false)
         case "background":
             return setBackground(item, \Item.background, "background", rest, value, ctx)
         case "position":
@@ -88,6 +92,10 @@ public enum PropertySetter {
             return setFloat(item, \Item.paddingRight, "padding_right", value, ctx)
         case "display":
             return setDisplayAssociation(item, value, ctx)
+        case "scroll_texts", "blur_radius", "padding_top", "padding_bottom",
+             "space", "associated_space", "ignore_association", "mach_helper", "shadow":
+            // Accepted-and-ignored for sketchybar config compatibility.
+            return nil
         case "graph":
             return setGraph(item, rest, value, ctx)
         case "slider":
@@ -144,6 +152,15 @@ public enum PropertySetter {
                 return nil
             }
             switch rest.first {
+            case "string":
+                slider.knob.string = value
+                ctx.invalidate()
+                return nil
+            case "drawing":
+                guard let flag = parseBool(value) else { return "[!] invalid boolean: \(value)" }
+                slider.knob.drawing = flag
+                ctx.invalidate()
+                return nil
             case "color":
                 return setColorValue(key: "item.\(item.id).slider.knob.color",
                                      current: slider.knob.color,
@@ -205,6 +222,13 @@ public enum PropertySetter {
             item.popup.autoClose = flag
             ctx.invalidate()
             return nil
+        case "align":
+            guard let first = value.first, "lcr".contains(first) else { return "[!] invalid align: \(value)" }
+            item.popup.align = first
+            ctx.invalidate()
+            return nil
+        case "blur_radius", "topmost":
+            return nil
         case "height":
             return setFloatValue(key: "item.\(item.id).popup.height", current: item.popup.cellHeight,
                                  value: value, ctx: ctx) { [weak item] in item?.popup.cellHeight = $0 }
@@ -229,6 +253,9 @@ public enum PropertySetter {
                 return setFloatValue(key: "item.\(item.id).popup.background.border_width",
                                      current: item.popup.background.borderWidth,
                                      value: value, ctx: ctx) { [weak item] in item?.popup.background.borderWidth = $0 }
+            case "shadow", "image":
+                // Panel shadow comes from the window; images unsupported. Ignore.
+                return nil
             default:
                 return "[?] unknown property: popup.background.\(rest.joined(separator: "."))"
             }
@@ -289,7 +316,8 @@ public enum PropertySetter {
         _ prefix: String,
         _ path: ArraySlice<Substring>,
         _ value: String,
-        _ ctx: PropertyContext
+        _ ctx: PropertyContext,
+        isIcon: Bool = false
     ) -> String? {
         guard let head = path.first else {
             // Bare `icon=...` / `label=...` sets the string.
@@ -327,6 +355,15 @@ public enum PropertySetter {
             item[keyPath: base.appending(path: \TextPart.maxChars)] = count
             ctx.invalidate()
             return nil
+        case "width":
+            return setTextWidth(item, base, prefix, isIcon, value, ctx)
+        case "align":
+            guard let first = value.first, "lcr".contains(first) else { return "[!] invalid align: \(value)" }
+            item[keyPath: base.appending(path: \TextPart.align)] = first
+            ctx.invalidate()
+            return nil
+        case "scroll_duration":
+            return nil
         case "background":
             return setBackground(item, base.appending(path: \TextPart.background),
                                  "\(prefix).background", rest, value, ctx)
@@ -363,6 +400,8 @@ public enum PropertySetter {
             return nil
         case "size":
             return setFloat(item, base.appending(path: \FontSpec.size), "\(prefix).size", value, ctx)
+        case "features":
+            return nil
         default:
             return "[?] unknown property: \(prefix).\(path.joined(separator: "."))"
         }
@@ -406,6 +445,9 @@ public enum PropertySetter {
             return setFloat(item, base.appending(path: \BackgroundStyle.xOffset), "\(prefix).x_offset", value, ctx)
         case "y_offset":
             return setFloat(item, base.appending(path: \BackgroundStyle.yOffset), "\(prefix).y_offset", value, ctx)
+        case "image", "clip":
+            // Background images / bar clipping are not in YBar v1; ignore quietly.
+            return nil
         case "gradient_color":
             guard let color = YColor.parse(value) else { return "[!] invalid color: \(value)" }
             item[keyPath: base.appending(path: \BackgroundStyle.gradientColor)] = color
@@ -449,6 +491,50 @@ public enum PropertySetter {
         default:
             return "[?] unknown property: \(prefix).\(path.joined(separator: "."))"
         }
+    }
+
+    /// Text-part `width` with the same dynamic-sentinel resolution as item width.
+    private static func setTextWidth(
+        _ item: Item,
+        _ base: ReferenceWritableKeyPath<Item, TextPart>,
+        _ prefix: String,
+        _ isIcon: Bool,
+        _ value: String,
+        _ ctx: PropertyContext
+    ) -> String? {
+        let widthPath = base.appending(path: \TextPart.customWidth)
+        let animationKey = "item.\(item.id).\(prefix).width"
+        if value == "dynamic" {
+            if let animation = ctx.animation, animation.durationFrames > 0,
+               item[keyPath: widthPath] >= 0, let measure = ctx.measureTextNaturalWidth {
+                let invalidate = ctx.invalidate
+                ctx.scheduler.animate(
+                    key: animationKey,
+                    from: .float(item[keyPath: widthPath]),
+                    to: .float(measure(item, isIcon)),
+                    durationFrames: animation.durationFrames,
+                    curve: animation.curve,
+                    apply: { [weak item] animValue in
+                        guard case .float(let current) = animValue else { return }
+                        item?[keyPath: widthPath] = current
+                        invalidate()
+                    },
+                    onComplete: { [weak item] in
+                        item?[keyPath: widthPath] = -1
+                        invalidate()
+                    })
+                return nil
+            }
+            ctx.scheduler.cancel(key: animationKey)
+            item[keyPath: widthPath] = -1
+            ctx.invalidate()
+            return nil
+        }
+        if let animation = ctx.animation, animation.durationFrames > 0,
+           item[keyPath: widthPath] < 0, let measure = ctx.measureTextNaturalWidth {
+            item[keyPath: widthPath] = measure(item, isIcon)
+        }
+        return setFloat(item, widthPath, "\(prefix).width", value, ctx)
     }
 
     // MARK: - Width (dynamic sentinel handling)

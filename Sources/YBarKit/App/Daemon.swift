@@ -187,6 +187,9 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                 name: "display_change",
                 info: "\(DisplayManager.screens().count)")
         }
+        barManager.onGlobalMouseExit = { [weak self] in
+            self?.eventBus.trigger(name: "mouse.exited.global")
+        }
     }
 
     private func wireMouse() {
@@ -340,7 +343,7 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
             guard item.updateFrequency > 0,
                   !item.script.isEmpty || item.hasLuaHandlers else { continue }
             if item.updatePolicy == .off { continue }
-            if item.updatePolicy == .whenShown, !item.isVisible { continue }
+            if item.updatePolicy == .whenShown, !item.drawing { continue }
             item.routineCounter += 1
             if item.routineCounter >= item.updateFrequency {
                 item.routineCounter = 0

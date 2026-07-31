@@ -61,8 +61,18 @@ public final class FontCache {
         return configured
     }
 
-    /// Measured size of one text part (layout units, points).
+    /// Measured size of one text part (layout units, points). A fixed
+    /// `customWidth` overrides the natural width (content clips/aligns inside).
     public func measure(part: TextPart) -> CGSize {
+        let natural = naturalMeasure(part: part)
+        if part.customWidth >= 0 {
+            return CGSize(width: CGFloat(part.customWidth), height: natural.height)
+        }
+        return natural
+    }
+
+    /// Natural (unclamped) size of the part's content.
+    public func naturalMeasure(part: TextPart) -> CGSize {
         let text = part.displayString
         guard !text.isEmpty else { return .zero }
         if let symbolName = FontCache.sfSymbolName(in: text) {

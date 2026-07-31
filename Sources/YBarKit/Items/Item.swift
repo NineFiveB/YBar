@@ -117,6 +117,34 @@ public final class ItemStore {
         items.first { $0.name == name }
     }
 
+    /// Items matching an exact name or a `/regex/` pattern (sketchybar's
+    /// regex-targeting convention, anchored to the full name).
+    public func items(matching target: String) -> [Item] {
+        if target.count > 2, target.hasPrefix("/"), target.hasSuffix("/") {
+            let pattern = String(target.dropFirst().dropLast())
+            guard let regex = try? NSRegularExpression(pattern: "^(\(pattern))$") else { return [] }
+            return items.filter { item in
+                regex.firstMatch(
+                    in: item.name, options: [],
+                    range: NSRange(item.name.startIndex..., in: item.name)) != nil
+            }
+        }
+        return item(named: target).map { [$0] } ?? []
+    }
+
+    /// Expand bracket member entries (names or `/regex/` patterns) into items.
+    public func expandMembers(_ members: [String]) -> [Item] {
+        var seen = Set<Int>()
+        var result: [Item] = []
+        for entry in members {
+            for item in items(matching: entry) where !seen.contains(item.id) {
+                seen.insert(item.id)
+                result.append(item)
+            }
+        }
+        return result
+    }
+
     /// Add an item; returns nil if the name is already taken.
     @discardableResult
     public func add(name: String, position: ItemPosition) -> Item? {

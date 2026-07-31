@@ -17,7 +17,7 @@ public final class EventBus {
         "system_woke", "system_will_sleep",
         "mouse.entered", "mouse.exited", "mouse.clicked", "mouse.scrolled",
         "volume_change", "power_source_change", "battery_change", "wifi_change",
-        "system_stats",
+        "system_stats", "mouse.exited.global",
     ]
 
     public private(set) var definitions: [EventDefinition] = []
@@ -86,7 +86,9 @@ public final class EventBus {
         for item in items where item.updateMask & bit != 0
             && (!item.script.isEmpty || item.hasLuaHandlers) {
             if item.updatePolicy == .off { continue }
-            if item.updatePolicy == .whenShown, !item.isVisible { continue }
+            // when_shown gates on drawing (sketchybar semantics), NOT on content:
+            // an empty item must still receive the update that populates it.
+            if item.updatePolicy == .whenShown, !item.drawing { continue }
             // Contract variables are applied last: a `--trigger e NAME=x` payload
             // must never clobber the receiving item's identity.
             var environment = extraEnvironment

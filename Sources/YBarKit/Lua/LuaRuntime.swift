@@ -86,6 +86,10 @@ public final class LuaRuntime {
         if let error = run(code: LuaRuntime.prelude, name: "=ybar-prelude") {
             return error
         }
+        // require("colors") etc. resolve against the config directory.
+        let directory = url.deletingLastPathComponent().path
+        _ = run(code: "package.path = [[\(directory)/?.lua;\(directory)/?/init.lua;]] .. package.path",
+                name: "=ybar-package-path")
         if luaL_loadfilex(state, url.path, nil) != luaOK {
             let error = toString(state, -1) ?? "unknown load error"
             pop(state, 1)
@@ -178,6 +182,9 @@ public final class LuaRuntime {
             invalidate: { [weak barManager] in barManager?.setNeedsRender() },
             measureNaturalWidth: { [weak barManager] item in
                 barManager?.naturalWidth(of: item) ?? 0
+            },
+            measureTextNaturalWidth: { [weak barManager] item, icon in
+                barManager?.naturalTextWidth(of: item, icon: icon) ?? 0
             })
     }
 
@@ -185,8 +192,9 @@ public final class LuaRuntime {
         guard let item = barManager.store.item(named: itemName) else {
             return "[!] no item named \(itemName)"
         }
-        // "routine" is the timer pseudo-event; real events register with the bus.
-        if event != "routine" {
+        // "routine"/"forced" are dispatch pseudo-events (timer ticks and
+        // --update); real events register with the bus.
+        if event != "routine" && event != "forced" {
             if let error = eventBus.subscribe(item: item, eventName: event) {
                 return error
             }
@@ -264,13 +272,19 @@ public final class LuaRuntime {
                     lua_pushstring(L, "[!] set(name, key, value) expects strings")
                     return 1
                 }
-                guard let item = runtime.barManager.store.item(named: name) else {
-                    lua_pushstring(L, "[!] no item named \(name)")
+                let targets = runtime.barManager.store.items(matching: name)
+                guard !targets.isEmpty else {
+                    lua_pushstring(L, "[!] no item matching \(name)")
                     return 1
                 }
-                pushOptionalError(L, PropertySetter.set(
-                    item: item, property: key, value: value,
-                    context: runtime.propertyContext()))
+                var firstError: String?
+                for item in targets {
+                    let error = PropertySetter.set(
+                        item: item, property: key, value: value,
+                        context: runtime.propertyContext())
+                    if firstError == nil { firstError = error }
+                }
+                pushOptionalError(L, firstError)
                 return 1
             }
         }
@@ -372,6 +386,41 @@ public final class LuaRuntime {
                 return 0
             }
         }
+        register("delay") { L in
+            MainActor.assumeIsolated {
+                guard let runtime = LuaRuntime.current else { return 0 }
+                guard lua_type(L, 1) == luaTypeNumber, lua_type(L, 2) == luaTypeFunction else {
+                    FileHandle.standardError.write(
+                        Data("[ybar] lua: delay(seconds, fn) expects (number, function)\n".utf8))
+                    return 0
+                }
+                let seconds = lua_tonumberx(L, 1, nil)
+                lua_pushvalue(L, 2)
+                let ref = Int32(luaL_ref(L, registryIndex))
+                runtime.scheduleDelay(seconds: seconds, ref: ref)
+                return 0
+            }
+        }
+        register("update") { _ in
+            MainActor.assumeIsolated {
+                LuaRuntime.current?.dispatchForcedToAllHandlers()
+                return 0
+            }
+        }
+        register("query_item") { L in
+            MainActor.assumeIsolated {
+                guard let runtime = LuaRuntime.current, let name = argString(L, 1),
+                      let item = runtime.barManager.store.item(named: name)
+                else {
+                    lua_pushnil(L)
+                    return 1
+                }
+                let dictionary = Serialize.itemDictionary(
+                    item, boundingRects: runtime.barManager.boundingRects(for: item))
+                LuaRuntime.push(dictionary, to: L)
+                return 1
+            }
+        }
         register("add_event") { L in
             MainActor.assumeIsolated {
                 guard let runtime = LuaRuntime.current else { return 0 }
@@ -401,7 +450,9 @@ public final class LuaRuntime {
             MainActor.assumeIsolated {
                 guard let runtime = LuaRuntime.current else { return 0 }
                 guard let name = argString(L, 1) else { return 0 }
-                _ = runtime.barManager.store.remove(name: name)
+                for item in runtime.barManager.store.items(matching: name) {
+                    _ = runtime.barManager.store.remove(name: item.name)
+                }
                 runtime.barManager.setNeedsRender()
                 return 0
             }
@@ -439,7 +490,9 @@ public final class LuaRuntime {
         case "bracket":
             // position carries comma-separated members for brackets.
             let members = position.split(separator: ",").map(String.init)
-            let missing = members.filter { store.item(named: $0) == nil }
+            let missing = members.filter {
+                !$0.hasPrefix("/") && store.item(named: $0) == nil
+            }
             guard missing.isEmpty else { return "[!] unknown bracket members: \(missing.joined(separator: ", "))" }
             guard let item = store.add(name: name, position: .left) else {
                 return "[!] item \(name) already exists"
@@ -498,6 +551,76 @@ public final class LuaRuntime {
         }
     }
 
+    /// SENDER=forced to every item's Lua handlers, one call per distinct
+    /// handler (`ybar.update()` — the boot-population idiom sketchybar's
+    /// --update provides for shell configs).
+    func dispatchForcedToAllHandlers() {
+        for item in barManager.store.items {
+            guard let handlers = subscriptions[item.id], !handlers.isEmpty else { continue }
+            var calledRefs = Set<Int32>()
+            for (_, ref) in handlers where !calledRefs.contains(ref) {
+                calledRefs.insert(ref)
+                call(ref: ref, environment: [
+                    "NAME": item.name, "SENDER": "forced", "INFO": "",
+                ])
+            }
+        }
+        barManager.setNeedsRender()
+    }
+
+    /// Generation-guarded delayed callback (`ybar.delay`).
+    func scheduleDelay(seconds: Double, ref: Int32) {
+        let generation = stateGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, seconds)) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, generation == self.stateGeneration, let state = self.state else { return }
+                lua_rawgeti(state, registryIndex, lua_Integer(ref))
+                luaL_unref(state, registryIndex, ref)
+                if lua_pcallk(state, 0, 0, 0, 0, nil) != luaOK {
+                    let error = toString(state, -1) ?? "unknown error"
+                    pop(state, 1)
+                    FileHandle.standardError.write(Data("[ybar] lua delay error: \(error)\n".utf8))
+                }
+            }
+        }
+    }
+
+    /// Recursively push a Serialize dictionary as a Lua table.
+    static func push(_ value: Any, to L: OpaquePointer?) {
+        switch value {
+        case let bool as Bool:
+            lua_pushboolean(L, bool ? 1 : 0)
+        case let string as String:
+            lua_pushstring(L, string)
+        case let int as Int:
+            lua_pushinteger(L, lua_Integer(int))
+        case let uint32 as UInt32:
+            lua_pushinteger(L, lua_Integer(uint32))
+        case let uint64 as UInt64:
+            lua_pushinteger(L, lua_Integer(truncatingIfNeeded: uint64))
+        case let float as Float:
+            lua_pushnumber(L, Double(float))
+        case let double as Double:
+            lua_pushnumber(L, double)
+        case let cgFloat as CGFloat:
+            lua_pushnumber(L, Double(cgFloat))
+        case let array as [Any]:
+            lua_createtable(L, Int32(array.count), 0)
+            for (index, element) in array.enumerated() {
+                LuaRuntime.push(element, to: L)
+                lua_rawseti(L, -2, lua_Integer(index + 1))
+            }
+        case let dictionary as [String: Any]:
+            lua_createtable(L, 0, Int32(dictionary.count))
+            for (key, element) in dictionary {
+                LuaRuntime.push(element, to: L)
+                lua_setfield(L, -2, key)
+            }
+        default:
+            lua_pushnil(L)
+        }
+    }
+
     // MARK: - Prelude (the user-facing `ybar` API, in Lua)
 
     static let prelude = """
@@ -547,7 +670,17 @@ public final class LuaRuntime {
     function ybar.bar(t) apply(raw.bar, nil, t) end
     function ybar.default(t) apply(raw.default, nil, t) end
     function ybar.set(name, t) apply(raw.set, name, t) end
-    function ybar.subscribe(name, event, fn) local e = raw.subscribe(name, event, fn) if e then print(e) end end
+    function ybar.subscribe(name, event, fn)
+      if type(event) == "table" then
+        for _, e in ipairs(event) do ybar.subscribe(name, e, fn) end
+        return
+      end
+      local e = raw.subscribe(name, event, fn)
+      if e then print(e) end
+    end
+    function ybar.delay(seconds, fn) raw.delay(seconds, fn) end
+    function ybar.update() raw.update() end
+    function ybar.query_table(name) return raw.query_item(name) end
     function ybar.trigger(event, env) raw.trigger(event, env or {}) end
     function ybar.push(name, values) raw.push(name, values) end
     function ybar.exec(cmd, fn) raw.exec(cmd, fn) end
@@ -567,6 +700,7 @@ public final class LuaRuntime {
     function item_methods:set(t) ybar.set(self.name, t) end
     function item_methods:subscribe(event, fn) ybar.subscribe(self.name, event, fn) end
     function item_methods:push(values) ybar.push(self.name, values) end
+    function item_methods:query() return raw.query_item(self.name) end
 
     local function handle(name)
       return setmetatable({ name = name }, item_methods)
