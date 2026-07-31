@@ -35,7 +35,11 @@ public final class PopupSurface {
 
         if #available(macOS 26.0, *) {
             let glass = NSGlassEffectView()
-            glass.style = .clear
+            // Regular (frosted) glass, matching system menus/popovers: a popup
+            // spans content-rich windows, and clear glass over text lets every
+            // line bleed through sharply. The pills stay clear — they float
+            // over the wallpaper strip where nothing bleeds.
+            glass.style = .regular
             glass.appearance = NSAppearance(named: .darkAqua)
             backdropView = glass
         } else {

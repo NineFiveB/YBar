@@ -18,7 +18,7 @@ return {
     border = 0x00000000,
   },
   popup = {
-    bg = 0x59161a24,         -- glass panel over popup blur
+    bg = 0x21262b36,         -- same tint as the pills: one material everywhere
     border = 0x2effffff,
   },
   -- True Tahoe glass is mostly backdrop: barely-there neutral tints, the
