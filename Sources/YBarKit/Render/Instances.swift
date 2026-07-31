@@ -27,6 +27,7 @@ public struct QuadInstance {
     var _pad2: UInt32 = 0
 
     public static let flagGradient: UInt32 = 1 << 0
+    public static let flagGlass: UInt32 = 1 << 1
 
     public init(
         origin: SIMD2<Float>, size: SIMD2<Float>, radii: SIMD4<Float>,

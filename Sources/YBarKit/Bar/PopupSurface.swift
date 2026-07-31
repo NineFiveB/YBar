@@ -7,6 +7,7 @@ import Metal
 public final class PopupSurface {
     public let hostItemID: Int
     let panel: BarPanel
+    let effectView: NSVisualEffectView
     public let hostView: MetalHostView
 
     /// Popup-local hit frames (top-left origin, points).
@@ -31,10 +32,22 @@ public final class PopupSurface {
         panel.level = .popUpMenu
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
 
+        effectView = NSVisualEffectView()
+        effectView.blendingMode = .behindWindow
+        effectView.material = .hudWindow
+        effectView.state = .active
+        effectView.autoresizingMask = [.width, .height]
+        effectView.isHidden = true
+
         hostView = MetalHostView(frame: .zero)
         hostView.autoresizingMask = [.width, .height]
         hostView.metalLayer.device = device
-        panel.contentView = hostView
+
+        let container = NSView()
+        container.autoresizesSubviews = true
+        container.addSubview(effectView)
+        container.addSubview(hostView)
+        panel.contentView = container
 
         hostView.onMouse = { [weak self] info in
             guard let self else { return }
@@ -62,8 +75,18 @@ public final class PopupSurface {
         case .bottom: y = anchor.maxY + yOffset
         }
         panel.setFrame(CGRect(x: x, y: y, width: size.width, height: size.height), display: true)
+        effectView.frame = panel.contentView?.bounds ?? .zero
+        hostView.frame = panel.contentView?.bounds ?? .zero
         hostView.updateDrawableSize()
         panel.orderFrontRegardless()
+    }
+
+    /// Blurred glass behind the whole panel (popup.blur_radius > 0).
+    public func setGlass(enabled: Bool, cornerRadius: CGFloat) {
+        effectView.isHidden = !enabled
+        if enabled {
+            effectView.maskImage = BarSurface.roundedMask(radius: cornerRadius)
+        }
     }
 
     public func close() {

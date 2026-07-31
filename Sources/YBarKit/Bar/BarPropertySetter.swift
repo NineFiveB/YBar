@@ -77,6 +77,10 @@ public enum BarPropertySetter {
                 manager.settings.displayPolicy = .list(indices)
             }
             return nil
+        case "glass":
+            guard let flag = PropertySetter.parseBool(value) else { return "[!] invalid boolean: \(value)" }
+            manager.settings.glass = flag
+            return nil
         case "font_smoothing", "shadow", "show_in_fullscreen":
             // Accepted for config compatibility; not applicable to the public-API v1 surface.
             return nil

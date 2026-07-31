@@ -92,7 +92,9 @@ public enum PropertySetter {
             return setFloat(item, \Item.paddingRight, "padding_right", value, ctx)
         case "display":
             return setDisplayAssociation(item, value, ctx)
-        case "scroll_texts", "blur_radius", "padding_top", "padding_bottom",
+        case "blur_radius":
+            return setFloat(item, \Item.blurRadius, "blur_radius", value, ctx)
+        case "scroll_texts", "padding_top", "padding_bottom",
              "space", "associated_space", "ignore_association", "mach_helper", "shadow":
             // Accepted-and-ignored for sketchybar config compatibility.
             return nil
@@ -227,7 +229,11 @@ public enum PropertySetter {
             item.popup.align = first
             ctx.invalidate()
             return nil
-        case "blur_radius", "topmost":
+        case "blur_radius":
+            return setFloatValue(key: "item.\(item.id).popup.blur_radius",
+                                 current: item.popup.blurRadius,
+                                 value: value, ctx: ctx) { [weak item] in item?.popup.blurRadius = $0 }
+        case "topmost":
             return nil
         case "height":
             return setFloatValue(key: "item.\(item.id).popup.height", current: item.popup.cellHeight,
@@ -445,6 +451,11 @@ public enum PropertySetter {
             return setFloat(item, base.appending(path: \BackgroundStyle.xOffset), "\(prefix).x_offset", value, ctx)
         case "y_offset":
             return setFloat(item, base.appending(path: \BackgroundStyle.yOffset), "\(prefix).y_offset", value, ctx)
+        case "glass":
+            guard let flag = parseBool(value) else { return "[!] invalid boolean: \(value)" }
+            item[keyPath: base.appending(path: \BackgroundStyle.glass)] = flag
+            ctx.invalidate()
+            return nil
         case "image", "clip":
             // Background images / bar clipping are not in YBar v1; ignore quietly.
             return nil

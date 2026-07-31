@@ -24,6 +24,8 @@ public final class BarSurface {
     /// Item hit-test frames for this surface (bar-local, top-left origin), set after layout.
     public var itemFrames: [(itemID: Int, frame: CGRect)] = []
     public var hoveredItemID: Int?
+    /// Per-item blurred backdrops (the glass substrate), keyed by item id.
+    private var glassViews: [Int: NSVisualEffectView] = [:]
 
     public var onMouse: ((MouseEventInfo, BarSurface) -> Void)?
 
@@ -95,6 +97,57 @@ public final class BarSurface {
     public func close() {
         panel.orderOut(nil)
         panel.close()
+    }
+
+    /// Sync the per-item glass backdrop views to the latest layout. `rect` is
+    /// bar-local top-left-origin points (the painted background pill's rect).
+    public func syncGlassBackdrops(_ specs: [(itemID: Int, rect: CGRect, cornerRadius: CGFloat)]) {
+        guard let container = panel.contentView else { return }
+        let containerHeight = container.bounds.height
+        var live = Set<Int>()
+        for spec in specs {
+            live.insert(spec.itemID)
+            let view: NSVisualEffectView
+            if let existing = glassViews[spec.itemID] {
+                view = existing
+            } else {
+                view = NSVisualEffectView()
+                view.blendingMode = .behindWindow
+                view.material = .hudWindow
+                view.state = .active
+                container.addSubview(view, positioned: .below, relativeTo: hostView)
+                glassViews[spec.itemID] = view
+            }
+            // Container is unflipped (AppKit y-up); layout rects are y-down.
+            view.frame = CGRect(
+                x: spec.rect.minX,
+                y: containerHeight - spec.rect.maxY,
+                width: spec.rect.width,
+                height: spec.rect.height)
+            view.maskImage = BarSurface.roundedMask(radius: spec.cornerRadius)
+        }
+        for (itemID, view) in glassViews where !live.contains(itemID) {
+            view.removeFromSuperview()
+            glassViews.removeValue(forKey: itemID)
+        }
+    }
+
+    /// Stretchable rounded-rect mask (the sanctioned way to shape a
+    /// behind-window material), cached per radius.
+    private static var maskCache: [Int: NSImage] = [:]
+    static func roundedMask(radius: CGFloat) -> NSImage {
+        let key = Int(radius.rounded())
+        if let cached = maskCache[key] { return cached }
+        let edge = max(1, radius * 2 + 1)
+        let image = NSImage(size: NSSize(width: edge, height: edge), flipped: false) { rect in
+            NSColor.black.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+            return true
+        }
+        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
+        image.resizingMode = .stretch
+        maskCache[key] = image
+        return image
     }
 
     /// Bar window frame in global AppKit coordinates (bottom-left origin, y-up).

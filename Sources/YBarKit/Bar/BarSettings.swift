@@ -48,6 +48,8 @@ public struct BarSettings: Sendable {
     public var cornerExponent: Float = 2
     /// 0 disables the system blur material behind the bar.
     public var blurRadius: Float = 0
+    /// Liquid-glass sheen/rim on the bar background quad.
+    public var glass: Bool = false
     public var hidden: Bool = false
     public var level: BarLevel = .behindWindows
     public var sticky: Bool = true

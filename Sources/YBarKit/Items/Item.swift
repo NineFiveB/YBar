@@ -32,6 +32,9 @@ public final class Item {
     /// Item-level paddings are outer margins around the whole item.
     public var paddingLeft: Float = 0
     public var paddingRight: Float = 0
+    /// > 0: a blurred system-material backdrop is placed behind this item's
+    /// background rect (the glass substrate).
+    public var blurRadius: Float = 0
 
     // Scripting / events
     public var script: String = ""

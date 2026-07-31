@@ -42,6 +42,9 @@ public final class SceneBuilder {
             barQuad.gradientDir = SceneBuilder.gradientDirection(angleDegrees: settings.gradientAngle)
             barQuad.flags |= QuadInstance.flagGradient
         }
+        if settings.glass {
+            barQuad.flags |= QuadInstance.flagGlass
+        }
         list.quads.append(barQuad)
 
         // Brackets: derived backgrounds spanning their members, painted first so
@@ -153,14 +156,8 @@ public final class SceneBuilder {
 
         // Background + shadow.
         if item.background.drawing {
-            let backgroundHeight = item.background.height > 0
-                ? CGFloat(item.background.height)
-                : min(contentBox.height, contentHeight + 8)
-            let backgroundRect = CGRect(
-                x: contentBox.minX + CGFloat(item.background.xOffset),
-                y: centerY - backgroundHeight / 2 - CGFloat(item.background.yOffset),
-                width: contentBox.width,
-                height: backgroundHeight)
+            let backgroundRect = SceneBuilder.backgroundRect(
+                item: item, contentBox: contentBox, contentHeight: contentHeight)
             emitBackground(item.background, rect: backgroundRect, scale: scale, into: &list)
         }
 
@@ -224,6 +221,20 @@ public final class SceneBuilder {
             }
         }
         // TODO(v1.5): per-part backgrounds (icon.background.* / label.background.*).
+    }
+
+    /// The item background's rect (bar-local, y-down) — shared with the glass
+    /// backdrop sync so blur views land exactly under the painted pill.
+    static func backgroundRect(item: Item, contentBox: CGRect, contentHeight: CGFloat) -> CGRect {
+        let centerY = contentBox.midY - CGFloat(item.yOffset)
+        let backgroundHeight = item.background.height > 0
+            ? CGFloat(item.background.height)
+            : min(contentBox.height, contentHeight + 8)
+        return CGRect(
+            x: contentBox.minX + CGFloat(item.background.xOffset),
+            y: centerY - backgroundHeight / 2 - CGFloat(item.background.yOffset),
+            width: contentBox.width,
+            height: backgroundHeight)
     }
 
     // MARK: - Components
@@ -330,6 +341,9 @@ public final class SceneBuilder {
             quad.fill2 = gradient.simd
             quad.gradientDir = SceneBuilder.gradientDirection(angleDegrees: background.gradientAngle)
             quad.flags |= QuadInstance.flagGradient
+        }
+        if background.glass {
+            quad.flags |= QuadInstance.flagGlass
         }
         list.quads.append(quad)
     }

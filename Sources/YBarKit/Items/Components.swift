@@ -83,6 +83,8 @@ public struct PopupState: Sendable {
     public var autoClose = true
     /// Horizontal anchoring against the host item: l/c/r.
     public var align: Character = "l"
+    /// > 0: blurred system material behind the whole panel.
+    public var blurRadius: Float = 0
     public var background = BackgroundStyle()
 
     public init() {

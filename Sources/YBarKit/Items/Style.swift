@@ -100,6 +100,9 @@ public struct BackgroundStyle: Equatable, Sendable {
     public var cornerRadius: Float = 0
     /// Superellipse exponent: 2 = circular corners, ~4.5 ≈ Apple continuous ("squircle").
     public var cornerExponent: Float = 2
+    /// Liquid-glass material: specular top rim + vertical sheen in-shader,
+    /// designed to sit over a blurred backdrop (item blur_radius > 0).
+    public var glass: Bool = false
     public var height: Float = 0
     public var paddingLeft: Float = 0
     public var paddingRight: Float = 0

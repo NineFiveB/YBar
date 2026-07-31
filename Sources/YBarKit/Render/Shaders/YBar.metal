@@ -36,6 +36,7 @@ struct Uniforms {
 };
 
 constant uint kQuadFlagGradient   = 1u << 0;
+constant uint kQuadFlagGlass      = 1u << 1;
 constant uint kGlyphFlagColor     = 1u << 0;
 
 // Vertex-pulled unit quad: vid 0..3 as a triangle strip.
@@ -115,10 +116,28 @@ fragment float4 quad_fragment(QuadVOut in [[stage_in]]) {
         float t = clamp(dot(in.uv - 0.5, in.gradientDir) + 0.5, 0.0, 1.0);
         fill = mix(in.fill, in.fill2, t);
     }
+    if (in.flags & kQuadFlagGlass) {
+        // Vertical sheen: linear-light, subtly brighter toward the top.
+        float sheen = (0.5 - in.uv.y) * 0.05;
+        fill.rgb = clamp(fill.rgb + sheen, 0.0, 1.0);
+    }
 
     // Premultiplied compositing: fill inside the border ring, border on the ring.
     float3 rgb = fill.rgb * fill.a * inner + in.borderColor.rgb * in.borderColor.a * (outer - inner);
     float alpha = fill.a * inner + in.borderColor.a * (outer - inner);
+
+    if (in.flags & kQuadFlagGlass) {
+        // Specular rim: a thin inner band, bright where light falls from above,
+        // gently shaded along the bottom edge (device-px SDF space).
+        float band = smoothstep(-2.6, -0.9, d) * outer;
+        float topness = clamp(-in.local.y / max(in.halfSize.y, 1.0), 0.0, 1.0);
+        float botness = clamp( in.local.y / max(in.halfSize.y, 1.0), 0.0, 1.0);
+        float highlight = band * (0.05 + 0.32 * topness * topness);
+        float shade = band * 0.22 * botness * botness;
+        rgb = clamp(rgb + float3(highlight), 0.0, 1.0);
+        rgb *= (1.0 - shade);
+        alpha = clamp(alpha + highlight * 0.7, 0.0, 1.0);
+    }
     return float4(rgb, alpha);
 }
 

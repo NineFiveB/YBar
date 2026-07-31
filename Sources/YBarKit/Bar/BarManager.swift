@@ -210,6 +210,9 @@ public final class BarManager {
                 y: barFrame.maxY - hostFrame.maxY,
                 width: hostFrame.width,
                 height: hostFrame.height)
+            popupSurface.setGlass(
+                enabled: host.popup.blurRadius > 0,
+                cornerRadius: CGFloat(host.popup.background.cornerRadius))
             popupSurface.present(
                 anchor: anchor,
                 size: scene.sizePoints,
@@ -332,6 +335,20 @@ public final class BarManager {
             items.first { $0.id == itemID }?.frame = frame
         }
         surface.itemFrames = items.map { ($0.id, $0.frame) }
+
+        // Glass backdrops: blurred material views placed exactly under the
+        // painted pill of every item with blur_radius > 0.
+        var glassSpecs: [(itemID: Int, rect: CGRect, cornerRadius: CGFloat)] = []
+        for item in items where item.blurRadius > 0 && item.isVisible {
+            guard let contentBox = result.contentBoxes[item.id], contentBox.width > 0 else { continue }
+            let contentHeight = max(
+                fontCache.measure(part: item.icon).height,
+                fontCache.measure(part: item.label).height)
+            let rect = SceneBuilder.backgroundRect(
+                item: item, contentBox: contentBox, contentHeight: contentHeight)
+            glassSpecs.append((item.id, rect, CGFloat(item.background.cornerRadius)))
+        }
+        surface.syncGlassBackdrops(glassSpecs)
 
         let list = sceneBuilder.build(
             items: items,
