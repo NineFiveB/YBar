@@ -511,6 +511,9 @@ public final class LuaRuntime {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["sh", "-c", command]
+        var environment = ProcessInfo.processInfo.environment
+        environment["PATH"] = ScriptRunner.augmentedPATH(environment["PATH"])
+        process.environment = environment
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.standardError

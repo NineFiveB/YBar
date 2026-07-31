@@ -107,10 +107,14 @@ public final class BarSurface {
         let y: CGFloat
         switch settings.position {
         case .top:
-            // Below the native menu bar when it is visible and the bar does not
-            // cover it; at the very top otherwise (visibleFrame tracks autohide).
+            // sketchybar semantics: the bar owns the top strip whenever the
+            // native menu bar is out of the way — covering it (topmost=on) or
+            // auto-hidden (the tiling-WM setup: WM top gap + hidden menu bar).
+            // Only a visible, persistent menu bar pushes the bar below the
+            // strip. On notched displays visibleFrame NEVER includes the strip,
+            // so the autohide check must come from defaults, not geometry.
             let topEdge: CGFloat
-            if settings.level == .coverMenuBar {
+            if settings.level == .coverMenuBar || BarSurface.menuBarAutohides() {
                 topEdge = screenFrame.maxY
             } else {
                 topEdge = min(screenFrame.maxY, screen.visibleFrame.maxY)
@@ -120,5 +124,13 @@ public final class BarSurface {
             y = screenFrame.minY + CGFloat(settings.yOffset)
         }
         return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    /// Is "Automatically hide and show the menu bar" enabled? (`_HIHideMenuBar`
+    /// in the global defaults domain — the public equivalent of sketchybar's
+    /// SLSGetMenuBarAutohideEnabled.)
+    static func menuBarAutohides() -> Bool {
+        UserDefaults.standard
+            .persistentDomain(forName: UserDefaults.globalDomain)?["_HIHideMenuBar"] as? Bool ?? false
     }
 }

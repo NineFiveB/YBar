@@ -29,6 +29,7 @@ public final class ScriptRunner: @unchecked Sendable {
         var mergedEnvironment = ProcessInfo.processInfo.environment
         for (key, value) in baseEnvironment { mergedEnvironment[key] = value }
         for (key, value) in environment { mergedEnvironment[key] = value }
+        mergedEnvironment["PATH"] = ScriptRunner.augmentedPATH(mergedEnvironment["PATH"])
         process.environment = mergedEnvironment
 
         do {
@@ -54,6 +55,18 @@ public final class ScriptRunner: @unchecked Sendable {
         // The path travels as an argv word ($0), immune to quotes/spaces/metachars
         // in the path; sh's ENOEXEC fallback still runs shebang-less scripts.
         launch(arguments: ["sh", "-c", "exec \"$0\"", url.path], environment: [:])
+    }
+}
+
+extension ScriptRunner {
+    /// Homebrew/local bins for daemons launched outside a login shell
+    /// (aerospace, blueutil, battery ... live there).
+    static func augmentedPATH(_ current: String?) -> String {
+        var path = current ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        for extra in ["/opt/homebrew/bin", "/usr/local/bin"] where !path.split(separator: ":").contains(Substring(extra)) {
+            path += ":" + extra
+        }
+        return path
     }
 }
 

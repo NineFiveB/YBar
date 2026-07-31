@@ -7,6 +7,7 @@ import Metal
 final class DaemonHooks {
     static let shared = DaemonHooks()
     var closePopups: (() -> Void)?
+    var reframeBars: (() -> Void)?
 }
 
 /// Owns the bars: one surface per included display, the shared render stack,
@@ -32,6 +33,7 @@ public final class BarManager {
     /// Item id of a slider currently being dragged.
     private var draggingSliderID: Int?
     private var outsideClickMonitor: Any?
+    private var menuBarObserver: NSObjectProtocol?
 
     // Interaction hooks, wired by the daemon (scripts + event bus live there).
     public var onItemClicked: ((Item, MouseEventInfo) -> Void)?
@@ -64,6 +66,27 @@ public final class BarManager {
         displayManager.onChange = { [weak self] in
             self?.rebuildSurfaces()
             self?.onDisplaysChanged?()
+        }
+        // Menu-bar autohide toggles move the bar between the top strip and
+        // below-the-strip (sketchybar listens for exactly this notification).
+        let observer = DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("AppleInterfaceMenuBarHidingChangedNotification"),
+            object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                DaemonHooks.shared.reframeBars?()
+            }
+        }
+        menuBarObserver = observer
+        DaemonHooks.shared.reframeBars = { [weak self] in
+            guard let self else { return }
+            let screens = DisplayManager.screens()
+            for surface in self.surfaces {
+                if let entry = screens.first(where: { $0.index == surface.arrangementIndex }) {
+                    surface.apply(settings: self.settings, screen: entry.screen)
+                }
+            }
+            self.setNeedsRender()
         }
         rebuildSurfaces()
     }
