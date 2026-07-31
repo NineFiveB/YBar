@@ -7,6 +7,8 @@ import CoreText
 public final class FontCache {
     public struct ShapedLine {
         public let line: CTLine
+        /// sketchybar-compatible width: tight glyph-path bounds with its
+        /// `(int)(width + 1.5)` rounding — the value all spacing derives from.
         public let width: CGFloat
         public let ascent: CGFloat
         public let descent: CGFloat
@@ -44,7 +46,11 @@ public final class FontCache {
         var ascent: CGFloat = 0
         var descent: CGFloat = 0
         var leading: CGFloat = 0
-        let width = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
+        _ = CTLineGetTypographicBounds(line, &ascent, &descent, &leading)
+        // sketchybar measures ink, not advances (text.c): glyph-path bounds
+        // with (int)(width + 1.5). Advances run wider and unevenly so.
+        let pathBounds = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
+        let width = CGFloat(Int(pathBounds.width + 1.5))
         let shaped = ShapedLine(line: line, width: width, ascent: ascent, descent: descent)
         lines[key] = shaped
         return shaped
@@ -82,7 +88,7 @@ public final class FontCache {
             return image.size
         }
         let shaped = shapedLine(text: text, spec: part.font)
-        return CGSize(width: ceil(shaped.width), height: ceil(shaped.ascent + shaped.descent))
+        return CGSize(width: shaped.width, height: ceil(shaped.ascent + shaped.descent))
     }
 
     public func clear() {

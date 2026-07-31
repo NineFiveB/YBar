@@ -34,12 +34,14 @@ public enum Layout {
     /// Content length ignoring any fixed-width override — the value `width=dynamic`
     /// animations resolve the -1 sentinel to.
     public static func naturalLength(item: Item, measured: MeasuredContent) -> CGFloat {
+        // sketchybar parity: a drawing part contributes its paddings even with
+        // an empty string (text_get_length gates on drawing alone).
         var length: CGFloat = 0
-        if item.icon.drawing, !item.icon.string.isEmpty {
+        if item.icon.drawing {
             length += CGFloat(item.icon.paddingLeft) + measured.iconSize.width + CGFloat(item.icon.paddingRight)
         }
         length += item.contentWidth
-        if item.label.drawing, !item.label.string.isEmpty {
+        if item.label.drawing {
             length += CGFloat(item.label.paddingLeft) + measured.labelSize.width + CGFloat(item.label.paddingRight)
         }
         return length

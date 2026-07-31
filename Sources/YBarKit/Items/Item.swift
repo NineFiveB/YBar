@@ -81,7 +81,9 @@ public final class Item {
     }
 
     public var isVisible: Bool {
-        drawing && (icon.drawing && !icon.string.isEmpty || label.drawing && !label.string.isEmpty
+        // sketchybar parity: visibility is the drawing flag; a drawing item with
+        // empty parts still occupies its paddings.
+        drawing && (icon.drawing || label.drawing
                     || background.drawing || customWidth >= 0
                     || graph != nil || slider != nil)
     }

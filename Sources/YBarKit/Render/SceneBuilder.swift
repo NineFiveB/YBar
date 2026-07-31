@@ -187,8 +187,9 @@ public final class SceneBuilder {
                 height: (contentBox.height * scale).rounded())
             : nil
 
-        // Icon, sandwich content, then label.
-        if item.icon.drawing, !item.icon.string.isEmpty {
+        // Icon, sandwich content, then label (paddings advance the pen even
+        // for empty strings — sketchybar parity).
+        if item.icon.drawing {
             penX += CGFloat(item.icon.paddingLeft)
             emitText(part: item.icon, penX: penX, centerY: centerY,
                      scale: scale, atlas: atlas, clip: clip, into: &list)
@@ -204,7 +205,7 @@ public final class SceneBuilder {
                        scale: scale, atlas: atlas, clip: clip, into: &list)
             penX += CGFloat(slider.width)
         }
-        if item.label.drawing, !item.label.string.isEmpty {
+        if item.label.drawing {
             penX += CGFloat(item.label.paddingLeft)
             emitText(part: item.label, penX: penX, centerY: centerY,
                      scale: scale, atlas: atlas, clip: clip, into: &list)
