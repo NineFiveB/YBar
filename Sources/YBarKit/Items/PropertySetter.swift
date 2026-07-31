@@ -200,6 +200,11 @@ public enum PropertySetter {
             item.popup.horizontal = flag
             ctx.invalidate()
             return nil
+        case "auto_close":
+            guard let flag = parseBool(value) else { return "[!] invalid boolean: \(value)" }
+            item.popup.autoClose = flag
+            ctx.invalidate()
+            return nil
         case "height":
             return setFloatValue(key: "item.\(item.id).popup.height", current: item.popup.cellHeight,
                                  value: value, ctx: ctx) { [weak item] in item?.popup.cellHeight = $0 }

@@ -11,6 +11,7 @@ public final class PopupSurface {
 
     /// Popup-local hit frames (top-left origin, points).
     public var itemFrames: [(itemID: Int, frame: CGRect)] = []
+    public var hoveredItemID: Int?
     public var onMouse: ((MouseEventInfo, PopupSurface) -> Void)?
 
     public init(hostItemID: Int, device: MTLDevice) {

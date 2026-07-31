@@ -53,7 +53,7 @@ public enum Serialize {
     }
 
     static func itemDictionary(_ item: Item, boundingRects: [String: [String: Any]] = [:]) -> [String: Any] {
-        [
+        var dictionary: [String: Any] = [
             "name": item.name,
             "type": item.kind.rawValue,
             "geometry": [
@@ -78,6 +78,35 @@ public enum Serialize {
             ] as [String: Any],
             "bounding_rects": boundingRects,
         ]
+
+        if item.kind == .bracket {
+            dictionary["bracket"] = item.members
+        }
+        if let graph = item.graph {
+            dictionary["graph"] = [
+                "width": graph.capacity,
+                "color": hex(graph.lineColor),
+                "fill_color": hex(graph.effectiveFillColor),
+                "line_width": graph.lineWidth,
+            ] as [String: Any]
+        }
+        if let slider = item.slider {
+            dictionary["slider"] = [
+                "percentage": slider.percentage,
+                "width": slider.width,
+                "highlight_color": hex(slider.highlightColor),
+            ] as [String: Any]
+        }
+        dictionary["popup"] = [
+            "drawing": item.popup.isOpen ? "on" : "off",
+            "horizontal": item.popup.horizontal,
+            "height": item.popup.cellHeight,
+            "auto_close": item.popup.autoClose,
+        ] as [String: Any]
+        if item.position == .popup {
+            dictionary["popup_host"] = item.popupHost ?? ""
+        }
+        return dictionary
     }
 
     static func textDictionary(_ part: TextPart) -> [String: Any] {

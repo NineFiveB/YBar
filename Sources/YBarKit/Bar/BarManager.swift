@@ -1,6 +1,14 @@
 import AppKit
 import Metal
 
+/// Weak hook registry so @Sendable system callbacks (global event monitors)
+/// can reach main-actor state without capturing it.
+@MainActor
+final class DaemonHooks {
+    static let shared = DaemonHooks()
+    var closePopups: (() -> Void)?
+}
+
 /// Owns the bars: one surface per included display, the shared render stack,
 /// layout, damage-driven redraw, and mouse routing. All mutation is main-actor.
 @MainActor
@@ -23,6 +31,7 @@ public final class BarManager {
     private var retryScheduled = false
     /// Item id of a slider currently being dragged.
     private var draggingSliderID: Int?
+    private var outsideClickMonitor: Any?
 
     // Interaction hooks, wired by the daemon (scripts + event bus live there).
     public var onItemClicked: ((Item, MouseEventInfo) -> Void)?
@@ -35,6 +44,8 @@ public final class BarManager {
     public var onSurfacesRebuilt: (() -> Void)?
     /// A slider drag ended at the given percentage.
     public var onSliderChanged: ((Item, Float) -> Void)?
+    /// A slider drag began (the daemon cancels in-flight percentage animations).
+    public var onSliderDragStarted: ((Item) -> Void)?
 
     public init() throws {
         guard let metalDevice = MTLCreateSystemDefaultDevice() else {
@@ -124,8 +135,9 @@ public final class BarManager {
     // MARK: - Popups
 
     private func updatePopups() {
-        // Open popups render on the surface showing their host; closed or
-        // orphaned popup panels are torn down.
+        // A host only counts as live once its scene actually rendered; anything
+        // else (closed, hostless, empty, zero-size) tears its panel down —
+        // stale, still-clickable panels must never linger.
         var liveHostIDs: Set<Int> = []
         for host in store.items where host.popup.isOpen {
             let members = store.items.filter { $0.position == .popup && $0.popupHost == host.name }
@@ -133,9 +145,17 @@ public final class BarManager {
                   let surface = surfaces.first(where: { surface in
                       surface.itemFrames.contains { $0.itemID == host.id && $0.frame != .zero }
                   }),
+                  let hostFrame = surface.itemFrames.first(where: { $0.itemID == host.id })?.frame,
                   let atlas = atlas(for: surface.scale)
             else { continue }
-            liveHostIDs.insert(host.id)
+
+            // The popup lives on the host's screen — build scene, atlas, and
+            // drawable at that one scale (a fresh panel's backingScaleFactor
+            // reports the primary screen until it is ordered in).
+            let scale = surface.scale
+            let scene = sceneBuilder.buildPopup(
+                host: host, members: members, scale: scale, atlas: atlas)
+            guard scene.sizePoints.width > 0, scene.sizePoints.height > 0 else { continue }
 
             let popupSurface: PopupSurface
             if let existing = popupSurfaces[host.id] {
@@ -145,18 +165,15 @@ public final class BarManager {
                 popupSurface.onMouse = { [weak self] info, popup in
                     self?.handlePopupMouse(info, on: popup)
                 }
+                popupSurface.hostView.onBackingChanged = { [weak self] in
+                    self?.setNeedsRender()
+                }
                 popupSurfaces[host.id] = popupSurface
             }
-
-            let scene = sceneBuilder.buildPopup(
-                host: host, members: members, scale: popupSurface.scale, atlas: atlas)
-            guard scene.sizePoints.width > 0 else { continue }
             popupSurface.itemFrames = scene.itemFrames
 
             // Host frame (bar-local, y-down) -> global AppKit coords (y-up).
             let barFrame = surface.panelFrame
-            guard let hostFrame = surface.itemFrames.first(where: { $0.itemID == host.id })?.frame
-            else { continue }
             let anchor = CGRect(
                 x: barFrame.minX + hostFrame.minX,
                 y: barFrame.maxY - hostFrame.maxY,
@@ -167,25 +184,87 @@ public final class BarManager {
                 size: scene.sizePoints,
                 barPosition: settings.position,
                 yOffset: CGFloat(host.popup.yOffset))
-            renderer.render(list: scene.list, layer: popupSurface.hostView.metalLayer, atlas: atlas)
+            if renderer.render(list: scene.list, layer: popupSurface.hostView.metalLayer, atlas: atlas) {
+                liveHostIDs.insert(host.id)
+            } else {
+                scheduleRetry()
+            }
         }
 
         for (hostID, popupSurface) in popupSurfaces where !liveHostIDs.contains(hostID) {
             popupSurface.close()
             popupSurfaces.removeValue(forKey: hostID)
         }
+        updateOutsideClickMonitor()
     }
 
     private func handlePopupMouse(_ info: MouseEventInfo, on popup: PopupSurface) {
+        func member(at point: CGPoint) -> Item? {
+            guard let itemID = popup.itemFrames.first(where: { $0.frame.contains(point) })?.itemID
+            else { return nil }
+            return store.items.first { $0.id == itemID }
+        }
         switch info.kind {
         case .clicked:
-            if let (itemID, _) = popup.itemFrames.first(where: { $0.frame.contains(info.point) }),
-               let item = store.items.first(where: { $0.id == itemID }) {
+            if let item = member(at: info.point) {
                 onItemClicked?(item, info)
             }
+        case .moved:
+            let hovered = member(at: info.point)
+            guard popup.hoveredItemID != hovered?.id else { return }
+            if let previousID = popup.hoveredItemID,
+               let previous = store.items.first(where: { $0.id == previousID }) {
+                previous.mouseOver = false
+                onItemHover?(previous, false)
+            }
+            popup.hoveredItemID = hovered?.id
+            if let hovered {
+                hovered.mouseOver = true
+                onItemHover?(hovered, true)
+            }
+        case .exited:
+            if let previousID = popup.hoveredItemID,
+               let previous = store.items.first(where: { $0.id == previousID }) {
+                previous.mouseOver = false
+                onItemHover?(previous, false)
+            }
+            popup.hoveredItemID = nil
         default:
             break
         }
+    }
+
+    // MARK: - Popup auto-close
+
+    /// Clicks outside any YBar window close auto-close popups (global monitors
+    /// observe other apps' mouse events; no permissions for mouse-only).
+    private func updateOutsideClickMonitor() {
+        let wantsMonitor = store.items.contains { $0.popup.isOpen && $0.popup.autoClose }
+        if wantsMonitor, outsideClickMonitor == nil {
+            outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
+                matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+            ) { _ in
+                MainActor.assumeIsolated {
+                    DaemonHooks.shared.closePopups?()
+                }
+            }
+            DaemonHooks.shared.closePopups = { [weak self] in
+                self?.closeAutoClosePopups(except: nil)
+            }
+        } else if !wantsMonitor, let monitor = outsideClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            outsideClickMonitor = nil
+        }
+    }
+
+    public func closeAutoClosePopups(except exceptItemID: Int?) {
+        var changed = false
+        for item in store.items
+        where item.popup.isOpen && item.popup.autoClose && item.id != exceptItemID {
+            item.popup.isOpen = false
+            changed = true
+        }
+        if changed { setNeedsRender() }
     }
 
     private func atlas(for scale: CGFloat) -> GlyphAtlas? {
@@ -206,6 +285,13 @@ public final class BarManager {
             MeasuredContent(
                 iconSize: fontCache.measure(part: item.icon),
                 labelSize: fontCache.measure(part: item.label))
+        }
+        // Brackets derive frames from their members — resolved before the hit
+        // snapshot so they are clickable/hoverable and can host popups.
+        let bracketFrames = ComponentGeometry.bracketFrames(
+            items: items, contentBoxes: result.contentBoxes, barHeight: barSize.height)
+        for (itemID, frame) in bracketFrames {
+            items.first { $0.id == itemID }?.frame = frame
         }
         surface.itemFrames = items.map { ($0.id, $0.frame) }
 
@@ -274,15 +360,20 @@ public final class BarManager {
     private func handleMouse(_ info: MouseEventInfo, on surface: BarSurface) {
         switch info.kind {
         case .down:
-            if let item = hitTest(point: info.point, on: surface), item.slider != nil {
+            let hit = hitTest(point: info.point, on: surface)
+            // A press anywhere that is not an open popup's host dismisses
+            // auto-close popups (host presses defer to their toggle scripts).
+            closeAutoClosePopups(except: hit?.id)
+            if let item = hit, item.slider != nil {
                 draggingSliderID = item.id
-                updateSlider(item: item, localX: info.point.x)
+                onSliderDragStarted?(item)
+                updateSlider(item: item, localX: info.point.x, on: surface)
             }
         case .dragged:
             if let id = draggingSliderID,
                let item = store.items.first(where: { $0.id == id }) {
                 item.slider?.isDragged = true
-                updateSlider(item: item, localX: info.point.x)
+                updateSlider(item: item, localX: info.point.x, on: surface)
             }
         case .clicked:
             if let id = draggingSliderID,
@@ -290,7 +381,7 @@ public final class BarManager {
                let slider = item.slider {
                 draggingSliderID = nil
                 slider.isDragged = false
-                updateSlider(item: item, localX: info.point.x)
+                updateSlider(item: item, localX: info.point.x, on: surface)
                 onSliderChanged?(item, slider.percentage)
                 return
             }
@@ -309,11 +400,24 @@ public final class BarManager {
         }
     }
 
-    /// Map a bar-local x to the slider's percentage (track spans the sandwich
-    /// slot between icon and label inside the item's content box).
-    private func updateSlider(item: Item, localX: CGFloat) {
-        guard let slider = item.slider else { return }
-        var trackX = item.frame.minX + CGFloat(item.paddingLeft)
+    /// Map a bar-local x to the slider's percentage. Uses the event surface's
+    /// own frame snapshot (the shared Item.frame holds whichever surface
+    /// rendered last — wrong on multi-display) and mirrors the emit-side
+    /// fixed-width alignment slack.
+    private func updateSlider(item: Item, localX: CGFloat, on surface: BarSurface) {
+        guard let slider = item.slider,
+              let frame = surface.itemFrames.first(where: { $0.itemID == item.id })?.frame,
+              frame != .zero
+        else { return }
+        var trackX = frame.minX + CGFloat(item.paddingLeft)
+        if item.customWidth >= 0 {
+            let slack = max(0, CGFloat(item.customWidth) - CGFloat(naturalWidth(of: item)))
+            switch item.align {
+            case "c": trackX += slack / 2
+            case "r": trackX += slack
+            default: break
+            }
+        }
         if item.icon.drawing, !item.icon.string.isEmpty {
             trackX += CGFloat(item.icon.paddingLeft)
                 + fontCache.measure(part: item.icon).width
@@ -338,9 +442,17 @@ public final class BarManager {
     }
 
     public func hitTest(point: CGPoint, on surface: BarSurface) -> Item? {
+        // Members take precedence over the bracket spanning them (sketchybar's
+        // window z-order, expressed as a two-pass hit test).
+        var bracketHit: Item?
         for (itemID, frame) in surface.itemFrames.reversed() where frame.contains(point) {
-            return store.items.first { $0.id == itemID }
+            guard let item = store.items.first(where: { $0.id == itemID }) else { continue }
+            if item.kind == .bracket {
+                if bracketHit == nil { bracketHit = item }
+            } else {
+                return item
+            }
         }
-        return nil
+        return bracketHit
     }
 }

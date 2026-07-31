@@ -77,6 +77,9 @@ public struct PopupState: Sendable {
     /// Fixed row height; 0 = each row sizes to its content.
     public var cellHeight: Float = 0
     public var yOffset: Float = 0
+    /// Close when the user clicks anywhere outside YBar (YBar extension;
+    /// `popup.auto_close=off` restores sketchybar's script-only lifecycle).
+    public var autoClose = true
     public var background = BackgroundStyle()
 
     public init() {
@@ -88,6 +91,31 @@ public struct PopupState: Sendable {
 
 /// Pure geometry for M4 components, split out for testability.
 public enum ComponentGeometry {
+    /// Interactive frames for bracket items (full bar height, like in-flow item
+    /// frames) — must be computed after layout and BEFORE the per-surface hit
+    /// snapshot, or brackets can never be clicked/hovered/host popups.
+    @MainActor
+    public static func bracketFrames(
+        items: [Item], contentBoxes: [Int: CGRect], barHeight: CGFloat
+    ) -> [Int: CGRect] {
+        var frames: [Int: CGRect] = [:]
+        for item in items where item.kind == .bracket && item.drawing {
+            let memberBoxes = item.members.compactMap { name -> CGRect? in
+                guard let member = items.first(where: { $0.name == name }) else { return nil }
+                return contentBoxes[member.id]
+            }
+            if let union = bracketUnion(
+                memberBoxes: memberBoxes,
+                paddingLeft: CGFloat(item.paddingLeft),
+                paddingRight: CGFloat(item.paddingRight)) {
+                frames[item.id] = CGRect(x: union.minX, y: 0, width: union.width, height: barHeight)
+            } else {
+                frames[item.id] = .zero
+            }
+        }
+        return frames
+    }
+
     /// Bracket background box: the union of member content boxes, expanded by
     /// the bracket's own paddings. Nil when no member is visible.
     public static func bracketUnion(

@@ -56,7 +56,8 @@ public final class SceneBuilder {
                 paddingLeft: CGFloat(item.paddingLeft),
                 paddingRight: CGFloat(item.paddingRight))
             else { continue }
-            item.frame = union
+            // Interactive frames are computed in BarManager before the hit
+            // snapshot; here the union drives painting only.
             let height = item.background.height > 0
                 ? CGFloat(item.background.height)
                 : barSize.height - 4

@@ -219,6 +219,10 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                     "MODIFIER": modifier,
                 ])
         }
+        barManager.onSliderDragStarted = { [weak self] item in
+            // An in-flight percentage animation would fight the drag every frame.
+            self?.scheduler.cancel(key: "item.\(item.id).slider.percentage")
+        }
         barManager.onSliderChanged = { [weak self] item, percentage in
             guard let self else { return }
             let environment = [

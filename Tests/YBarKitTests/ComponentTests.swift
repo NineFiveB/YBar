@@ -135,3 +135,32 @@ import Testing
         #expect(normal.frame.width == 40)
     }
 }
+
+@MainActor
+@Suite struct BracketFrameTests {
+    @Test func bracketFramesSpanMembersAtFullBarHeight() {
+        let a = Item(name: "a", position: .left)
+        let b = Item(name: "b", position: .left)
+        let bracket = Item(name: "grp", position: .left)
+        bracket.kind = .bracket
+        bracket.members = ["a", "b"]
+
+        let frames = ComponentGeometry.bracketFrames(
+            items: [a, b, bracket],
+            contentBoxes: [
+                a.id: CGRect(x: 10, y: 0, width: 40, height: 30),
+                b.id: CGRect(x: 60, y: 0, width: 30, height: 30),
+            ],
+            barHeight: 32)
+        #expect(frames[bracket.id] == CGRect(x: 10, y: 0, width: 80, height: 32))
+    }
+
+    @Test func bracketWithoutVisibleMembersGetsZeroFrame() {
+        let bracket = Item(name: "grp", position: .left)
+        bracket.kind = .bracket
+        bracket.members = ["ghost"]
+        let frames = ComponentGeometry.bracketFrames(
+            items: [bracket], contentBoxes: [:], barHeight: 32)
+        #expect(frames[bracket.id] == .zero)
+    }
+}

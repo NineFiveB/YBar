@@ -27,6 +27,9 @@ public struct MouseEventInfo {
 public final class MetalHostView: NSView {
     public let metalLayer = CAMetalLayer()
     public var onMouse: ((MouseEventInfo) -> Void)?
+    /// Fired when backingScaleFactor changes (window moved across displays) —
+    /// the owner must schedule a corrective frame at the new scale.
+    public var onBackingChanged: (() -> Void)?
 
     public override var isFlipped: Bool { true }
     public override var wantsUpdateLayer: Bool { true }
@@ -69,6 +72,7 @@ public final class MetalHostView: NSView {
     public override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         updateDrawableSize()
+        onBackingChanged?()
     }
 
     // MARK: - Mouse
