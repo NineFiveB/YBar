@@ -2,165 +2,141 @@ local icons = require("icons")
 local colors = require("colors")
 local settings = require("settings")
 
--- Config dir: sketchybar sets CONFIG_DIR when item scripts run; at load time use fallback
-local config_dir = SKETCHYBAR_CONFIG  -- YBAR PORT: helpers live in the original tree
-local network_load_bin = config_dir .. "/helpers/event_providers/network_load/bin/network_load"
-
--- YBAR PORT: register the event up front so subscriptions succeed even when
--- the provider binary is absent.
-sbar.add("event", "network_update")
-
--- Execute the event provider binary which provides the event "network_update"
--- for the network interface "en0", which is fired every 2.0 seconds. Skip if binary missing (e.g. not built).
-sbar.exec("killall network_load >/dev/null 2>&1; [ -x '" .. network_load_bin:gsub("'", "'\\''") .. "' ] && '" .. network_load_bin:gsub("'", "'\\''") .. "' en0 network_update 2.0")
+-- YBAR PORT: rebuilt as a native-style Wi-Fi menu. The old widget showed
+-- up/down speeds on the bar (dead helper binary -> "??? Bps") and a popup of
+-- device details whose SSID macOS now redacts. This one is a single wifi pill
+-- whose popup lists nearby networks (click to join) like the system menu,
+-- plus the ProtonVPN row driven by the real tunnel state.
 
 local popup_width = 250
+local max_networks = 8
 
-local wifi_up = sbar.add("item", "widgets.wifi1", {
-  position = "right",
-  padding_left = -5,
-  width = 0,
-  icon = {
-    padding_right = 0,
-    font = {
-      style = settings.font.style_map["Bold"],
-      size = 9.0,
-    },
-    string = icons.wifi.upload,
-  },
-  label = {
-    font = {
-      family = settings.font.numbers,
-      style = settings.font.style_map["Bold"],
-      size = 9.0,
-    },
-    color = colors.red,
-    string = "??? Bps",
-  },
-  y_offset = 4,
-})
-
-local wifi_down = sbar.add("item", "widgets.wifi2", {
-  position = "right",
-  padding_left = -5,
-  icon = {
-    padding_right = 0,
-    font = {
-      style = settings.font.style_map["Bold"],
-      size = 9.0,
-    },
-    string = icons.wifi.download,
-  },
-  label = {
-    font = {
-      family = settings.font.numbers,
-      style = settings.font.style_map["Bold"],
-      size = 9.0,
-    },
-    color = colors.blue,
-    string = "??? Bps",
-  },
-  y_offset = -4,
-})
+-- Scanner: system_profiler is the one CLI that still reports real SSIDs, but
+-- it takes ~10s — so results are cached, shown instantly, refreshed behind.
+local wifi_scan_py = (PORT_DIR or (os.getenv("HOME") .. "/.config/ybar"))
+  .. "/helpers/wifi_scan.py"
 
 local wifi = sbar.add("item", "widgets.wifi.padding", {
   position = "right",
+  icon = {
+    string = icons.wifi.connected,
+    padding_left = 8,
+    padding_right = 8,
+  },
   label = { drawing = false },
 })
 
 -- Background around the item
 local wifi_bracket = sbar.add("bracket", "widgets.wifi.bracket", {
   wifi.name,
-  wifi_up.name,
-  wifi_down.name
 }, {
   background = { color = colors.bg1 },
   popup = { align = "center", height = 30 }
 })
 
-local ssid = sbar.add("item", {
+local header = sbar.add("item", {
   position = "popup." .. wifi_bracket.name,
   icon = {
-    font = {
-      style = settings.font.style_map["Bold"]
-    },
-    string = icons.wifi.router,
+    align = "left",
+    string = "Wi-Fi",
+    font = { size = 14, style = settings.font.style_map["Bold"] },
+    width = popup_width / 2,
+  },
+  label = {
+    align = "right",
+    string = "scanning…",
+    color = colors.grey,
+    width = popup_width / 2,
   },
   width = popup_width,
-  align = "center",
-  label = {
-    font = {
-      size = 15,
-      style = settings.font.style_map["Bold"]
-    },
-    max_chars = 18,
-    string = "????????????",
-  },
   background = {
     height = 2,
     color = colors.grey,
-    y_offset = -15
-  }
-})
-
-local hostname = sbar.add("item", {
-  position = "popup." .. wifi_bracket.name,
-  icon = {
-    align = "left",
-    string = "Hostname:",
-    width = popup_width / 2,
-  },
-  label = {
-    max_chars = 20,
-    string = "????????????",
-    width = popup_width / 2,
-    align = "right",
-  }
-})
-
-local ip = sbar.add("item", {
-  position = "popup." .. wifi_bracket.name,
-  icon = {
-    align = "left",
-    string = "IP:",
-    width = popup_width / 2,
-  },
-  label = {
-    string = "???.???.???.???",
-    width = popup_width / 2,
-    align = "right",
-  }
-})
-
-local mask = sbar.add("item", {
-  position = "popup." .. wifi_bracket.name,
-  icon = {
-    align = "left",
-    string = "Subnet mask:",
-    width = popup_width / 2,
-  },
-  label = {
-    string = "???.???.???.???",
-    width = popup_width / 2,
-    align = "right",
-  }
-})
-
-local router = sbar.add("item", {
-  position = "popup." .. wifi_bracket.name,
-  icon = {
-    align = "left",
-    string = "Router:",
-    width = popup_width / 2,
-  },
-  label = {
-    string = "???.???.???.???",
-    width = popup_width / 2,
-    align = "right",
+    y_offset = -15,
   },
 })
 
--- ── ProtonVPN button ────────────────────────────────────────────────────────
+-- One popup row per nearby network, populated from the scan cache.
+local net_rows = {}
+for i = 1, max_networks do
+  local row = sbar.add("item", "widgets.wifi.net." .. i, {
+    position = "popup." .. wifi_bracket.name,
+    drawing = false,
+    width = popup_width,
+    icon = {
+      string = icons.wifi.connected,
+      width = 28,
+      align = "left",
+    },
+    label = {
+      align = "left",
+      width = popup_width - 28,
+      max_chars = 24,
+    },
+  })
+  net_rows[i] = row
+end
+
+local scan_cache = {}
+local scan_running = false
+
+local function signal_color(net)
+  if net.current then return colors.white end
+  if net.rssi <= -900 then return colors.grey end
+  if net.rssi >= -60 then return colors.white end
+  if net.rssi >= -75 then return colors.blue end
+  return colors.grey
+end
+
+local function populate_rows()
+  if #scan_cache == 0 then return end
+  header:set({ label = { string = scan_running and "scanning…" or "" } })
+  for i, row in ipairs(net_rows) do
+    local net = scan_cache[i]
+    if net then
+      row:set({
+        drawing = true,
+        icon = { color = signal_color(net) },
+        label = {
+          string = net.name .. (net.current and "  ✓" or ""),
+          color = net.current and colors.white or colors.grey,
+          font = { style = settings.font.style_map[net.current and "Bold" or "Regular"] },
+        },
+      })
+    else
+      row:set({ drawing = false })
+    end
+  end
+end
+
+local function run_scan()
+  if scan_running then return end
+  scan_running = true
+  header:set({ label = { string = "scanning…" } })
+  sbar.exec(
+    "system_profiler SPAirPortDataType -json 2>/dev/null | python3 '"
+      .. wifi_scan_py:gsub("'", "'\\''") .. "'",
+    function(output)
+      scan_running = false
+      local nets = {}
+      for line in output:gmatch("[^\r\n]+") do
+        local cur, name, rssi, sec = line:match("^(%d)\t(.-)\t(%-?%d+)\t(%d)$")
+        if name and #nets < max_networks then
+          nets[#nets + 1] = {
+            current = cur == "1",
+            name = name,
+            rssi = tonumber(rssi),
+            secured = sec == "1",
+          }
+        end
+      end
+      if #nets > 0 then scan_cache = nets end
+      populate_rows()
+      header:set({ label = { string = "" } })
+    end)
+end
+
+-- ── Wi-Fi Settings + ProtonVPN ──────────────────────────────────────────────
 sbar.add("item", {
   position = "popup." .. wifi_bracket.name,
   background = {
@@ -171,6 +147,21 @@ sbar.add("item", {
   width = popup_width,
   icon = { drawing = false },
   label = { drawing = false },
+})
+
+local settings_row = sbar.add("item", {
+  position = "popup." .. wifi_bracket.name,
+  width = popup_width,
+  icon = {
+    string = icons.gear,
+    width = 28,
+    align = "left",
+  },
+  label = {
+    string = "Wi-Fi Settings…",
+    align = "left",
+    width = popup_width - 28,
+  },
 })
 
 local vpn_button = sbar.add("item", {
@@ -196,18 +187,22 @@ local vpn_button = sbar.add("item", {
   },
 })
 
+-- YBAR PORT: the app being open says nothing about the tunnel. scutil
+-- reports the VPN service's live state ("(Connected)") — the same source
+-- the system uses.
 local function update_vpn_status()
-  sbar.exec("pgrep -x ProtonVPN >/dev/null 2>&1 && echo running || echo stopped",
-    function(output)
-      local running = output:match("running")
-      vpn_button:set({
-        icon = { color = running and colors.green or colors.grey },
-        label = {
-          string = running and "Connected" or "Not Running",
-          color = running and colors.green or colors.grey,
-        },
-      })
-    end)
+  sbar.exec("scutil --nc list 2>/dev/null | grep -i proton", function(output)
+    local connected = output:match("%(Connected%)") ~= nil
+    local present = output:match("%S") ~= nil
+    vpn_button:set({
+      icon = { color = connected and colors.green or colors.grey },
+      label = {
+        string = connected and "Connected"
+          or (present and "Not Connected" or "Not Installed"),
+        color = connected and colors.green or colors.grey,
+      },
+    })
+  end)
 end
 
 vpn_button:subscribe("mouse.clicked", function()
@@ -216,26 +211,7 @@ end)
 
 sbar.add("item", { position = "right", width = settings.group_paddings })
 
-wifi_up:subscribe("network_update", function(env)
-  local up_color = (env.upload == "000 Bps") and colors.grey or colors.red
-  local down_color = (env.download == "000 Bps") and colors.grey or colors.blue
-  wifi_up:set({
-    icon = { color = up_color },
-    label = {
-      string = env.upload,
-      color = up_color
-    }
-  })
-  wifi_down:set({
-    icon = { color = down_color },
-    label = {
-      string = env.download,
-      color = down_color
-    }
-  })
-end)
-
-wifi:subscribe({"wifi_change", "system_woke"}, function(env)
+local function refresh_pill_icon()
   sbar.exec("ipconfig getifaddr en0", function(ip)
     local connected = not (ip == "")
     wifi:set({
@@ -245,7 +221,9 @@ wifi:subscribe({"wifi_change", "system_woke"}, function(env)
       },
     })
   end)
-end)
+end
+
+wifi:subscribe({ "wifi_change", "system_woke" }, refresh_pill_icon)
 
 local function hide_details()
   wifi_bracket:set({ popup = { drawing = false } })
@@ -254,44 +232,47 @@ end
 local function toggle_details()
   local should_draw = wifi_bracket:query().popup.drawing == "off"
   if should_draw then
-    wifi_bracket:set({ popup = { drawing = true }})
-    sbar.exec("networksetup -getcomputername", function(result)
-      hostname:set({ label = result })
-    end)
-    sbar.exec("ipconfig getifaddr en0", function(result)
-      ip:set({ label = result })
-    end)
-    sbar.exec("ipconfig getsummary en0 | awk -F ' SSID : '  '/ SSID : / {print $2}'", function(result)
-      ssid:set({ label = result })
-    end)
-    sbar.exec("networksetup -getinfo Wi-Fi | awk -F 'Subnet mask: ' '/^Subnet mask: / {print $2}'", function(result)
-      mask:set({ label = result })
-    end)
-    sbar.exec("networksetup -getinfo Wi-Fi | awk -F 'Router: ' '/^Router: / {print $2}'", function(result)
-      router:set({ label = result })
-    end)
+    wifi_bracket:set({ popup = { drawing = true } })
+    populate_rows()
+    run_scan()
     update_vpn_status()
   else
     hide_details()
   end
 end
 
-wifi_up:subscribe("mouse.clicked", toggle_details)
-wifi_down:subscribe("mouse.clicked", toggle_details)
 wifi:subscribe("mouse.clicked", toggle_details)
 wifi:subscribe("mouse.exited.global", hide_details)
 
-local function copy_label_to_clipboard(env)
-  local label = sbar.query(env.NAME).label.value
-  sbar.exec("printf '%s' '" .. label:gsub("'", "'\\''") .. "' | pbcopy")
-  sbar.set(env.NAME, { label = { string = icons.clipboard, align="center" } })
-  sbar.delay(1, function()
-    sbar.set(env.NAME, { label = { string = label, align = "right" } })
+-- Click a network row: join it (works for known/open networks — macOS uses
+-- the saved password). Anything needing interactive auth lands in Wi-Fi
+-- Settings instead.
+for i, row in ipairs(net_rows) do
+  row:subscribe("mouse.clicked", function()
+    local net = scan_cache[i]
+    if not net or net.current then return end
+    row:set({ label = { string = "Joining " .. net.name .. "…" } })
+    sbar.exec(
+      "networksetup -setairportnetwork en0 '" .. net.name:gsub("'", "'\\''") .. "'",
+      function(output)
+        if output:match("%S") then
+          -- Needs a password (or failed) — hand off to the system UI.
+          sbar.exec("open 'x-apple.systempreferences:com.apple.wifi-settings-extension'")
+        end
+        hide_details()
+        sbar.delay(3, function()
+          refresh_pill_icon()
+          run_scan()
+        end)
+      end)
   end)
 end
 
-ssid:subscribe("mouse.clicked", copy_label_to_clipboard)
-hostname:subscribe("mouse.clicked", copy_label_to_clipboard)
-ip:subscribe("mouse.clicked", copy_label_to_clipboard)
-mask:subscribe("mouse.clicked", copy_label_to_clipboard)
-router:subscribe("mouse.clicked", copy_label_to_clipboard)
+settings_row:subscribe("mouse.clicked", function()
+  sbar.exec("open 'x-apple.systempreferences:com.apple.wifi-settings-extension'")
+  hide_details()
+end)
+
+-- Warm the cache at load so the first popup opens populated.
+run_scan()
+refresh_pill_icon()
