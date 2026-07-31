@@ -124,9 +124,8 @@ public enum ComponentGeometry {
         var seen = Set<Int>()
         var result: [Item] = []
         for entry in members {
-            if entry.count > 2, entry.hasPrefix("/"), entry.hasSuffix("/") {
-                let pattern = String(entry.dropFirst().dropLast())
-                guard let regex = try? NSRegularExpression(pattern: "^(\(pattern))$") else { continue }
+            if let pattern = ItemStore.regexPattern(from: entry) {
+                guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
                 for item in items where !seen.contains(item.id) {
                     let range = NSRange(item.name.startIndex..., in: item.name)
                     if regex.firstMatch(in: item.name, options: [], range: range) != nil {

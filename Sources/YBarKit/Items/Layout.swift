@@ -38,13 +38,21 @@ public enum Layout {
         // an empty string (text_get_length gates on drawing alone).
         var length: CGFloat = 0
         if item.icon.drawing {
-            length += CGFloat(item.icon.paddingLeft) + measured.iconSize.width + CGFloat(item.icon.paddingRight)
+            length += partAdvance(item.icon, inkWidth: measured.iconSize.width)
         }
         length += item.contentWidth
         if item.label.drawing {
-            length += CGFloat(item.label.paddingLeft) + measured.labelSize.width + CGFloat(item.label.paddingRight)
+            length += partAdvance(item.label, inkWidth: measured.labelSize.width)
         }
         return length
+    }
+
+    /// Total horizontal advance of a text part. A fixed customWidth REPLACES
+    /// ink + paddings entirely (sketchybar's text_get_length override: paddings
+    /// live inside the slot), so width=0 collapses to exactly zero.
+    public static func partAdvance(_ part: TextPart, inkWidth: CGFloat) -> CGFloat {
+        if part.customWidth >= 0 { return CGFloat(part.customWidth) }
+        return CGFloat(part.paddingLeft) + inkWidth + CGFloat(part.paddingRight)
     }
 
     @discardableResult

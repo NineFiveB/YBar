@@ -253,7 +253,7 @@ public final class CommandHandler {
             guard args.count >= 3 else { return "[!] usage: --add bracket <name> <member>..." }
             let members = Array(args.dropFirst(2))
             let missing = members.filter {
-                !$0.hasPrefix("/") && barManager.store.item(named: $0) == nil
+                ItemStore.regexPattern(from: $0) == nil && barManager.store.item(named: $0) == nil
             }
             guard missing.isEmpty else { return "[!] unknown bracket members: \(missing.joined(separator: ", "))" }
             guard let item = barManager.store.add(name: args[1], position: .left) else {

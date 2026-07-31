@@ -530,6 +530,7 @@ public enum PropertySetter {
             ctx.invalidate()
             return nil
         }
+        guard Float(value) != nil else { return "[!] invalid number: \(value)" }
         if let animation = ctx.animation, animation.durationFrames > 0,
            item[keyPath: widthPath] < 0, let measure = ctx.measureTextNaturalWidth {
             item[keyPath: widthPath] = measure(item, isIcon)
@@ -571,7 +572,9 @@ public enum PropertySetter {
             ctx.invalidate()
             return nil
         }
-        // Animating dynamic -> fixed: seed from the real rendered width, not -1.
+        // Animating dynamic -> fixed: seed from the real rendered width, not -1
+        // (validated first — a bad value must not freeze the dynamic sentinel).
+        guard Float(value) != nil else { return "[!] invalid number: \(value)" }
         if let animation = ctx.animation, animation.durationFrames > 0,
            item.customWidth < 0, let measure = ctx.measureNaturalWidth {
             item.customWidth = measure(item)

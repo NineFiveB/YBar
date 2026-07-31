@@ -67,14 +67,12 @@ public final class FontCache {
         return configured
     }
 
-    /// Measured size of one text part (layout units, points). A fixed
-    /// `customWidth` overrides the natural width (content clips/aligns inside).
+    /// Measured ink size of one text part (layout units, points). Fixed-width
+    /// slot semantics (customWidth with paddings folded INSIDE, sketchybar's
+    /// text_get_length override) are applied by Layout.partAdvance and
+    /// SceneBuilder — not here.
     public func measure(part: TextPart) -> CGSize {
-        let natural = naturalMeasure(part: part)
-        if part.customWidth >= 0 {
-            return CGSize(width: CGFloat(part.customWidth), height: natural.height)
-        }
-        return natural
+        naturalMeasure(part: part)
     }
 
     /// Natural (unclamped) size of the part's content.

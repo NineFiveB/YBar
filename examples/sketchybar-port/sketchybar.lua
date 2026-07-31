@@ -78,9 +78,9 @@ function compat.add(kind, a, b, c)
     else
       name, members, props = next_name(), a, b
     end
-    local item = ybar.add("bracket", name, members)
-    if item and props then item:set(props) end
-    return item or handle(name)
+    local item = ybar.add("bracket", name, members) or handle(name)
+    if props then item:set(props) end
+    return item
   end
 
   if kind == "slider" or kind == "graph" then
@@ -92,9 +92,9 @@ function compat.add(kind, a, b, c)
     end
     props = props or {}
     local position = split_position(props)
-    local item = ybar.add(kind, name, position, width)
-    if item then item:set(props) end
-    return item or handle(name)
+    local item = ybar.add(kind, name, position, width) or handle(name)
+    item:set(props)
+    return item
   end
 
   -- plain items
@@ -106,9 +106,9 @@ function compat.add(kind, a, b, c)
   end
   props = props or {}
   local position = split_position(props)
-  local item = ybar.add("item", name, position)
-  if item then item:set(props) end
-  return item or handle(name)
+  local item = ybar.add("item", name, position) or handle(name)
+  item:set(props)
+  return item
 end
 
 -- ── The rest of the sbar surface ──────────────────────────────────────────

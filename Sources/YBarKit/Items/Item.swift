@@ -119,12 +119,21 @@ public final class ItemStore {
         items.first { $0.name == name }
     }
 
-    /// Items matching an exact name or a `/regex/` pattern (sketchybar's
-    /// regex-targeting convention, anchored to the full name).
+    /// The inner pattern of a `/regex/` target, or nil for plain names.
+    public static func regexPattern(from target: String) -> String? {
+        guard target.count > 2, target.hasPrefix("/"), target.hasSuffix("/") else { return nil }
+        return String(target.dropFirst().dropLast())
+    }
+
+    /// Items matching an exact name or a `/regex/` pattern. UNANCHORED substring
+    /// match — sketchybar uses plain regexec, and upstream configs depend on it
+    /// (`/bt.device\.*/` must match "bt.device.0" via the "bt.device" prefix).
     public func items(matching target: String) -> [Item] {
-        if target.count > 2, target.hasPrefix("/"), target.hasSuffix("/") {
-            let pattern = String(target.dropFirst().dropLast())
-            guard let regex = try? NSRegularExpression(pattern: "^(\(pattern))$") else { return [] }
+        if let pattern = ItemStore.regexPattern(from: target) {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else {
+                FileHandle.standardError.write(Data("[ybar] invalid regex target: \(target)\n".utf8))
+                return []
+            }
             return items.filter { item in
                 regex.firstMatch(
                     in: item.name, options: [],

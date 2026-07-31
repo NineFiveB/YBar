@@ -164,12 +164,13 @@ public final class SceneBuilder {
             emitBackground(item.background, rect: backgroundRect, scale: scale, into: &list)
         }
 
-        // Fixed-width alignment slack.
+        // Fixed-width alignment slack (unclamped: overflow anchors per align
+        // and the clip below trims the far side — sketchybar behavior).
         var penX = contentBox.minX
         if item.customWidth >= 0 {
             let natural = Layout.naturalLength(
                 item: item, measured: MeasuredContent(iconSize: iconSize, labelSize: labelSize))
-            let slack = max(0, CGFloat(item.customWidth) - natural)
+            let slack = CGFloat(item.customWidth) - natural
             switch item.align {
             case "c": penX += slack / 2
             case "r": penX += slack
@@ -188,12 +189,19 @@ public final class SceneBuilder {
             : nil
 
         // Icon, sandwich content, then label (paddings advance the pen even
-        // for empty strings — sketchybar parity).
+        // for empty strings — sketchybar parity). Fixed-width parts receive
+        // the SLOT origin; their paddings/alignment resolve inside emitText.
         if item.icon.drawing {
-            penX += CGFloat(item.icon.paddingLeft)
-            emitText(part: item.icon, penX: penX, centerY: centerY,
-                     scale: scale, atlas: atlas, clip: clip, into: &list)
-            penX += iconSize.width + CGFloat(item.icon.paddingRight)
+            if item.icon.customWidth >= 0 {
+                emitText(part: item.icon, penX: penX, centerY: centerY,
+                         scale: scale, atlas: atlas, clip: clip, into: &list)
+                penX += CGFloat(item.icon.customWidth)
+            } else {
+                penX += CGFloat(item.icon.paddingLeft)
+                emitText(part: item.icon, penX: penX, centerY: centerY,
+                         scale: scale, atlas: atlas, clip: clip, into: &list)
+                penX += iconSize.width + CGFloat(item.icon.paddingRight)
+            }
         }
         if let graph = item.graph {
             emitGraph(graph, item: item, penX: penX, contentBox: contentBox,
@@ -206,9 +214,14 @@ public final class SceneBuilder {
             penX += CGFloat(slider.width)
         }
         if item.label.drawing {
-            penX += CGFloat(item.label.paddingLeft)
-            emitText(part: item.label, penX: penX, centerY: centerY,
-                     scale: scale, atlas: atlas, clip: clip, into: &list)
+            if item.label.customWidth >= 0 {
+                emitText(part: item.label, penX: penX, centerY: centerY,
+                         scale: scale, atlas: atlas, clip: clip, into: &list)
+            } else {
+                penX += CGFloat(item.label.paddingLeft)
+                emitText(part: item.label, penX: penX, centerY: centerY,
+                         scale: scale, atlas: atlas, clip: clip, into: &list)
+            }
         }
         // TODO(v1.5): per-part backgrounds (icon.background.* / label.background.*).
     }
@@ -337,17 +350,21 @@ public final class SceneBuilder {
         let color = part.effectiveColor.simd
         let partCenterY = centerY - CGFloat(part.yOffset)
 
-        // Fixed-width parts align their content in the box and clip to it —
-        // the substrate of the hover-reveal idiom (width animating 0↔natural).
+        // Fixed-width parts: penX is the SLOT origin; paddings fold inside the
+        // slot (sketchybar text_get_length override), content aligns with
+        // UNCLAMPED slack (overflow anchors per align; the slot clip trims the
+        // far side), and everything clips to the slot box.
         var penX = penX
         var clip = clip
         if part.customWidth >= 0 {
-            let natural = fontCache.naturalMeasure(part: part).width
-            let slack = CGFloat(part.customWidth) - natural
+            let ink = fontCache.naturalMeasure(part: part).width
+            let slack = CGFloat(part.customWidth)
+                - CGFloat(part.paddingLeft) - CGFloat(part.paddingRight) - ink
             let boxOrigin = penX
+            penX += CGFloat(part.paddingLeft)
             switch part.align {
-            case "c": penX += max(0, slack) / 2
-            case "r": penX += max(0, slack)
+            case "c": penX += slack / 2
+            case "r": penX += slack
             default: break
             }
             let partBox = CGRect(

@@ -102,6 +102,11 @@ public final class BarManager {
     // MARK: - Surfaces
 
     public func rebuildSurfaces() {
+        // Closed panels never deliver mouseExited — clean the presence set or
+        // mouse.exited.global dies for the session after a display change.
+        let hadPointer = surfaces.contains { pointerInsideSurfaces.contains(ObjectIdentifier($0)) }
+        surfaces.forEach { pointerInsideSurfaces.remove(ObjectIdentifier($0)) }
+        if hadPointer { scheduleGlobalExitCheck() }
         surfaces.forEach { $0.close() }
         surfaces.removeAll()
 
@@ -219,7 +224,9 @@ public final class BarManager {
         }
 
         for (hostID, popupSurface) in popupSurfaces where !liveHostIDs.contains(hostID) {
-            pointerInsideSurfaces.remove(ObjectIdentifier(popupSurface))
+            if pointerInsideSurfaces.remove(ObjectIdentifier(popupSurface)) != nil {
+                scheduleGlobalExitCheck()
+            }
             popupSurface.close()
             popupSurfaces.removeValue(forKey: hostID)
         }
@@ -358,9 +365,12 @@ public final class BarManager {
         return Float(Layout.naturalLength(item: item, measured: measured))
     }
 
-    /// Natural width of one text part (`icon.width=dynamic` / `label.width=dynamic`).
+    /// Natural SLOT width of one text part — ink plus its paddings, because a
+    /// fixed customWidth replaces all three (`width=dynamic` animation endpoint).
     public func naturalTextWidth(of item: Item, icon: Bool) -> Float {
-        Float(fontCache.naturalMeasure(part: icon ? item.icon : item.label).width)
+        let part = icon ? item.icon : item.label
+        return Float(fontCache.naturalMeasure(part: part).width)
+            + part.paddingLeft + part.paddingRight
     }
 
     /// Items associated with a surface's display (mask bit i-1 = display i; 0 = all).

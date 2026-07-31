@@ -491,7 +491,7 @@ public final class LuaRuntime {
             // position carries comma-separated members for brackets.
             let members = position.split(separator: ",").map(String.init)
             let missing = members.filter {
-                !$0.hasPrefix("/") && store.item(named: $0) == nil
+                ItemStore.regexPattern(from: $0) == nil && store.item(named: $0) == nil
             }
             guard missing.isEmpty else { return "[!] unknown bracket members: \(missing.joined(separator: ", "))" }
             guard let item = store.add(name: name, position: .left) else {
@@ -554,19 +554,15 @@ public final class LuaRuntime {
         }
     }
 
-    /// SENDER=forced to every item's Lua handlers, one call per distinct
-    /// handler (`ybar.update()` — the boot-population idiom sketchybar's
-    /// --update provides for shell configs).
+    /// SENDER=forced once per item, resolved exactly like normal dispatch
+    /// ("forced" handler, else "routine") — SbarLua semantics. Mouse and named
+    /// event handlers must NOT fire here: a boot-time forced update clicking
+    /// every item is a destructive phantom interaction.
     func dispatchForcedToAllHandlers() {
         for item in barManager.store.items {
-            guard let handlers = subscriptions[item.id], !handlers.isEmpty else { continue }
-            var calledRefs = Set<Int32>()
-            for (_, ref) in handlers where !calledRefs.contains(ref) {
-                calledRefs.insert(ref)
-                call(ref: ref, environment: [
-                    "NAME": item.name, "SENDER": "forced", "INFO": "",
-                ])
-            }
+            _ = handleEvent(item: item, environment: [
+                "NAME": item.name, "SENDER": "forced", "INFO": "",
+            ])
         }
         barManager.setNeedsRender()
     }
