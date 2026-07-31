@@ -1,7 +1,9 @@
 import Foundation
 
-/// Config discovery, sketchybar-compatible search order:
-/// `-c <path>` → `$XDG_CONFIG_HOME/<name>/<name>rc` → `~/.config/<name>/<name>rc` → `~/.<name>rc`.
+/// Config discovery, sketchybar-compatible search order with a Lua twist:
+/// `-c <path>` → per directory, `<name>rc.lua` (embedded YbarLua) is preferred
+/// over the executable `<name>rc` shell script:
+/// `$XDG_CONFIG_HOME/<name>/` → `~/.config/<name>/` → `~/.{<name>rc.lua,<name>rc}`.
 public enum ConfigLocator {
     public static func locate(explicitPath: String?, instanceName: String) -> URL? {
         let fileManager = FileManager.default
@@ -11,13 +13,18 @@ public enum ConfigLocator {
         }
         var candidates: [URL] = []
         let environment = ProcessInfo.processInfo.environment
+
+        func addDirectory(_ directory: URL) {
+            candidates.append(directory.appendingPathComponent("\(instanceName)rc.lua"))
+            candidates.append(directory.appendingPathComponent("\(instanceName)rc"))
+        }
+
         if let xdg = environment["XDG_CONFIG_HOME"], !xdg.isEmpty {
-            candidates.append(URL(fileURLWithPath: xdg)
-                .appendingPathComponent(instanceName)
-                .appendingPathComponent("\(instanceName)rc"))
+            addDirectory(URL(fileURLWithPath: xdg).appendingPathComponent(instanceName))
         }
         let home = fileManager.homeDirectoryForCurrentUser
-        candidates.append(home.appendingPathComponent(".config/\(instanceName)/\(instanceName)rc"))
+        addDirectory(home.appendingPathComponent(".config/\(instanceName)"))
+        candidates.append(home.appendingPathComponent(".\(instanceName)rc.lua"))
         candidates.append(home.appendingPathComponent(".\(instanceName)rc"))
         return candidates.first { fileManager.fileExists(atPath: $0.path) }
     }

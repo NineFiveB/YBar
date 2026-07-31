@@ -9,8 +9,16 @@ let package = Package(
             name: "ybar",
             dependencies: ["YBarKit"]
         ),
+        // Vendored Lua 5.4.8 (MIT) — the YbarLua config runtime.
+        .target(
+            name: "CLua",
+            cSettings: [
+                .define("LUA_USE_MACOSX")
+            ]
+        ),
         .target(
             name: "YBarKit",
+            dependencies: ["CLua"],
             resources: [
                 // Copied verbatim and compiled at runtime via makeLibrary(source:) —
                 // works without the Xcode metal toolchain (CLT-only machines).

@@ -48,6 +48,9 @@ public final class Item {
 
     // Interaction state
     public var mouseOver: Bool = false
+    /// The embedded Lua runtime holds callbacks for this item (events fire
+    /// even without a shell script).
+    public var hasLuaHandlers: Bool = false
 
     /// Frame within the bar, set by layout (bar-local, top-left origin, points).
     public var frame: CGRect = .zero

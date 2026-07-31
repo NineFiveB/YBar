@@ -83,7 +83,8 @@ public final class EventBus {
     /// events and `--update` intentionally bypass it via their own paths.
     public func trigger(name: String, info: String = "", extraEnvironment: [String: String] = [:]) {
         guard let bit = bit(for: name), let items = itemsProvider?() else { return }
-        for item in items where item.updateMask & bit != 0 && !item.script.isEmpty {
+        for item in items where item.updateMask & bit != 0
+            && (!item.script.isEmpty || item.hasLuaHandlers) {
             if item.updatePolicy == .off { continue }
             if item.updatePolicy == .whenShown, !item.isVisible { continue }
             // Contract variables are applied last: a `--trigger e NAME=x` payload

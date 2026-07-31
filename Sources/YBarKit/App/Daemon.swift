@@ -57,6 +57,7 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
 
     var routineTimer: Timer?
     var configURL: URL?
+    var luaRuntime: LuaRuntime?
 
     init(explicitConfigPath: String?) throws {
         self.instanceName = Version.instanceName
@@ -129,8 +130,7 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
             self?.barManager.store.items ?? []
         }
         eventBus.runItemScript = { [weak self] item, environment in
-            guard !item.script.isEmpty else { return }
-            self?.scriptRunner.run(script: item.script, environment: environment)
+            self?.dispatchItemScript(item: item, environment: environment)
         }
         eventBus.onFirstSubscription = { [weak self] eventName in
             guard let self else { return }
@@ -243,12 +243,22 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
     private func triggerTargeted(item: Item, eventName: String, environment: [String: String]) {
         guard let bit = eventBus.bit(for: eventName),
               item.updateMask & bit != 0,
-              !item.script.isEmpty
+              !item.script.isEmpty || item.hasLuaHandlers
         else { return }
         var env = environment
         env["SENDER"] = eventName
         env["INFO"] = env["INFO"] ?? ""
-        scriptRunner.run(script: item.script, environment: env)
+        dispatchItemScript(item: item, environment: env)
+    }
+
+    /// Lua-first dispatch: an embedded callback handles the event in-process;
+    /// otherwise the shell script contract runs.
+    func dispatchItemScript(item: Item, environment: [String: String]) {
+        if let luaRuntime, luaRuntime.handleEvent(item: item, environment: environment) {
+            return
+        }
+        guard !item.script.isEmpty else { return }
+        scriptRunner.run(script: item.script, environment: environment)
     }
 
     private func wireCommandHandler() {
@@ -324,13 +334,14 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
 
     private func routineTick() {
         for item in barManager.store.items {
-            guard item.updateFrequency > 0, !item.script.isEmpty else { continue }
+            guard item.updateFrequency > 0,
+                  !item.script.isEmpty || item.hasLuaHandlers else { continue }
             if item.updatePolicy == .off { continue }
             if item.updatePolicy == .whenShown, !item.isVisible { continue }
             item.routineCounter += 1
             if item.routineCounter >= item.updateFrequency {
                 item.routineCounter = 0
-                scriptRunner.run(script: item.script, environment: [
+                dispatchItemScript(item: item, environment: [
                     "NAME": item.name, "SENDER": "routine", "INFO": "",
                 ])
             }
@@ -360,7 +371,23 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         }
         hotload.watch(directory: directory, configFile: url)
         hotload.noteReloadHappened()
-        scriptRunner.runConfigScript(at: url)
+        runConfig(at: url)
+    }
+
+    /// `.lua` configs run in the embedded YbarLua runtime; anything else is an
+    /// executable script driving the CLI (sketchybar model).
+    private func runConfig(at url: URL) {
+        if url.pathExtension == "lua" {
+            if luaRuntime == nil {
+                luaRuntime = LuaRuntime(
+                    barManager: barManager, eventBus: eventBus, scheduler: scheduler)
+            }
+            if let error = luaRuntime?.runConfig(at: url) {
+                FileHandle.standardError.write(Data("\(error)\n".utf8))
+            }
+        } else {
+            scriptRunner.runConfigScript(at: url)
+        }
     }
 
     /// Full teardown + re-exec — no diffing (config is imperative; sketchybar's call).
@@ -386,7 +413,7 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
             ]
             hotload.watch(directory: directory, configFile: configURL)
             hotload.noteReloadHappened()
-            scriptRunner.runConfigScript(at: configURL)
+            runConfig(at: configURL)
         }
         barManager.setNeedsRender()
     }
