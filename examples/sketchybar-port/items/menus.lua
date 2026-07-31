@@ -66,7 +66,13 @@ space_menu_swap:subscribe("swap_menus_and_spaces", function(env)
   if drawing then
     menu_watcher:set( { updates = false })
     sbar.set("/menu\\..*/", { drawing = false })
-    sbar.set("/space\\..*/", { drawing = true })
+    -- YBAR PORT: a blanket show resurrects every configured workspace
+    -- (6..9, A..Z). Restore through the spaces refresh instead, which only
+    -- shows non-empty or focused workspaces and re-applies highlights.
+    sbar.exec("aerospace list-workspaces --focused 2>/dev/null", function(focused)
+      sbar.trigger("aerospace_workspace_change",
+        { FOCUSED_WORKSPACE = focused:gsub("%s+", "") })
+    end)
     sbar.set("front_app", { drawing = true })
   else
     menu_watcher:set( { updates = true })
