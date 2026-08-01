@@ -85,6 +85,61 @@ local remaining_time = add_detail("Time Remaining")
 local condition      = add_detail("Condition")
 local max_capacity   = add_detail("Max Capacity")
 
+-- ── Battery Level graph (last 24 hours, from pmset's charge log) ───────────
+local history_script = (PORT_DIR or (os.getenv("HOME") .. "/.config/ybar"))
+  .. "/helpers/battery_history.py"
+local history_buckets = 216   -- 24h at ~6.7 min per sample; 1pt per sample
+
+sbar.add("item", {
+  position = popup_pos,
+  width = popup_width,
+  icon = {
+    align = "left",
+    string = "Battery Level",
+    color = colors.white,
+    font = { size = 13, style = settings.font.style_map["Bold"] },
+    width = popup_width / 2,
+    padding_left = inset,
+  },
+  label = {
+    align = "right",
+    string = "Last 24 Hours",
+    color = colors.grey,
+    font = { size = 11.0 },
+    width = popup_width / 2,
+    padding_right = inset,
+  },
+  padding_top = 6,
+})
+
+local history = sbar.add("graph", "widgets.battery.history", history_buckets, {
+  position = popup_pos,
+  graph = { color = colors.green },
+  background = {
+    height = 64,
+    color = { alpha = 0 },
+    border_color = { alpha = 0 },
+    drawing = true,
+  },
+  icon = { drawing = false },
+  label = { drawing = false },
+  padding_left = inset,
+  padding_right = inset,
+})
+
+local function update_history()
+  sbar.exec(
+    "pmset -g log | python3 '" .. history_script:gsub("'", "'\\''") .. "' "
+      .. history_buckets .. " 2>/dev/null",
+    function(out)
+      local values = {}
+      for v in out:gmatch("%d+") do
+        values[#values + 1] = tonumber(v) / 100
+      end
+      if #values > 0 then history:push(values) end
+    end)
+end
+
 sbar.add("item", {
   position = popup_pos,
   width = popup_width,
@@ -163,6 +218,7 @@ local function toggle_details()
     battery_bracket:set({ popup = { drawing = true } })
     update_main_icon()
     update_health()
+    update_history()
   else
     hide_details()
   end
