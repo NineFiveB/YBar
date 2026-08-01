@@ -4,14 +4,16 @@ local settings = require("settings")
 
 -- YBAR PORT: the cpu_load event-provider binary is replaced by YBar's
 -- built-in system_stats event (in-process host_statistics sampling).
--- The popup is a rich sectioned panel (no graphs/sliders): CPU with
--- user/system split, load and top process, memory with pressure and swap,
--- GPU, disk, uptime — fed by helpers/system_stats_rich.sh.
+-- The popup is an Apple-style sectioned panel (no graphs): every left
+-- label sits on one of two indents, every value ends on the same right
+-- edge, SF Pro throughout, units normalized in Lua.
 
 local stats_script = (PORT_DIR or (os.getenv("HOME") .. "/.config/ybar"))
   .. "/helpers/system_stats_rich.sh"
 
 local popup_width = 260
+local inset = 12          -- shared left/right content inset
+local detail_indent = 24  -- detail rows indent under their section
 
 -- ── Bar item: small CPU graph in the menu bar ─────────────────────────────
 local cpu = sbar.add("graph", "widgets.cpu", 42, {
@@ -44,7 +46,7 @@ local cpu_bracket = sbar.add("bracket", "widgets.cpu.bracket", { cpu.name }, {
   popup = { align = "center", height = 30 }
 })
 
--- ── Popup: rich sectioned panel ───────────────────────────────────────────
+-- ── Popup: Apple-style sectioned panel ────────────────────────────────────
 local popup_pos = "popup." .. cpu_bracket.name
 
 sbar.add("item", "widgets.cpu.popup.header", {
@@ -57,7 +59,7 @@ sbar.add("item", "widgets.cpu.popup.header", {
   padding_bottom = 4,
 })
 
--- Section row: bold title left, prominent value right.
+-- Section row: semibold title, prominent value, shared columns.
 local function add_section(title)
   return sbar.add("item", {
     position = popup_pos,
@@ -67,26 +69,22 @@ local function add_section(title)
       align = "left",
       width = popup_width / 2,
       color = colors.white,
-      font = { size = 13, style = settings.font.style_map["Bold"] },
-      padding_left = 8,
+      font = { size = 13, style = settings.font.style_map["Semibold"] },
+      padding_left = inset,
     },
     label = {
       string = "…",
       align = "right",
       width = popup_width / 2,
       color = colors.white,
-      font = {
-        family = settings.font.numbers,
-        style = settings.font.style_map["Bold"],
-        size = 13.0,
-      },
-      padding_right = 8,
+      font = { size = 13, style = settings.font.style_map["Semibold"] },
+      padding_right = inset,
     },
     padding_top = 4,
   })
 end
 
--- Detail row: dim, indented under its section.
+-- Detail row: secondary color, indented label, value on the shared right edge.
 local function add_detail(title)
   return sbar.add("item", {
     position = popup_pos,
@@ -96,20 +94,16 @@ local function add_detail(title)
       align = "left",
       width = popup_width / 2,
       color = colors.grey,
-      font = { size = 11.0 },
-      padding_left = 18,
+      font = { size = 12.0 },
+      padding_left = detail_indent,
     },
     label = {
       string = "…",
       align = "right",
       width = popup_width / 2,
       color = colors.grey,
-      font = {
-        family = settings.font.numbers,
-        style = settings.font.style_map["Bold"],
-        size = 11.0,
-      },
-      padding_right = 8,
+      font = { size = 12.0, style = settings.font.style_map["Semibold"] },
+      padding_right = inset,
     },
   })
 end
@@ -122,17 +116,18 @@ local function add_separator()
     label = { drawing = false },
     background = {
       height = 2,
-      color = colors.with_alpha(colors.grey, 0.4),
+      color = colors.with_alpha(colors.grey, 0.3),
     },
   })
 end
 
-local cpu_section  = add_section("CPU")
-local cpu_split    = add_detail("User · System")
+local cpu_section = add_section("CPU")
+local cpu_user    = add_detail("User")
+local cpu_system  = add_detail("System")
 
--- Load as a line: a knobless slider filled with the 1-minute load relative
--- to core count, with the 1 · 5 · 15 numbers kept compact on the right.
-local cpu_load = sbar.add("slider", 72, {
+-- Load as a line: knobless slider in its own middle column, value in the
+-- shared right column.
+local cpu_load = sbar.add("slider", 60, {
   position = popup_pos,
   width = popup_width,
   slider = {
@@ -148,30 +143,26 @@ local cpu_load = sbar.add("slider", 72, {
   icon = {
     string = "Load",
     align = "left",
-    width = 54,
+    width = popup_width / 2,
     color = colors.grey,
-    font = { size = 11.0 },
-    padding_left = 18,
+    font = { size = 12.0 },
+    padding_left = detail_indent,
   },
   label = {
     string = "…",
     align = "right",
-    width = 126,
+    width = popup_width / 2 - 60,
     color = colors.grey,
-    font = {
-      family = settings.font.numbers,
-      style = settings.font.style_map["Bold"],
-      size = 11.0,
-    },
-    padding_right = 8,
+    font = { size = 12.0, style = settings.font.style_map["Semibold"] },
+    padding_right = inset,
   },
 })
 
-local cpu_top      = add_detail("Top process")
+local cpu_top = add_detail("Top Process")
 add_separator()
 local mem_section  = add_section("Memory")
 local mem_pressure = add_detail("Pressure")
-local mem_swap     = add_detail("Swap used")
+local mem_swap     = add_detail("Swap")
 add_separator()
 local gpu_section  = add_section("GPU")
 add_separator()
@@ -198,6 +189,25 @@ local function cpu_color_for(load)
   end
 end
 
+-- "23G" / "646.38M" / "1995G" (df/top SI suffixes) -> GB.
+local function to_gb(str)
+  local n, unit = (str or ""):match("^([%d%.]+)([KMGT])")
+  n = tonumber(n)
+  if not n then return nil end
+  if unit == "T" then return n * 1000 end
+  if unit == "M" then return n / 1000 end
+  if unit == "K" then return n / 1000000 end
+  return n
+end
+
+local function fmt_size(gb)
+  if not gb then return "—" end
+  if gb >= 1000 then return string.format("%.1f TB", gb / 1000) end
+  if gb >= 10 then return string.format("%.0f GB", gb) end
+  if gb >= 1 then return string.format("%.1f GB", gb) end
+  return string.format("%.0f MB", gb * 1000)
+end
+
 local function format_uptime(boot_sec)
   local diff = os.time() - boot_sec
   if diff <= 0 then return "—" end
@@ -214,9 +224,9 @@ local function update_popup_from_helper(out)
 
   local user = tonumber(stats.CPU_USER)
   local sys = tonumber(stats.CPU_SYS)
-  cpu_split:set({
-    label = user and string.format("%.0f%% · %.0f%%", user, sys or 0) or "—",
-  })
+  cpu_user:set({ label = user and string.format("%.0f%%", user) or "—" })
+  cpu_system:set({ label = sys and string.format("%.0f%%", sys) or "—" })
+
   local load1 = tonumber(stats.LOAD1)
   local ncpu = tonumber(stats.NCPU) or 1
   local load_pct = load1 and math.min(math.floor(load1 / ncpu * 100 + 0.5), 100) or 0
@@ -225,11 +235,9 @@ local function update_popup_from_helper(out)
       percentage = load_pct,
       highlight_color = cpu_color_for(load_pct),
     },
-    label = load1
-      and string.format("%.1f · %.1f · %.1f",
-        load1, tonumber(stats.LOAD5) or 0, tonumber(stats.LOAD15) or 0)
-      or "—",
+    label = load1 and string.format("%.1f", load1) or "—",
   })
+
   local top_cpu = tonumber(stats.TOP_CPU)
   cpu_top:set({
     label = (stats.TOP_NAME and top_cpu)
@@ -237,10 +245,11 @@ local function update_popup_from_helper(out)
   })
 
   local total_bytes = tonumber(stats.MEM_TOTAL_BYTES) or 0
-  local total = total_bytes > 0
-    and string.format("%d GB", math.floor(total_bytes / 1073741824 + 0.5)) or "?"
+  local total_gb = total_bytes > 0 and total_bytes / 1073741824 or nil
+  local used_gb = to_gb(stats.MEM_USED)
   mem_section:set({
-    label = (stats.MEM_USED or "?") .. " / " .. total,
+    label = (used_gb and total_gb)
+      and (fmt_size(used_gb) .. " of " .. fmt_size(total_gb)) or "—",
   })
   local pressure = stats.MEM_PRESSURE or "—"
   mem_pressure:set({
@@ -250,7 +259,7 @@ local function update_popup_from_helper(out)
         or (pressure == "Warning" and colors.yellow or colors.red),
     },
   })
-  mem_swap:set({ label = stats.SWAP_USED or "—" })
+  mem_swap:set({ label = fmt_size(to_gb(stats.SWAP_USED)) })
 
   local gpu = tonumber(stats.GPU)
   gpu_section:set({
@@ -261,12 +270,9 @@ local function update_popup_from_helper(out)
   })
 
   disk_section:set({
-    label = (stats.DISK_USED or "?") .. " / " .. (stats.DISK_SIZE or "?"),
+    label = fmt_size(to_gb(stats.DISK_USED)) .. " of " .. fmt_size(to_gb(stats.DISK_SIZE)),
   })
-  disk_free:set({
-    label = (stats.DISK_AVAIL or "—")
-      .. (stats.DISK_PCT and ("  (" .. stats.DISK_PCT .. " used)") or ""),
-  })
+  disk_free:set({ label = fmt_size(to_gb(stats.DISK_AVAIL)) })
 
   local boot = tonumber(stats.BOOT_SEC)
   up_section:set({ label = boot and format_uptime(boot) or "—" })
