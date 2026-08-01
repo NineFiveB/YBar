@@ -171,7 +171,7 @@ local search_row = sbar.add("item", "widgets.bluetooth.search", {
   position = popup_pos,
   width = popup_width,
   icon = {
-    string = bt_glyph .. "  Search for Devices…",
+    string = "Search for Devices",
     align = "left",
     color = colors.white,
     font = { size = 12.0 },
@@ -359,11 +359,11 @@ local function run_inquiry()
     return
   end
   busy = true
-  search_row:set({ icon = { string = bt_glyph .. "  Searching" } })
+  search_row:set({ icon = { string = "Searching" } })
   spin()
   sbar.exec(blueutil("--inquiry 8") .. " 2>/dev/null", function(output)
     busy = false
-    search_row:set({ icon = { string = bt_glyph .. "  Search for Devices…" } })
+    search_row:set({ icon = { string = "Search for Devices" } })
     local paired_addrs = {}
     for _, dev in ipairs(paired_cache) do paired_addrs[dev.address:lower()] = true end
     nearby_cache = {}
