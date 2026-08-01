@@ -15,6 +15,7 @@ sysctl -n vm.loadavg 2>/dev/null | awk '{ printf "LOAD1=%s\nLOAD5=%s\nLOAD15=%s\
 ps -Aceo pcpu,comm -r 2>/dev/null | sed -n 2p | awk '
   { c = $1; $1 = ""; sub(/^ +/, ""); printf "TOP_CPU=%s\nTOP_NAME=%s\n", c, $0 }'
 
+echo "NCPU=$(sysctl -n hw.ncpu 2>/dev/null)"
 echo "MEM_TOTAL_BYTES=$(sysctl -n hw.memsize 2>/dev/null)"
 sysctl -n vm.swapusage 2>/dev/null | awk '{ printf "SWAP_USED=%s\n", $6 }'
 

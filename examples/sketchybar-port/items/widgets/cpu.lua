@@ -129,7 +129,44 @@ end
 
 local cpu_section  = add_section("CPU")
 local cpu_split    = add_detail("User · System")
-local cpu_load     = add_detail("Load 1 · 5 · 15 min")
+
+-- Load as a line: a knobless slider filled with the 1-minute load relative
+-- to core count, with the 1 · 5 · 15 numbers kept compact on the right.
+local cpu_load = sbar.add("slider", 72, {
+  position = popup_pos,
+  width = popup_width,
+  slider = {
+    highlight_color = colors.blue,
+    percentage = 0,
+    background = {
+      height = 4,
+      corner_radius = 2,
+      color = colors.with_alpha(colors.grey, 0.3),
+    },
+    knob = { drawing = false },
+  },
+  icon = {
+    string = "Load",
+    align = "left",
+    width = 54,
+    color = colors.grey,
+    font = { size = 11.0 },
+    padding_left = 18,
+  },
+  label = {
+    string = "…",
+    align = "right",
+    width = 126,
+    color = colors.grey,
+    font = {
+      family = settings.font.numbers,
+      style = settings.font.style_map["Bold"],
+      size = 11.0,
+    },
+    padding_right = 8,
+  },
+})
+
 local cpu_top      = add_detail("Top process")
 add_separator()
 local mem_section  = add_section("Memory")
@@ -180,8 +217,18 @@ local function update_popup_from_helper(out)
   cpu_split:set({
     label = user and string.format("%.0f%% · %.0f%%", user, sys or 0) or "—",
   })
+  local load1 = tonumber(stats.LOAD1)
+  local ncpu = tonumber(stats.NCPU) or 1
+  local load_pct = load1 and math.min(math.floor(load1 / ncpu * 100 + 0.5), 100) or 0
   cpu_load:set({
-    label = (stats.LOAD1 and (stats.LOAD1 .. " · " .. stats.LOAD5 .. " · " .. stats.LOAD15)) or "—",
+    slider = {
+      percentage = load_pct,
+      highlight_color = cpu_color_for(load_pct),
+    },
+    label = load1
+      and string.format("%.1f · %.1f · %.1f",
+        load1, tonumber(stats.LOAD5) or 0, tonumber(stats.LOAD15) or 0)
+      or "—",
   })
   local top_cpu = tonumber(stats.TOP_CPU)
   cpu_top:set({
