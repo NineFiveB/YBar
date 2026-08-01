@@ -93,6 +93,14 @@ local history_buckets = 216   -- 24h at ~6.7 min per sample; 1pt per sample
 sbar.add("item", {
   position = popup_pos,
   width = popup_width,
+  icon = { drawing = false },
+  label = { drawing = false },
+  background = { height = 2, color = colors.with_alpha(colors.grey, 0.3) },
+})
+
+sbar.add("item", {
+  position = popup_pos,
+  width = popup_width,
   icon = {
     align = "left",
     string = "Battery Level",
