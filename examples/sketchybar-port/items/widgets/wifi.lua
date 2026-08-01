@@ -448,8 +448,50 @@ settings_row:subscribe("mouse.clicked", function()
   hide_details()
 end)
 
+-- ProtonVPN registers a system VPN profile, so the tunnel can be driven
+-- directly (scutil --nc start/stop) — no need to open the app. The app
+-- only becomes the fallback when the service never reaches a terminal
+-- state (e.g. profile removed or needs re-auth).
+local vpn_busy = false
+
+local function poll_vpn(want, attempt)
+  sbar.exec("scutil --nc status ProtonVPN 2>/dev/null | head -1", function(out)
+    local state = out:gsub("%s+", "")
+    if state == want then
+      vpn_busy = false
+      update_vpn_status()
+      return
+    end
+    if (attempt or 0) < 8 then
+      sbar.delay(1, function() poll_vpn(want, (attempt or 0) + 1) end)
+    else
+      vpn_busy = false
+      -- Couldn't reach the requested state (e.g. Proton's auto-reconnect
+      -- reviving a stopped tunnel) — hand off to the app.
+      sbar.exec("open -a ProtonVPN")
+      update_vpn_status()
+    end
+  end)
+end
+
 vpn_button:subscribe("mouse.clicked", function()
-  sbar.exec("open -a ProtonVPN")
+  if vpn_busy then return end
+  vpn_busy = true
+  sbar.exec("scutil --nc status ProtonVPN 2>/dev/null | head -1", function(out)
+    local connected = out:match("^Connected") ~= nil
+    vpn_button:set({
+      label = {
+        string = connected and "Disconnecting…" or "Connecting…",
+        color = colors.grey,
+      },
+    })
+    sbar.exec("scutil --nc " .. (connected and "stop" or "start")
+      .. " ProtonVPN 2>/dev/null", function()
+      sbar.delay(1.5, function()
+        poll_vpn(connected and "Disconnected" or "Connected", 0)
+      end)
+    end)
+  end)
 end)
 
 local function toggle_details()
