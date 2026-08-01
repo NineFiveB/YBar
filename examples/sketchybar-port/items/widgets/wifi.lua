@@ -44,7 +44,7 @@ local header = sbar.add("item", {
   },
   label = {
     align = "right",
-    string = "scanning…",
+    string = "",
     color = colors.grey,
     width = popup_width / 2,
   },
@@ -88,9 +88,23 @@ local function signal_color(net)
   return colors.grey
 end
 
+-- Spinner while a scan runs (frame animation; the renderer falls back to
+-- Apple Braille for the glyphs).
+local spinner_frames = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
+local spinner_index = 0
+
+local function spin()
+  if not scan_running then
+    header:set({ label = { string = "" } })
+    return
+  end
+  spinner_index = spinner_index % #spinner_frames + 1
+  header:set({ label = { string = spinner_frames[spinner_index] } })
+  sbar.delay(0.1, spin)
+end
+
 local function populate_rows()
   if #scan_cache == 0 then return end
-  header:set({ label = { string = scan_running and "scanning…" or "" } })
   for i, row in ipairs(net_rows) do
     local net = scan_cache[i]
     if net then
@@ -112,7 +126,7 @@ end
 local function run_scan()
   if scan_running then return end
   scan_running = true
-  header:set({ label = { string = "scanning…" } })
+  spin()
   sbar.exec(
     "system_profiler SPAirPortDataType -json 2>/dev/null | python3 '"
       .. wifi_scan_py:gsub("'", "'\\''") .. "'",
@@ -132,7 +146,6 @@ local function run_scan()
       end
       if #nets > 0 then scan_cache = nets end
       populate_rows()
-      header:set({ label = { string = "" } })
     end)
 end
 
