@@ -24,13 +24,17 @@ local function blueutil(args)
 end
 
 -- ── SF Symbols for device types ─────────────────────────────────────────────
+-- This macOS's SF Pro has NO bluetooth symbol (the port's codepoint renders a
+-- fallback globe); the Bluetooth logo's rune ᛒ (U+16D2) via font fallback is
+-- the honest glyph — and narrow, keeping the pill tight.
+local bt_glyph = "ᛒ"
 local type_icons = {
   headset  = "􀑈",
   keyboard = "􀇳",
   trackpad = "􀟀",
   phone    = "􀟜",
   speaker  = "􀝎",
-  generic  = icons.bluetooth,
+  generic  = bt_glyph,
 }
 
 local function battery_icon_for(pct)
@@ -53,15 +57,15 @@ end
 local bt_icon = sbar.add("item", "widgets.bluetooth", {
   position = "right",
   icon = {
-    string = icons.bluetooth,
-    font = { style = settings.font.style_map["Regular"], size = 16.0 },
+    string = bt_glyph,
+    font = { style = settings.font.style_map["Bold"], size = 14.0 },
     color = colors.blue,
-    width = 32,
-    align = "center",
+    padding_left = 8,
+    padding_right = 8,
   },
   label = { drawing = false },
-  padding_left = 4,
-  padding_right = 4,
+  padding_left = 2,
+  padding_right = 2,
 })
 
 local bt_bracket = sbar.add("bracket", "widgets.bluetooth.bracket", { bt_icon.name }, {
@@ -163,7 +167,7 @@ local search_row = sbar.add("item", "widgets.bluetooth.search", {
   position = popup_pos,
   width = popup_width,
   icon = {
-    string = icons.bluetooth .. "  Search for Devices…",
+    string = bt_glyph .. "  Search for Devices…",
     align = "left",
     color = colors.white,
     font = { size = 12.0 },
@@ -197,7 +201,7 @@ local settings_row = sbar.add("item", "widgets.bluetooth.settings", {
   position = popup_pos,
   width = popup_width,
   icon = {
-    string = icons.gear .. "  Bluetooth Settings…",
+    string = icons.gear .. "  Settings",
     align = "left",
     color = colors.white,
     font = { size = 12.0 },
@@ -207,25 +211,16 @@ local settings_row = sbar.add("item", "widgets.bluetooth.settings", {
   label = { drawing = false },
 })
 
--- ── Spinner (shared by search and pairing) ──────────────────────────────────
+-- ── Spinner (animates in the search row's right slot while searching) ───────
 local busy = false
 local spinner_frames = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
 local spinner_index = 0
 
 local function spin()
-  if not busy then
-    header:set({ label = { string = "" } })
-    return
-  end
+  if not busy then return end
   spinner_index = spinner_index % #spinner_frames + 1
-  header:set({ label = { string = spinner_frames[spinner_index] } })
+  search_row:set({ label = { string = spinner_frames[spinner_index] } })
   sbar.delay(0.1, spin)
-end
-
-local function set_busy(value)
-  if busy == value then return end
-  busy = value
-  if busy then spin() end
 end
 
 -- ── Paired devices ──────────────────────────────────────────────────────────
@@ -359,10 +354,12 @@ local function run_inquiry()
     populate_nearby("No Bluetooth access")
     return
   end
-  set_busy(true)
-  search_row:set({ label = { string = "" } })
+  busy = true
+  search_row:set({ icon = { string = bt_glyph .. "  Searching" } })
+  spin()
   sbar.exec(blueutil("--inquiry 8") .. " 2>/dev/null", function(output)
-    set_busy(false)
+    busy = false
+    search_row:set({ icon = { string = bt_glyph .. "  Search for Devices…" } })
     local paired_addrs = {}
     for _, dev in ipairs(paired_cache) do paired_addrs[dev.address:lower()] = true end
     nearby_cache = {}
@@ -391,14 +388,14 @@ for i, row in ipairs(nearby_rows) do
   row:subscribe("mouse.clicked", function()
     local dev = nearby_cache[i]
     if not dev or busy then return end
-    set_busy(true)
+    busy = true
     row:set({ label = { string = "Pairing…", color = colors.white } })
     sbar.exec(
       blueutil("--pair " .. shell.quote(dev.address)) .. " >/dev/null 2>&1 && "
         .. blueutil("--connect " .. shell.quote(dev.address)) .. " >/dev/null 2>&1"
         .. " && echo ok || echo fail",
       function(result)
-        set_busy(false)
+        busy = false
         if result:match("ok") then
           table.remove(nearby_cache, i)
           populate_nearby()
