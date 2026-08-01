@@ -25,8 +25,12 @@ end
 
 -- ── SF Symbols for device types ─────────────────────────────────────────────
 -- This macOS's SF Pro has NO bluetooth symbol (the port's codepoint renders a
--- fallback globe); the Bluetooth logo's rune ᛒ (U+16D2) via font fallback is
--- the honest glyph — and narrow, keeping the pill tight.
+-- fallback globe). The real logo comes from the symbols-only Nerd Font
+-- (U+F00AF), which needs its family set explicitly — PUA codepoints don't
+-- font-fallback — so it's used where the icon stands alone (the bar pill).
+-- Inline with text (device rows), the rune ᛒ keeps rendering via fallback.
+local bt_logo = "\u{F00AF}"
+local bt_logo_font = "Symbols Nerd Font"
 local bt_glyph = "ᛒ"
 local type_icons = {
   headset  = "􀑈",
@@ -57,8 +61,8 @@ end
 local bt_icon = sbar.add("item", "widgets.bluetooth", {
   position = "right",
   icon = {
-    string = bt_glyph,
-    font = { style = settings.font.style_map["Bold"], size = 14.0 },
+    string = bt_logo,
+    font = { family = bt_logo_font, size = 15.0 },
     color = colors.blue,
     padding_left = 8,
     padding_right = 8,
@@ -268,7 +272,7 @@ local function refresh_paired()
       power_row:set({
         drawing = true,
         icon = { string = "Bluetooth access needed" },
-        label = { string = "Open Privacy…" },
+        label = { string = "Open Privacy" },
       })
       paired_cache = {}
       populate_paired()
