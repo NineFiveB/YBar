@@ -142,11 +142,19 @@ end
 -- Undo the collapse geometry. Direct sets cancel any in-flight animation on
 -- the same properties, so this doubles as the mid-collapse abort.
 local function restore_pill(sid)
+  -- Park the geometry the pill will actually reveal with: an empty pill is
+  -- 12/12 with no label; parking the non-empty 8/4 look makes the reveal
+  -- pop wider ~200ms later when update_windows lands.
+  local is_empty = empty[sid] ~= false
   spaces[sid]:set({
     padding_left = 1,
     padding_right = 1,
-    icon = { width = "dynamic", padding_left = 8, padding_right = 4 },
-    label = { width = "dynamic", padding_left = 4, padding_right = 8 },
+    icon = {
+      width = "dynamic",
+      padding_left = is_empty and 12 or 8,
+      padding_right = is_empty and 12 or 4,
+    },
+    label = { width = "dynamic", padding_left = 4, padding_right = 8, drawing = not is_empty },
     background = { border_width = 1 },
   })
   brackets[sid]:set({ background = { border_width = bracket_border(sid) } })
@@ -160,6 +168,14 @@ local function reveal_pill(sid)
   if hiding[sid] then
     hiding[sid] = nil
     restore_pill(sid)
+  elseif not shown[sid] and empty[sid] ~= false then
+    -- Believed-empty pill about to appear: paint the empty geometry NOW so
+    -- it shows up at final size — update_windows only confirms it later
+    -- (items are created 8/4, so the first-ever reveal pops without this).
+    spaces[sid]:set({
+      label = { drawing = false },
+      icon = { padding_left = 12, padding_right = 12 },
+    })
   end
   shown[sid] = true
   spaces[sid]:set({ drawing = true })
