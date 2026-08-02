@@ -83,6 +83,23 @@ for _, sid in ipairs(workspaces) do
   })
 end
 
+-- Pill visibility -------------------------------------------------------------
+-- An emptied workspace slides shut (width and paddings animate to zero)
+-- before it stops drawing, instead of vanishing between two frames.
+-- `shown` tracks which pills are visually present (so only a real
+-- shown->hidden transition animates); `hiding` carries a sequence number so
+-- a reveal landing mid-collapse cancels the delayed drawing=off cleanly.
+local shown = {}     -- sid -> pill currently visible
+local hiding = {}    -- sid -> hide_seq of the in-flight collapse
+local hide_seq = 0
+local empty = {}     -- sid -> false once windows are seen (nil = unknown/new)
+
+-- The bracket ring only outlines workspaces that actually hold windows; an
+-- empty/new workspace shows as a bare pill.
+local function bracket_border(sid)
+  return (empty[sid] == false) and 2 or 0
+end
+
 -- Fetch the app icons for a workspace and render them as the space label.
 local function update_windows(sid)
   sbar.exec(
@@ -102,6 +119,10 @@ local function update_windows(sid)
 
       local space = spaces[sid]
       if not space then return end
+      empty[sid] = (icon_line == "")
+      -- A collapsing pill is animating these exact properties; direct sets
+      -- would cancel the animations and snap it back open mid-slide.
+      if hiding[sid] then return end
       if icon_line == "" then
         space:set({
           label = { drawing = false },
@@ -113,8 +134,63 @@ local function update_windows(sid)
           icon = { padding_left = 8, padding_right = 4 },
         })
       end
+      brackets[sid]:set({ background = { border_width = bracket_border(sid) } })
     end
   )
+end
+
+-- Undo the collapse geometry. Direct sets cancel any in-flight animation on
+-- the same properties, so this doubles as the mid-collapse abort.
+local function restore_pill(sid)
+  spaces[sid]:set({
+    padding_left = 1,
+    padding_right = 1,
+    icon = { width = "dynamic", padding_left = 8, padding_right = 4 },
+    label = { width = "dynamic", padding_left = 4, padding_right = 8 },
+    background = { border_width = 1 },
+  })
+  brackets[sid]:set({ background = { border_width = bracket_border(sid) } })
+  sbar.set("space.padding." .. sid,
+    { width = settings.group_paddings, padding_left = 5, padding_right = 5 })
+end
+
+-- drawing=on is set unconditionally: menus.lua hides pills behind our back
+-- with a regex set, so `shown` can be stale when the menus swap away.
+local function reveal_pill(sid)
+  if hiding[sid] then
+    hiding[sid] = nil
+    restore_pill(sid)
+  end
+  shown[sid] = true
+  spaces[sid]:set({ drawing = true })
+  sbar.set("space.padding." .. sid, { drawing = true })
+end
+
+local function collapse_pill(sid)
+  hide_seq = hide_seq + 1
+  local seq = hide_seq
+  hiding[sid] = seq
+  sbar.animate("tanh", 14, function()
+    spaces[sid]:set({
+      padding_left = 0,
+      padding_right = 0,
+      icon = { width = 0, padding_left = 0, padding_right = 0 },
+      label = { width = 0, padding_left = 0, padding_right = 0 },
+      background = { border_width = 0 },
+    })
+    brackets[sid]:set({ background = { border_width = 0 } })
+    -- The spacer's full footprint is width + its default 5/5 item paddings;
+    -- leaving the paddings un-animated would snap 10pt shut at cleanup.
+    sbar.set("space.padding." .. sid, { width = 0, padding_left = 0, padding_right = 0 })
+  end)
+  sbar.delay(0.3, function()   -- 14 frames at 60Hz, plus margin
+    if hiding[sid] ~= seq then return end
+    hiding[sid] = nil
+    shown[sid] = nil
+    spaces[sid]:set({ drawing = false })
+    sbar.set("space.padding." .. sid, { drawing = false })
+    restore_pill(sid)          -- park clean geometry for the next reveal
+  end)
 end
 
 -- Refresh which workspaces are visible/highlighted. Visible = non-empty OR the
@@ -126,6 +202,7 @@ end
 -- Instant phase: the event already names the focused workspace — the
 -- cross-fade and the focused pill's reveal must not wait for the
 -- aerospace query round-trip.
+local last_focused
 local function apply_focus(focused)
   -- Instant, no animation: switching must feel immediate.
   for sid, space in pairs(spaces) do
@@ -143,11 +220,18 @@ local function apply_focus(focused)
     })
   end
 
-  local space = spaces[focused]
-  if space then
-    space:set({ drawing = true })
-    sbar.set("space.padding." .. focused, { drawing = true })
+  if spaces[focused] then reveal_pill(focused) end
+
+  -- The workspace being left collapses NOW if it holds no windows — waiting
+  -- for the debounce + aerospace round-trip reads as lag. empty[sid] == nil
+  -- (new, never-inspected workspace) counts as empty; the reconcile pass
+  -- corrects the rare miss.
+  if last_focused and last_focused ~= focused and spaces[last_focused]
+      and empty[last_focused] ~= false
+      and shown[last_focused] and not hiding[last_focused] then
+    collapse_pill(last_focused)
   end
+  last_focused = focused
 end
 
 -- Reconcile generation: rapid switching debounces into one query burst,
@@ -159,6 +243,10 @@ local reconcile
 reconcile = function(focused, attempt, gen)
   sbar.exec("aerospace list-workspaces --monitor all --empty no 2>/dev/null", function(nonempty)
     if gen ~= reconcile_gen then return end
+    -- The menus may have swapped in while this query was in flight; a
+    -- reveal now would draw pills over the open app menus, and nothing
+    -- hides them again until the next swap.
+    if MENUS_VISIBLE then return end
     local visible = {}
     for raw_ws in nonempty:gmatch("[^\r\n]+") do
       local ws = raw_ws:match("^%s*(.-)%s*$")
@@ -172,11 +260,13 @@ reconcile = function(focused, attempt, gen)
     end
     if focused and focused ~= "" then visible[focused] = true end
 
-    for sid, space in pairs(spaces) do
-      local show = visible[sid] == true
-      space:set({ drawing = show })
-      sbar.set("space.padding." .. sid, { drawing = show })
-      if show then update_windows(sid) end
+    for sid in pairs(spaces) do
+      if visible[sid] then
+        reveal_pill(sid)
+        update_windows(sid)
+      elseif shown[sid] and not hiding[sid] then
+        collapse_pill(sid)
+      end
     end
   end)
 end
