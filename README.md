@@ -1,6 +1,6 @@
 # YBar
 
-**Top bar for macOS** — a GPU-rendered, scriptable status bar. Metal renders everything (SDF shapes, glyph-atlas text, display-link-paced animation at near-zero CPU); the architecture is sketchybar's proven live-object model: a single `ybar` binary that is both daemon and CLI client, driven entirely over IPC — plus an embedded Lua runtime so whole configs run in-process.
+**Top bar for macOS** — a GPU-rendered, scriptable status bar. Metal renders everything (SDF shapes, glyph-atlas text, display-link-paced animation at near-zero CPU); the architecture is [sketchybar](https://github.com/FelixKratz/SketchyBar)'s proven live-object model: a single `ybar` binary that is both daemon and CLI client, driven entirely over IPC — plus an embedded Lua runtime so whole configs run in-process.
 
 ```sh
 ybar                                  # start the daemon
@@ -64,6 +64,10 @@ Two equivalent surfaces, mixable at will:
 
 - **Lua**: point the daemon at a `ybarrc.lua`; it runs inside the daemon with an `ybar.*` API (items as live objects, closures as event handlers, `animate`/`exec`/`delay`), plus a sketchybar-compatibility shim exposing the `sbar` API for existing SbarLua configs.
 - **CLI**: any shell script or REPL can drive the same live-object model over the socket at runtime — the bar is not a parsed file.
+
+## Acknowledgments
+
+YBar stands on the shoulders of [sketchybar](https://github.com/FelixKratz/SketchyBar) by [Felix Kratz](https://github.com/FelixKratz) — the daemon/CLI live-object architecture, the command grammar, and the script contract all originate there, and YBar deliberately stays compatible with them (including the [SbarLua](https://github.com/FelixKratz/SbarLua) API surface). [Waybar](https://github.com/Alexays/Waybar) shaped the feature set — tooltips, the idle inhibitor, and the general "bar as a first-class desktop component" sensibility are its influence.
 
 ## License
 
