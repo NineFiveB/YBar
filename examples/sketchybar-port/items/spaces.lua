@@ -185,6 +185,7 @@ end
 local space_observer = sbar.add("item", {
   drawing = false,
   updates = true,
+  update_freq = 5,
 })
 
 -- AeroSpace passes FOCUSED_WORKSPACE through the triggered event.
@@ -224,6 +225,10 @@ space_observer:subscribe("front_app_switched", function() query_and_update() end
 space_observer:subscribe({ "app_launched", "app_terminated" }, function()
   query_and_update()
 end)
+
+-- Minimize/window-close emit no OS-level event at all — a light routine
+-- poll reconciles those within seconds.
+space_observer:subscribe("routine", function() query_and_update() end)
 
 -- Initial paint at config load.
 query_and_update()
