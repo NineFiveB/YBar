@@ -29,6 +29,7 @@ local workspaces = aerospace_workspaces()
 
 local spaces = {}    -- sid -> space item
 local brackets = {}  -- sid -> bracket item
+local desired_visible = {}  -- sid -> latest wanted state (animation guards)
 
 for _, sid in ipairs(workspaces) do
   local space = sbar.add("item", "space." .. sid, {
@@ -139,16 +140,43 @@ local function update_spaces(focused, attempt)
     for sid, space in pairs(spaces) do
       local show = visible[sid] == true
       local selected = (sid == focused)
-      space:set({
-        drawing = show,
-        icon = { highlight = selected },
-        label = { highlight = selected },
-        background = { border_color = selected and colors.black or colors.bg2 },
-      })
-      brackets[sid]:set({
-        background = { border_color = selected and colors.grey or colors.bg2 },
-      })
-      sbar.set("space.padding." .. sid, { drawing = show })
+      local was_shown = space:query().geometry.drawing == "on"
+      desired_visible[sid] = show
+
+      -- Highlight and border changes fade instead of snapping.
+      sbar.animate("tanh", 20, function()
+        space:set({
+          icon = { highlight = selected },
+          label = { highlight = selected },
+          background = { border_color = selected and colors.black or colors.bg2 },
+        })
+        brackets[sid]:set({
+          background = { border_color = selected and colors.grey or colors.bg2 },
+        })
+      end)
+
+      if show and not was_shown then
+        -- Slide in: appear at zero width, animate to natural.
+        space:set({ drawing = true, width = 0 })
+        sbar.set("space.padding." .. sid, { drawing = true, width = 0 })
+        sbar.animate("tanh", 20, function()
+          space:set({ width = "dynamic" })
+          sbar.set("space.padding." .. sid, { width = settings.group_paddings })
+        end)
+      elseif not show and was_shown then
+        -- Slide out, then stop drawing once the collapse has played.
+        sbar.animate("tanh", 20, function()
+          space:set({ width = 0 })
+          sbar.set("space.padding." .. sid, { width = 0 })
+        end)
+        sbar.delay(0.4, function()
+          if desired_visible[sid] == false then
+            space:set({ drawing = false, width = "dynamic" })
+            sbar.set("space.padding." .. sid, {
+              drawing = false, width = settings.group_paddings })
+          end
+        end)
+      end
       if show then update_windows(sid) end
     end
   end)
