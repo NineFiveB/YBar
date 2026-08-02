@@ -12,6 +12,10 @@ BIN     := $(SCRATCH)/out/Products/Debug/ybar
 # cover the daemon plus every helper it spawns. Launch with:
 #   open -g ~/Applications/YBar.app --args -c <config.lua>
 APP_DIR := $(HOME)/Applications/YBar.app
+# Stable identity if present ("YBar Signing" self-signed cert), else ad-hoc.
+# A stable signature keeps TCC grants (Accessibility, Screen Recording)
+# valid across rebuilds; ad-hoc voids them every time.
+SIGN_ID := $(shell security find-identity -v -p codesigning 2>/dev/null | grep -q "YBar Signing" && echo YBar Signing || echo -)
 
 app: build
 	rm -rf $(APP_DIR)
@@ -19,7 +23,7 @@ app: build
 	cp packaging/Info.plist $(APP_DIR)/Contents/Info.plist
 	cp $(BIN) $(APP_DIR)/Contents/MacOS/ybar
 	cp -R $(SCRATCH)/out/Products/Debug/YBar_YBarKit.bundle $(APP_DIR)/Contents/Resources/
-	codesign --force --sign - --identifier com.ybar.YBar $(APP_DIR)
+	codesign --force --sign "$(SIGN_ID)" --identifier com.ybar.YBar $(APP_DIR)
 
 build:
 	swift build --scratch-path $(SCRATCH)
