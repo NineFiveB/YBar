@@ -1,4 +1,3 @@
-require("items.widgets.altserver")
 require("items.widgets.battery")
 require("items.widgets.bluetooth")
 require("items.widgets.wifi")
