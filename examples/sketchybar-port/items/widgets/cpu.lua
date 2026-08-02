@@ -52,21 +52,12 @@ local popup_pos = "popup." .. cpu_bracket.name
 local header = sbar.add("item", "widgets.cpu.popup.header", {
   position = popup_pos,
   width = popup_width,
+  align = "center",
   icon = {
-    align = "left",
     string = "System Monitor",
     font = { size = 14, style = settings.font.style_map["Bold"] },
-    width = popup_width / 2,
-    padding_left = inset,
   },
-  label = {
-    align = "right",
-    string = icons.gear,
-    color = colors.grey,
-    font = { size = 13 },
-    width = popup_width / 2,
-    padding_right = inset,
-  },
+  label = { drawing = false },
   background = { height = 2, color = colors.grey, y_offset = -15 },
 })
 
@@ -127,31 +118,6 @@ add_separator()
 local mem_gauge   = add_gauge()
 add_center("MEMORY")
 local mem_detail  = add_center("…", { color = colors.grey, size = 11, style = "Regular" })
-add_separator()
-local disk_pct    = add_center("…", { size = 17 })
-local disk_slider = sbar.add("slider", 170, {
-  position = popup_pos,
-  width = popup_width,
-  align = "center",
-  slider = {
-    highlight_color = colors.blue,
-    percentage = 0,
-    background = {
-      height = 5,
-      corner_radius = 2,
-      color = colors.with_alpha(colors.grey, 0.25),
-    },
-    knob = { drawing = false },
-  },
-  icon = { drawing = false },
-  label = { drawing = false },
-})
-local disk_title  = add_center("DISK")
-local disk_detail = add_center("…", { color = colors.grey, size = 11, style = "Regular" })
-add_separator()
-local net_up      = add_center("↑  …", { size = 14 })
-local net_down    = add_center("↓  …", { size = 14 })
-add_center(icons.wifi.connected .. "  Wi-Fi", { color = colors.grey, size = 11, style = "Regular" })
 
 -- ── Helpers ───────────────────────────────────────────────────────────────
 local function parse_system_stats(out)
@@ -189,19 +155,6 @@ local function fmt_size(gb)
   return string.format("%.0f MB", gb * 1000)
 end
 
-local function fmt_rate(bytes_per_s)
-  if not bytes_per_s or bytes_per_s < 0 then return "…" end
-  if bytes_per_s >= 1048576 then
-    return string.format("%.1f MB/s", bytes_per_s / 1048576)
-  end
-  if bytes_per_s >= 1024 then
-    return string.format("%.1f KB/s", bytes_per_s / 1024)
-  end
-  return string.format("%.0f B/s", bytes_per_s)
-end
-
-local net_prev = nil   -- { inb, outb, t }
-
 local function update_popup_from_helper(out)
   local stats = parse_system_stats(out)
 
@@ -221,33 +174,6 @@ local function update_popup_from_helper(out)
     })
   end
 
-  local disk_used_pct = tonumber((stats.DISK_PCT or ""):match("(%d+)"))
-  if disk_used_pct then
-    disk_pct:set({ icon = { string = disk_used_pct .. "%" } })
-    disk_slider:set({
-      slider = {
-        percentage = disk_used_pct,
-        highlight_color = cpu_color_for(disk_used_pct),
-      },
-    })
-  end
-  disk_title:set({ icon = { string = stats.DISK_NAME or "DISK" } })
-  disk_detail:set({
-    icon = {
-      string = fmt_size(to_gb(stats.DISK_USED)) .. " of " .. fmt_size(to_gb(stats.DISK_SIZE)),
-    },
-  })
-
-  local inb, outb = tonumber(stats.NET_IN), tonumber(stats.NET_OUT)
-  local now = os.time()
-  if inb and outb then
-    if net_prev and now > net_prev.t then
-      local dt = now - net_prev.t
-      net_down:set({ icon = { string = "↓  " .. fmt_rate((inb - net_prev.inb) / dt) } })
-      net_up:set({ icon = { string = "↑  " .. fmt_rate((outb - net_prev.outb) / dt) } })
-    end
-    net_prev = { inb = inb, outb = outb, t = now }
-  end
 end
 
 local function hide_popup()
@@ -307,6 +233,7 @@ header:subscribe("mouse.clicked", function()
   sbar.exec("open -a 'Activity Monitor'")
   hide_popup()
 end)
+
 
 cpu:subscribe("mouse.clicked", toggle_popup)
 cpu:subscribe("mouse.exited.global", hide_popup)

@@ -41,7 +41,9 @@ public enum Layout {
             length += partAdvance(item.icon, inkWidth: measured.iconSize.width)
         }
         length += item.contentWidth
-        if item.label.drawing {
+        // A gauge item's label renders inside the dial, not beside it — it
+        // must not widen the item (it skews align-slack centering).
+        if item.label.drawing, item.gauge == nil {
             length += partAdvance(item.label, inkWidth: measured.labelSize.width)
         }
         return length
