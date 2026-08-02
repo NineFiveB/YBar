@@ -120,27 +120,6 @@ sbar.add("item", {
   background = { height = 2, color = colors.with_alpha(colors.grey, 0.3) },
 })
 
-local show_hidden_row = sbar.add("item", {
-  position = popup_pos,
-  width = popup_width,
-  icon = {
-    string = "Show Hidden",
-    align = "left",
-    color = colors.white,
-    font = { size = 12.0 },
-    width = popup_width / 2,
-    padding_left = inset,
-  },
-  label = {
-    string = "",
-    align = "right",
-    color = colors.grey,
-    font = { size = 11.0, style = settings.font.style_map["Semibold"] },
-    width = popup_width / 2,
-    padding_right = inset,
-  },
-})
-
 local hint_row = sbar.add("item", {
   position = popup_pos,
   width = popup_width,
@@ -237,12 +216,11 @@ local function populate()
     end
   end
 
-  show_hidden_row:set({
-    drawing = not no_access,
-    icon = { string = show_hidden and "Hide Hidden" or "Show Hidden" },
-    label = { string = hidden_count > 0 and tostring(hidden_count) or "" },
-  })
-  hint_row:set({ drawing = not no_access })
+  local hint = "click opens · right-click hides"
+  if hidden_count > 0 and not show_hidden then
+    hint = hint .. " · ⌥ shows " .. hidden_count .. " hidden"
+  end
+  hint_row:set({ drawing = not no_access, icon = { string = hint } })
 end
 
 local function refresh()
@@ -296,19 +274,16 @@ for i, row in ipairs(rows) do
   end)
 end
 
-show_hidden_row:subscribe("mouse.clicked", function()
-  show_hidden = not show_hidden
-  populate()
-end)
-
 access_row:subscribe("mouse.clicked", function()
   sbar.exec("open 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'")
   hide_popup()
 end)
 
-local function toggle_popup()
+-- Option-click opens with the hidden set revealed (Bartender's idiom).
+local function toggle_popup(env)
   local should_draw = bracket:query().popup.drawing == "off"
   if should_draw then
+    show_hidden = (env and env.MODIFIER == "alt") or false
     bracket:set({ popup = { drawing = true } })
     populate()
     refresh()
