@@ -116,7 +116,7 @@ add_center(icons.cpu .. "  CPU LOAD")
 local cpu_chip    = add_center("…", { color = colors.grey, size = 11, style = "Regular" })
 add_separator()
 local mem_gauge   = add_gauge()
-add_center("MEMORY")
+add_center(icons.memory .. "  MEMORY")
 local mem_detail  = add_center("…", { color = colors.grey, size = 11, style = "Regular" })
 
 -- ── Helpers ───────────────────────────────────────────────────────────────
