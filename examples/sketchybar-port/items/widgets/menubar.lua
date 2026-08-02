@@ -50,7 +50,7 @@ local header = sbar.add("item", {
   width = popup_width,
   icon = {
     align = "left",
-    string = "Menu Bar Items",
+    string = "Background",
     font = { size = 14, style = settings.font.style_map["Bold"] },
     width = popup_width / 2,
     padding_left = inset,
