@@ -31,6 +31,8 @@ public final class BarSurface {
     /// NSGlassEffectContainerView, which batches the glass passes and merges
     /// pills that drift within `spacing` of each other. nil pre-26.
     private let glassHost: NSView?
+    /// Bar-wide Liquid Glass backdrop (--bar glass=on), behind the pill glass.
+    private var barGlass: NSView?
 
     public var onMouse: ((MouseEventInfo, BarSurface) -> Void)?
 
@@ -104,7 +106,25 @@ public final class BarSurface {
         panel.collectionBehavior = settings.sticky
             ? [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
             : [.moveToActiveSpace, .stationary, .fullScreenAuxiliary, .ignoresCycle]
-        effectView.isHidden = settings.blurRadius <= 0
+        if #available(macOS 26.0, *) {
+            effectView.isHidden = settings.blurRadius <= 0
+            if settings.glass, barGlass == nil, let container = panel.contentView {
+                let glass = NSGlassEffectView()
+                // Clear, same as the pills: regular's frost is an opaque slab
+                // at bar width; the bar color quad supplies any tint.
+                glass.style = .clear
+                glass.appearance = NSAppearance(named: .darkAqua)
+                glass.autoresizingMask = [.width, .height]
+                glass.frame = container.bounds
+                container.addSubview(glass, positioned: .above, relativeTo: effectView)
+                barGlass = glass
+            }
+            barGlass?.isHidden = !settings.glass
+            (barGlass as? NSGlassEffectView)?.cornerRadius = CGFloat(settings.cornerRadius)
+        } else {
+            // Pre-26 there is no glass material; fall back to the blur.
+            effectView.isHidden = settings.blurRadius <= 0 && !settings.glass
+        }
 
         effectView.frame = panel.contentView?.bounds ?? .zero
         hostView.frame = panel.contentView?.bounds ?? .zero
