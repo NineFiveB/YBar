@@ -5,3 +5,5 @@
 .DS_Store
 /dist/
 examples/sketchybar-port/helpers/bin/
+examples/sketchybar-port/helpers/menus/bin/
+examples/sketchybar-port/helpers/calendar_events_bin

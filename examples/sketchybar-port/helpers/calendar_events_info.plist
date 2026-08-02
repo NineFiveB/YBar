@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>com.ybar.calendar-events</string>
+	<key>CFBundleName</key>
+	<string>ybar-calendar-events</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>YBar shows your upcoming events in the calendar popup.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>YBar shows your upcoming events in the calendar popup.</string>
+</dict>
+</plist>

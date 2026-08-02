@@ -14,7 +14,8 @@
 --   (then adjust PORT_DIR below to ~/.config/ybar-port-files)
 
 PORT_DIR = os.getenv("HOME") .. "/Documents/Development/YBar/examples/sketchybar-port"
-SKETCHYBAR_CONFIG = os.getenv("HOME") .. "/Documents/Development/sketchybar-setup/config"
+-- All helpers are vendored with the port now — the config is self-contained.
+SKETCHYBAR_CONFIG = PORT_DIR
 
 -- The glass dir (already first on package.path) wins for colors/bar/default;
 -- everything else (compat shim, items, helpers, settings, icons) comes from
