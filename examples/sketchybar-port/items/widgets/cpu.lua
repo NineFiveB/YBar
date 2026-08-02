@@ -58,7 +58,6 @@ local header = sbar.add("item", "widgets.cpu.popup.header", {
     font = { size = 14, style = settings.font.style_map["Bold"] },
   },
   label = { drawing = false },
-  background = { height = 2, color = colors.grey, y_offset = -15 },
 })
 
 local function add_gauge()
@@ -111,6 +110,7 @@ local function add_separator()
   })
 end
 
+add_separator()
 local cpu_gauge   = add_gauge()
 add_center(icons.cpu .. "  CPU LOAD")
 local cpu_chip    = add_center("…", { color = colors.grey, size = 11, style = "Regular" })
