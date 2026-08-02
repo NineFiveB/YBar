@@ -111,7 +111,13 @@ public final class SceneBuilder {
                                     CGFloat(member.background.height),
                                     CGFloat(member.gauge?.diameter ?? 0),
                                     CGFloat(member.image?.drawing == true ? member.image!.size : 0))
-            return (member.id, CGSize(width: width, height: max(contentHeight + 8, 22)),
+            // Blank rows (separators: background only, no parts) skip the
+            // text-row minimum — a hairline shouldn't cost a full row.
+            let bare = !member.icon.drawing && !member.label.drawing
+                && member.graph == nil && member.slider == nil
+                && member.gauge == nil && member.image?.drawing != true
+            let height = bare ? max(contentHeight + 8, 10) : max(contentHeight + 8, 22)
+            return (member.id, CGSize(width: width, height: height),
                     CGFloat(member.paddingLeft), CGFloat(member.paddingRight))
         }
 
