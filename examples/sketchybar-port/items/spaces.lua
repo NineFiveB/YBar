@@ -214,6 +214,17 @@ end
 -- resync on the daemon's system_woke event.
 space_observer:subscribe("system_woke", function() query_and_update() end)
 
+-- YBAR PORT: apps opening and closing repaint the pills immediately —
+-- front_app_switched fires both when a launched app takes focus and when
+-- a quit app hands focus back, so icons don't wait for the next switch.
+space_observer:subscribe("front_app_switched", function() query_and_update() end)
+
+-- app_launched/app_terminated (ybar events) catch what focus changes miss:
+-- background apps quitting, agents launching without taking focus.
+space_observer:subscribe({ "app_launched", "app_terminated" }, function()
+  query_and_update()
+end)
+
 -- Initial paint at config load.
 query_and_update()
 

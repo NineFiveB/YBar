@@ -15,6 +15,17 @@ public final class WorkspaceProvider {
             return app?.localizedName ?? ""
         }
         observe(NSWorkspace.activeSpaceDidChangeNotification, event: "space_change") { _ in "" }
+        // App lifecycle (a ybar extension): closing a background app changes
+        // no focus, so front_app_switched alone leaves stale state (workspace
+        // app icons) until the next switch.
+        observe(NSWorkspace.didLaunchApplicationNotification, event: "app_launched") { notification in
+            let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            return app?.localizedName ?? ""
+        }
+        observe(NSWorkspace.didTerminateApplicationNotification, event: "app_terminated") { notification in
+            let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            return app?.localizedName ?? ""
+        }
         observe(NSWorkspace.didWakeNotification, event: "system_woke") { _ in "" }
         observe(NSWorkspace.willSleepNotification, event: "system_will_sleep") { _ in "" }
     }
