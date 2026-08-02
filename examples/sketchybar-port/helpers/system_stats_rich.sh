@@ -16,6 +16,9 @@ ps -Aceo pcpu,comm -r 2>/dev/null | sed -n 2p | awk '
   { c = $1; $1 = ""; sub(/^ +/, ""); printf "TOP_CPU=%s\nTOP_NAME=%s\n", c, $0 }'
 
 echo "NCPU=$(sysctl -n hw.ncpu 2>/dev/null)"
+echo "CHIP=$(sysctl -n machdep.cpu.brand_string 2>/dev/null)"
+diskutil info / 2>/dev/null | awk -F': *' '/Volume Name/ { print "DISK_NAME=" $2 }'
+netstat -ib -I en0 2>/dev/null | awk 'NR == 2 { printf "NET_IN=%s\nNET_OUT=%s\n", $7, $10 }'
 echo "MEM_TOTAL_BYTES=$(sysctl -n hw.memsize 2>/dev/null)"
 sysctl -n vm.swapusage 2>/dev/null | awk '{ printf "SWAP_USED=%s\n", $6 }'
 

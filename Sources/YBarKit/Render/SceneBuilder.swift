@@ -107,7 +107,9 @@ public final class SceneBuilder {
             let labelSize = fontCache.measure(part: member.label)
             let measured = MeasuredContent(iconSize: iconSize, labelSize: labelSize)
             let width = Layout.contentLength(item: member, measured: measured)
-            let contentHeight = max(iconSize.height, labelSize.height, CGFloat(member.background.height))
+            let contentHeight = max(iconSize.height, labelSize.height,
+                                    CGFloat(member.background.height),
+                                    CGFloat(member.gauge?.diameter ?? 0))
             return (member.id, CGSize(width: width, height: max(contentHeight + 8, 22)),
                     CGFloat(member.paddingLeft), CGFloat(member.paddingRight))
         }
@@ -210,7 +212,12 @@ public final class SceneBuilder {
                        scale: scale, atlas: atlas, clip: clip, into: &list)
             penX += CGFloat(slider.width)
         }
-        if item.label.drawing {
+        if let gauge = item.gauge {
+            emitGauge(gauge, label: item.label, penX: penX, centerY: centerY,
+                      scale: scale, atlas: atlas, clip: clip, into: &list)
+            penX += CGFloat(gauge.diameter)
+        }
+        if item.gauge == nil, item.label.drawing {
             if item.label.customWidth >= 0 {
                 emitText(part: item.label, penX: penX, centerY: centerY,
                          scale: scale, atlas: atlas, clip: clip, into: &list)
@@ -267,6 +274,40 @@ public final class SceneBuilder {
         let lineColor = graph.lineColor.simd
         list.triangles.append(contentsOf: tessellation.fill.map { ShapeVertex(position: $0, color: fillColor) })
         list.triangles.append(contentsOf: tessellation.line.map { ShapeVertex(position: $0, color: lineColor) })
+    }
+
+    /// Speedometer arc (flagArc quad) with the item's label centered in the
+    /// ring — a gauge item's label lives inside the dial, not beside it.
+    private func emitGauge(
+        _ gauge: GaugeState,
+        label: TextPart,
+        penX: CGFloat,
+        centerY: CGFloat,
+        scale: CGFloat,
+        atlas: GlyphAtlas,
+        clip: CGRect?,
+        into list: inout DisplayList
+    ) {
+        let size = CGFloat(gauge.diameter)
+        let rect = CGRect(x: penX, y: centerY - size / 2, width: size, height: size)
+        var quad = QuadInstance(
+            origin: SceneBuilder.pixelOrigin(rect, scale: scale),
+            size: SceneBuilder.pixelSize(rect, scale: scale),
+            radii: SIMD4(repeating: Float(size / 2) * Float(scale)),
+            fill: gauge.trackColor.simd,
+            borderWidth: gauge.thickness * Float(scale),
+            cornerExponent: 2,
+            borderColor: gauge.color.simd)
+        quad.gradientDir = SIMD2(min(1, max(0, gauge.percentage / 100)), 0)
+        quad.flags |= QuadInstance.flagArc
+        list.quads.append(quad)
+
+        if label.drawing {
+            let labelSize = fontCache.measure(part: label)
+            emitText(part: label, penX: rect.midX - labelSize.width / 2,
+                     centerY: centerY, scale: scale, atlas: atlas, clip: clip,
+                     centerInk: true, into: &list)
+        }
     }
 
     private func emitSlider(

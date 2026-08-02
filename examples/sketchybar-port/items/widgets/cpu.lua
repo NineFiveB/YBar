@@ -2,18 +2,17 @@ local icons = require("icons")
 local colors = require("colors")
 local settings = require("settings")
 
--- YBAR PORT: the cpu_load event-provider binary is replaced by YBar's
--- built-in system_stats event (in-process host_statistics sampling).
--- The popup is an Apple-style sectioned panel (no graphs): every left
--- label sits on one of two indents, every value ends on the same right
--- edge, SF Pro throughout, units normalized in Lua.
+-- YBAR PORT: system monitor popup in the Stats-app dashboard style:
+-- arc gauges (YBar's gauge component) for CPU and memory, disk with a
+-- percentage + line, and live network throughput — each tile a stack of
+-- centered rows. Data from helpers/system_stats_rich.sh; network rates
+-- from successive byte-counter deltas.
 
 local stats_script = (PORT_DIR or (os.getenv("HOME") .. "/.config/ybar"))
   .. "/helpers/system_stats_rich.sh"
 
-local popup_width = 260
-local inset = 12          -- shared left/right content inset
-local detail_indent = 24  -- detail rows indent under their section
+local popup_width = 240
+local inset = 12
 
 -- ── Bar item: small CPU graph in the menu bar ─────────────────────────────
 local cpu = sbar.add("graph", "widgets.cpu", 42, {
@@ -43,68 +42,71 @@ local cpu = sbar.add("graph", "widgets.cpu", 42, {
 
 local cpu_bracket = sbar.add("bracket", "widgets.cpu.bracket", { cpu.name }, {
   background = { color = colors.bg1 },
-  popup = { align = "center", height = 30 }
+  -- No fixed popup row height: gauge tiles size to their content.
+  popup = { align = "center" }
 })
 
--- ── Popup: Apple-style sectioned panel ────────────────────────────────────
+-- ── Popup: gauge dashboard ────────────────────────────────────────────────
 local popup_pos = "popup." .. cpu_bracket.name
 
-sbar.add("item", "widgets.cpu.popup.header", {
+local header = sbar.add("item", "widgets.cpu.popup.header", {
   position = popup_pos,
   width = popup_width,
-  align = "center",
-  icon = { string = icons.cpu, font = { style = settings.font.style_map["Bold"], size = 14.0 } },
-  label = { string = "System Monitor", font = { size = 15, style = settings.font.style_map["Bold"] } },
+  icon = {
+    align = "left",
+    string = "System Monitor",
+    font = { size = 14, style = settings.font.style_map["Bold"] },
+    width = popup_width / 2,
+    padding_left = inset,
+  },
+  label = {
+    align = "right",
+    string = icons.gear,
+    color = colors.grey,
+    font = { size = 13 },
+    width = popup_width / 2,
+    padding_right = inset,
+  },
   background = { height = 2, color = colors.grey, y_offset = -15 },
-  padding_bottom = 4,
 })
 
--- Section row: semibold title, prominent value, shared columns.
-local function add_section(title)
+local function add_gauge()
   return sbar.add("item", {
     position = popup_pos,
     width = popup_width,
-    icon = {
-      string = title,
-      align = "left",
-      width = popup_width / 2,
-      color = colors.white,
-      font = { size = 13, style = settings.font.style_map["Semibold"] },
-      padding_left = inset,
+    align = "center",
+    icon = { drawing = false },
+    gauge = {
+      percentage = 0,
+      size = 84,
+      thickness = 8,
+      color = colors.blue,
+      track_color = colors.with_alpha(colors.grey, 0.25),
     },
     label = {
       string = "…",
-      align = "right",
-      width = popup_width / 2,
+      font = { size = 19, style = settings.font.style_map["Semibold"] },
       color = colors.white,
-      font = { size = 13, style = settings.font.style_map["Semibold"] },
-      padding_right = inset,
     },
-    padding_top = 4,
+    padding_top = 6,
   })
 end
 
--- Detail row: secondary color, indented label, value on the shared right edge.
-local function add_detail(title)
+local function add_center(text, opts)
+  opts = opts or {}
   return sbar.add("item", {
     position = popup_pos,
     width = popup_width,
+    align = "center",
     icon = {
-      string = title,
-      align = "left",
-      width = popup_width / 2,
-      color = colors.grey,
-      font = { size = 12.0 },
-      padding_left = detail_indent,
+      string = text,
+      color = opts.color or colors.white,
+      font = {
+        size = opts.size or 13,
+        style = settings.font.style_map[opts.style or "Semibold"],
+      },
     },
-    label = {
-      string = "…",
-      align = "right",
-      width = popup_width / 2,
-      color = colors.grey,
-      font = { size = 12.0, style = settings.font.style_map["Semibold"] },
-      padding_right = inset,
-    },
+    label = { drawing = false },
   })
 end
 
@@ -114,62 +116,42 @@ local function add_separator()
     width = popup_width,
     icon = { drawing = false },
     label = { drawing = false },
-    background = {
-      height = 2,
-      color = colors.with_alpha(colors.grey, 0.3),
-    },
+    background = { height = 2, color = colors.with_alpha(colors.grey, 0.3) },
   })
 end
 
-local cpu_section = add_section("CPU")
-local cpu_user    = add_detail("User")
-local cpu_system  = add_detail("System")
-
--- Load as a line: knobless slider in its own middle column, value in the
--- shared right column.
-local cpu_load = sbar.add("slider", 60, {
+local cpu_gauge   = add_gauge()
+add_center(icons.cpu .. "  CPU LOAD")
+local cpu_chip    = add_center("…", { color = colors.grey, size = 11, style = "Regular" })
+add_separator()
+local mem_gauge   = add_gauge()
+add_center("MEMORY")
+local mem_detail  = add_center("…", { color = colors.grey, size = 11, style = "Regular" })
+add_separator()
+local disk_pct    = add_center("…", { size = 17 })
+local disk_slider = sbar.add("slider", 170, {
   position = popup_pos,
   width = popup_width,
+  align = "center",
   slider = {
     highlight_color = colors.blue,
     percentage = 0,
     background = {
-      height = 4,
+      height = 5,
       corner_radius = 2,
-      color = colors.with_alpha(colors.grey, 0.3),
+      color = colors.with_alpha(colors.grey, 0.25),
     },
     knob = { drawing = false },
   },
-  icon = {
-    string = "Load",
-    align = "left",
-    width = popup_width / 2,
-    color = colors.grey,
-    font = { size = 12.0 },
-    padding_left = detail_indent,
-  },
-  label = {
-    string = "…",
-    align = "right",
-    width = popup_width / 2 - 60,
-    color = colors.grey,
-    font = { size = 12.0, style = settings.font.style_map["Semibold"] },
-    padding_right = inset,
-  },
+  icon = { drawing = false },
+  label = { drawing = false },
 })
-
-local cpu_top = add_detail("Top Process")
+local disk_title  = add_center("DISK")
+local disk_detail = add_center("…", { color = colors.grey, size = 11, style = "Regular" })
 add_separator()
-local mem_section  = add_section("Memory")
-local mem_pressure = add_detail("Pressure")
-local mem_swap     = add_detail("Swap")
-add_separator()
-local gpu_section  = add_section("GPU")
-add_separator()
-local disk_section = add_section("Disk")
-local disk_free    = add_detail("Free")
-add_separator()
-local up_section   = add_section("Uptime")
+local net_up      = add_center("↑  …", { size = 14 })
+local net_down    = add_center("↓  …", { size = 14 })
+add_center(icons.wifi.connected .. "  Wi-Fi", { color = colors.grey, size = 11, style = "Regular" })
 
 -- ── Helpers ───────────────────────────────────────────────────────────────
 local function parse_system_stats(out)
@@ -189,7 +171,6 @@ local function cpu_color_for(load)
   end
 end
 
--- "23G" / "646.38M" / "1995G" (df/top SI suffixes) -> GB.
 local function to_gb(str)
   local n, unit = (str or ""):match("^([%d%.]+)([KMGT])")
   n = tonumber(n)
@@ -208,81 +189,75 @@ local function fmt_size(gb)
   return string.format("%.0f MB", gb * 1000)
 end
 
-local function format_uptime(boot_sec)
-  local diff = os.time() - boot_sec
-  if diff <= 0 then return "—" end
-  local days = math.floor(diff / 86400)
-  local hours = math.floor((diff % 86400) / 3600)
-  local mins = math.floor((diff % 3600) / 60)
-  if days > 0 then return days .. "d " .. hours .. "h" end
-  if hours > 0 then return hours .. "h " .. mins .. "m" end
-  return mins .. "m"
+local function fmt_rate(bytes_per_s)
+  if not bytes_per_s or bytes_per_s < 0 then return "…" end
+  if bytes_per_s >= 1048576 then
+    return string.format("%.1f MB/s", bytes_per_s / 1048576)
+  end
+  if bytes_per_s >= 1024 then
+    return string.format("%.1f KB/s", bytes_per_s / 1024)
+  end
+  return string.format("%.0f B/s", bytes_per_s)
 end
+
+local net_prev = nil   -- { inb, outb, t }
 
 local function update_popup_from_helper(out)
   local stats = parse_system_stats(out)
 
-  local user = tonumber(stats.CPU_USER)
-  local sys = tonumber(stats.CPU_SYS)
-  cpu_user:set({ label = user and string.format("%.0f%%", user) or "—" })
-  cpu_system:set({ label = sys and string.format("%.0f%%", sys) or "—" })
-
-  local load1 = tonumber(stats.LOAD1)
-  local ncpu = tonumber(stats.NCPU) or 1
-  local load_pct = load1 and math.min(math.floor(load1 / ncpu * 100 + 0.5), 100) or 0
-  cpu_load:set({
-    slider = {
-      percentage = load_pct,
-      highlight_color = cpu_color_for(load_pct),
-    },
-    label = load1 and string.format("%.1f", load1) or "—",
-  })
-
-  local top_cpu = tonumber(stats.TOP_CPU)
-  cpu_top:set({
-    label = (stats.TOP_NAME and top_cpu)
-      and string.format("%s  %.0f%%", stats.TOP_NAME, top_cpu) or "—",
-  })
+  cpu_chip:set({ icon = { string = stats.CHIP or "…" } })
 
   local total_bytes = tonumber(stats.MEM_TOTAL_BYTES) or 0
   local total_gb = total_bytes > 0 and total_bytes / 1073741824 or nil
   local used_gb = to_gb(stats.MEM_USED)
-  mem_section:set({
-    label = (used_gb and total_gb)
-      and (fmt_size(used_gb) .. " of " .. fmt_size(total_gb)) or "—",
-  })
-  local pressure = stats.MEM_PRESSURE or "—"
-  mem_pressure:set({
-    label = {
-      string = pressure,
-      color = pressure == "Normal" and colors.grey
-        or (pressure == "Warning" and colors.yellow or colors.red),
+  if used_gb and total_gb then
+    local pct = math.floor(used_gb / total_gb * 100 + 0.5)
+    mem_gauge:set({
+      gauge = { percentage = pct, color = cpu_color_for(pct) },
+      label = pct .. "%",
+    })
+    mem_detail:set({
+      icon = { string = fmt_size(used_gb) .. " of " .. fmt_size(total_gb) },
+    })
+  end
+
+  local disk_used_pct = tonumber((stats.DISK_PCT or ""):match("(%d+)"))
+  if disk_used_pct then
+    disk_pct:set({ icon = { string = disk_used_pct .. "%" } })
+    disk_slider:set({
+      slider = {
+        percentage = disk_used_pct,
+        highlight_color = cpu_color_for(disk_used_pct),
+      },
+    })
+  end
+  disk_title:set({ icon = { string = stats.DISK_NAME or "DISK" } })
+  disk_detail:set({
+    icon = {
+      string = fmt_size(to_gb(stats.DISK_USED)) .. " of " .. fmt_size(to_gb(stats.DISK_SIZE)),
     },
   })
-  mem_swap:set({ label = fmt_size(to_gb(stats.SWAP_USED)) })
 
-  local gpu = tonumber(stats.GPU)
-  gpu_section:set({
-    label = {
-      string = gpu and (gpu .. "%") or "N/A",
-      color = gpu and cpu_color_for(gpu) or colors.grey,
-    },
-  })
-
-  disk_section:set({
-    label = fmt_size(to_gb(stats.DISK_USED)) .. " of " .. fmt_size(to_gb(stats.DISK_SIZE)),
-  })
-  disk_free:set({ label = fmt_size(to_gb(stats.DISK_AVAIL)) })
-
-  local boot = tonumber(stats.BOOT_SEC)
-  up_section:set({ label = boot and format_uptime(boot) or "—" })
+  local inb, outb = tonumber(stats.NET_IN), tonumber(stats.NET_OUT)
+  local now = os.time()
+  if inb and outb then
+    if net_prev and now > net_prev.t then
+      local dt = now - net_prev.t
+      net_down:set({ icon = { string = "↓  " .. fmt_rate((inb - net_prev.inb) / dt) } })
+      net_up:set({ icon = { string = "↑  " .. fmt_rate((outb - net_prev.outb) / dt) } })
+    end
+    net_prev = { inb = inb, outb = outb, t = now }
+  end
 end
 
 local function hide_popup()
   cpu_bracket:set({ popup = { drawing = false } })
 end
 
+local last_refresh = 0
+
 local function refresh_popup()
+  last_refresh = os.time()
   sbar.exec("sh '" .. stats_script:gsub("'", "'\\''") .. "' 2>/dev/null", function(out)
     update_popup_from_helper(out)
   end)
@@ -318,10 +293,19 @@ cpu:subscribe("system_stats", function(env)  -- YBAR PORT: built-in provider
   })
 
   if cpu_bracket:query().popup.drawing == "on" then
-    cpu_section:set({
-      label = { string = load .. "%", color = color },
+    cpu_gauge:set({
+      gauge = { percentage = load, color = color },
+      label = load .. "%",
     })
+    -- Keep the panel fresh even when it was opened without a click
+    -- (CLI toggle) and the scheduled loop never started.
+    if os.time() - last_refresh >= 3 then refresh_popup() end
   end
+end)
+
+header:subscribe("mouse.clicked", function()
+  sbar.exec("open -a 'Activity Monitor'")
+  hide_popup()
 end)
 
 cpu:subscribe("mouse.clicked", toggle_popup)

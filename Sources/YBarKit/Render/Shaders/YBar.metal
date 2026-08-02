@@ -37,6 +37,7 @@ struct Uniforms {
 
 constant uint kQuadFlagGradient   = 1u << 0;
 constant uint kQuadFlagGlass      = 1u << 1;
+constant uint kQuadFlagArc        = 1u << 2;
 constant uint kGlyphFlagColor     = 1u << 0;
 
 // Vertex-pulled unit quad: vid 0..3 as a triangle strip.
@@ -105,6 +106,25 @@ static inline float sd_rounded_box(float2 p, float2 halfSize, float4 radii) {
 fragment float4 quad_fragment(QuadVOut in [[stage_in]]) {
     float d = sd_rounded_box(in.local, in.halfSize, in.radii);
     float aa = max(fwidth(d), 1e-4);
+
+    if (in.flags & kQuadFlagArc) {
+        // Speedometer gauge: a 270-degree ring open at the bottom, filling
+        // clockwise from the lower-left. The quad is a circle (radius =
+        // halfSize); ring band = borderWidth; progress (0..1) rides in
+        // gradientDir.x; borderColor = progress arc, fill = track.
+        float ringOuter = 1.0 - smoothstep(-aa, aa, d);
+        float ringInner = 1.0 - smoothstep(-aa, aa, d + in.borderWidth);
+        float ring = max(ringOuter - ringInner, 0.0);
+
+        float deg = atan2(-in.local.y, in.local.x) * 57.29577951;
+        float a = (deg <= -135.0) ? deg + 360.0 : deg;   // (-135, 225]
+        float t = (225.0 - a) / 270.0;                    // 0 at start, 1 at end
+        if (t < 0.0 || t > 1.0) {
+            return float4(0.0);                           // bottom gap
+        }
+        float4 c = (t <= in.gradientDir.x) ? in.borderColor : in.fill;
+        return float4(c.rgb * c.a * ring, c.a * ring);
+    }
 
     float outer = 1.0 - smoothstep(-aa, aa, d);
     float inner = (in.borderWidth > 0.0)

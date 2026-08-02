@@ -97,6 +97,15 @@ public enum Serialize {
                 "highlight_color": hex(slider.highlightColor),
             ] as [String: Any]
         }
+        if let gauge = item.gauge {
+            dictionary["gauge"] = [
+                "percentage": gauge.percentage,
+                "size": gauge.diameter,
+                "thickness": gauge.thickness,
+                "color": hex(gauge.color),
+                "track_color": hex(gauge.trackColor),
+            ] as [String: Any]
+        }
         dictionary["popup"] = [
             "drawing": item.popup.isOpen ? "on" : "off",
             "horizontal": item.popup.horizontal,

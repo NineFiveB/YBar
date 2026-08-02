@@ -70,6 +70,26 @@ public final class SliderState {
     }
 }
 
+/// Speedometer-style arc gauge: a 270° ring open at the bottom, filled
+/// clockwise by `percentage`, with the item's label rendered at its center.
+/// Created lazily on the first `gauge.*` property set (a ybar extension —
+/// sketchybar has no gauge component).
+@MainActor
+public final class GaugeState {
+    /// 0...100.
+    public var percentage: Float = 0
+    /// Outer diameter in points.
+    public var diameter: Float = 84
+    /// Ring thickness in points.
+    public var thickness: Float = 8
+    /// Progress arc color.
+    public var color: YColor = .white
+    /// Remaining track color.
+    public var trackColor: YColor = YColor(argb: 0x40FF_FFFF)
+
+    public init() {}
+}
+
 /// Anchored popup panel owned by a host item; members are items added at
 /// position `popup.<host>`.
 public struct PopupState: Sendable {

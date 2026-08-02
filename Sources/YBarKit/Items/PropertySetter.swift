@@ -102,6 +102,8 @@ public enum PropertySetter {
             return setGraph(item, rest, value, ctx)
         case "slider":
             return setSlider(item, rest, value, ctx)
+        case "gauge":
+            return setGauge(item, rest, value, ctx)
         case "popup":
             return setPopup(item, rest, value, ctx)
         default:
@@ -127,6 +129,32 @@ public enum PropertySetter {
                                  value: value, ctx: ctx) { graph.lineWidth = $0 }
         default:
             return "[?] unknown property: graph.\(path.joined(separator: "."))"
+        }
+    }
+
+    private static func setGauge(_ item: Item, _ path: ArraySlice<Substring>,
+                                 _ value: String, _ ctx: PropertyContext) -> String? {
+        // Lazily attach: any gauge.* set turns the item into a gauge.
+        if item.gauge == nil { item.gauge = GaugeState() }
+        guard let gauge = item.gauge else { return nil }
+        switch path.first {
+        case "percentage":
+            return setFloatValue(key: "item.\(item.id).gauge.percentage", current: gauge.percentage,
+                                 value: value, ctx: ctx) { gauge.percentage = min(100, max(0, $0)) }
+        case "size":
+            return setFloatValue(key: "item.\(item.id).gauge.size", current: gauge.diameter,
+                                 value: value, ctx: ctx) { gauge.diameter = max(8, $0) }
+        case "thickness":
+            return setFloatValue(key: "item.\(item.id).gauge.thickness", current: gauge.thickness,
+                                 value: value, ctx: ctx) { gauge.thickness = max(1, $0) }
+        case "color":
+            return setColorValue(key: "item.\(item.id).gauge.color", current: gauge.color,
+                                 value: value, ctx: ctx) { gauge.color = $0 }
+        case "track_color":
+            return setColorValue(key: "item.\(item.id).gauge.track_color", current: gauge.trackColor,
+                                 value: value, ctx: ctx) { gauge.trackColor = $0 }
+        default:
+            return "[?] unknown property: gauge.\(path.joined(separator: "."))"
         }
     }
 
