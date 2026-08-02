@@ -4,3 +4,4 @@
 *.xcworkspace
 .DS_Store
 /dist/
+examples/sketchybar-port/helpers/bin/
