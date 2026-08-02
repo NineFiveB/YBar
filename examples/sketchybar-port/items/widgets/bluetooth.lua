@@ -30,7 +30,6 @@ local nf_family = "Symbols Nerd Font"
 local bt_logo = "\u{F00AF}"
 local glyph_toggle_on = "\u{F0521}"
 local glyph_toggle_off = "\u{F0522}"
-local bt_glyph = "ᛒ"
 
 local type_icons = {
   headset  = "􀑈",
@@ -38,7 +37,6 @@ local type_icons = {
   trackpad = "􀟀",
   phone    = "􀟜",
   speaker  = "􀝎",
-  generic  = bt_glyph,
 }
 
 -- ── Bar pill ────────────────────────────────────────────────────────────────
@@ -150,11 +148,17 @@ for i = 1, max_devices do
       string = "",
       color = colors.white,
       font = { size = 13.0 },
-      width = popup_width - 20,
+      width = 30,
       align = "left",
       padding_left = inset + 6,
     },
-    label = { drawing = false },
+    label = {
+      string = "",
+      color = colors.white,
+      font = { size = 13.0 },
+      width = popup_width - 30 - inset - 6,
+      align = "left",
+    },
   })
   paired_status_rows[i] = sbar.add("item", "widgets.bluetooth.devstatus." .. i, {
     position = popup_pos,
@@ -166,7 +170,7 @@ for i = 1, max_devices do
       font = { size = 11.0 },
       width = popup_width - 20,
       align = "left",
-      padding_left = inset + 28,
+      padding_left = inset + 36,
     },
     label = { drawing = false },
   })
@@ -182,20 +186,19 @@ for i = 1, max_devices do
     drawing = false,
     width = popup_width,
     icon = {
-      string = "",
+      string = "\u{F00AF}",
       color = colors.grey,
-      font = { size = 12.0 },
-      width = popup_width - 110,
+      font = { family = nf_family, size = 12.0 },
+      width = 30,
       align = "left",
       padding_left = inset + 6,
     },
     label = {
       string = "",
-      color = colors.grey,
-      font = { size = 11.0, style = settings.font.style_map["Semibold"] },
-      width = 100,
-      align = "right",
-      padding_right = inset,
+      color = colors.white,
+      font = { size = 12.0 },
+      width = popup_width - 30 - inset - 6,
+      align = "left",
     },
   })
 end
@@ -262,12 +265,17 @@ local function populate()
       if dev.connected and dev.battery >= 0 then
         status = status .. " · " .. dev.battery .. "%"
       end
+      local glyph = type_icons[dev.dtype]
       paired_name_rows[i]:set({
         drawing = true,
-        icon = {
-          string = (type_icons[dev.dtype] or type_icons.generic) .. "  " .. dev.name,
-          color = colors.white,
+        icon = glyph and {
+          string = glyph,
+          font = { family = settings.font.text, size = 13.0 },
+        } or {
+          string = bt_logo,
+          font = { family = nf_family, size = 13.0 },
         },
+        label = { string = dev.name },
       })
       paired_status_rows[i]:set({
         drawing = true,
@@ -285,8 +293,7 @@ local function populate()
     if dev then
       nearby_rows[i]:set({
         drawing = true,
-        icon = { string = bt_glyph .. "  " .. dev.name, color = colors.white },
-        label = { string = "", color = colors.grey },
+        label = { string = dev.name, color = colors.white },
       })
     else
       nearby_rows[i]:set({ drawing = false })
@@ -424,7 +431,7 @@ for i, row in ipairs(nearby_rows) do
     local dev = nearby_cache[i]
     if not dev or busy then return end
     busy = true
-    row:set({ label = { string = "Pairing…", color = colors.white } })
+    row:set({ label = { string = dev.name .. "  ·  Pairing…", color = colors.grey } })
     sbar.exec(
       blueutil("--pair " .. shell.quote(dev.address)) .. " >/dev/null 2>&1 && "
         .. blueutil("--connect " .. shell.quote(dev.address)) .. " >/dev/null 2>&1"
@@ -437,7 +444,7 @@ for i, row in ipairs(nearby_rows) do
           refresh_paired()
           refresh_bar_icon()
         else
-          row:set({ label = { string = "Pairing Failed", color = colors.red } })
+          row:set({ label = { string = dev.name .. "  ·  Pairing Failed", color = colors.red } })
         end
       end)
   end)
