@@ -42,6 +42,13 @@ public enum BarPropertySetter {
             return setFloat(manager, \BarManager.settings.gradientAngle, "gradient_angle", value, context)
         case "blur_radius":
             return setFloat(manager, \BarManager.settings.blurRadius, "blur_radius", value, context)
+        case "idle_inhibit":
+            let flag: Bool
+            if value == "toggle" { flag = !manager.settings.idleInhibit }
+            else if let parsed = PropertySetter.parseBool(value) { flag = parsed }
+            else { return "[!] invalid boolean: \(value)" }
+            manager.setIdleInhibit(flag)
+            return nil
         case "shadow":
             guard let flag = PropertySetter.parseBool(value) else { return "[!] invalid boolean: \(value)" }
             manager.settings.shadow = flag

@@ -89,6 +89,7 @@ public struct ShadowStyle: Equatable, Sendable {
 }
 
 /// Rounded-rect background: fill, optional 2-stop gradient, border, shadow.
+// (background.image lives below as value fields — see imageSource)
 public struct BackgroundStyle: Equatable, Sendable {
     public var drawing: Bool = false
     public var color: YColor = .clear
@@ -109,6 +110,14 @@ public struct BackgroundStyle: Equatable, Sendable {
     public var xOffset: Float = 0
     public var yOffset: Float = 0
     public var shadow = ShadowStyle()
+    /// background.image: rendered aspect-fit inside the background rect.
+    /// Same source forms as the image component (app.<Name>, sf.<symbol>, path).
+    public var imageSource: String = ""
+    public var imageScale: Float = 1
+    public var imageDrawing: Bool = true
+    /// Bar-background cutout: > 0 punches an item-shaped hole in the bar
+    /// (sketchybar background.clip).
+    public var clip: Float = 0
 
     public init() {}
 }
@@ -116,6 +125,8 @@ public struct BackgroundStyle: Equatable, Sendable {
 /// One text part of an item (`icon.*` or `label.*` on the CLI).
 public struct TextPart: Equatable, Sendable {
     public var string: String = ""
+    /// Marquee cycle length in frames (~60/s) when the item scrolls texts.
+    public var scrollDuration: Int = 100
     public var drawing: Bool = true
     public var color: YColor = .white
     public var highlight: Bool = false

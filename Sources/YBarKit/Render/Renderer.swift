@@ -105,13 +105,24 @@ public final class Renderer {
             return false
         }
 
-        var uniforms = Uniforms(viewportSize: SIMD2(
-            Float(drawable.texture.width), Float(drawable.texture.height)))
+        var uniforms = Uniforms(
+            viewportSize: SIMD2(
+                Float(drawable.texture.width), Float(drawable.texture.height)),
+            holeCount: UInt32(min(list.holes.count, DisplayList.maxHoles)))
 
         if !list.quads.isEmpty, let buffer = quadBuffers[slot] {
             encoder.setRenderPipelineState(quadPipeline)
             encoder.setVertexBuffer(buffer, offset: 0, index: 0)
             encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+            var holes = list.holes
+            if holes.isEmpty {
+                holes = [HoleInstance(origin: .zero, size: .zero, radius: 0,
+                                      _pad: SIMD3(repeating: 0))]
+            }
+            holes.withUnsafeBytes { raw in
+                encoder.setFragmentBytes(raw.baseAddress!, length: raw.count, index: 2)
+            }
             encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4,
                                    instanceCount: list.quads.count)
         }

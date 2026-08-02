@@ -15,10 +15,15 @@ public final class Item {
     public var background = BackgroundStyle()
 
     // Component state ("sandwich" content between icon and label).
+    /// Marquee: overflowing fixed-width text scrolls instead of clipping.
+    public var scrollTexts: Bool = false
+    /// Hover tooltip text (Waybar analogue); empty = none.
+    public var tooltip: String = ""
     public var graph: GraphState?
     public var slider: SliderState?
     public var gauge: GaugeState?
     public var image: ImageState?
+    public var alias: AliasState?
     /// Bracket member item names (kind == .bracket).
     public var members: [String] = []
     /// Host item name for `position == .popup`.
@@ -94,7 +99,7 @@ public final class Item {
         drawing && (icon.drawing || label.drawing
                     || background.drawing || customWidth >= 0
                     || graph != nil || slider != nil || gauge != nil
-                    || image?.drawing == true)
+                    || image?.drawing == true || alias != nil)
     }
 
     /// Participates in the bar's cursor flow (brackets derive their geometry
@@ -106,6 +111,7 @@ public final class Item {
     /// Width of the sandwich content between icon and label (points).
     public var contentWidth: CGFloat {
         var width: CGFloat = image?.advance ?? 0
+        if let alias { width += alias.displaySize(backingScale: 2).width }
         if let graph { width += CGFloat(graph.capacity) }
         else if let slider { width += CGFloat(slider.width) }
         else if let gauge { width += CGFloat(gauge.diameter) }

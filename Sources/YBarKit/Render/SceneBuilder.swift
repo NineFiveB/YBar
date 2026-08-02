@@ -10,6 +10,14 @@ import simd
 @MainActor
 public final class SceneBuilder {
     let fontCache: FontCache
+    /// Atlas of the scene being built (set on build entry; used by nested
+    /// emitters like background images).
+    private var activeAtlas: GlyphAtlas?
+    /// Monotonic clock driving marquee phase (set by the render loop).
+    public var clock: CFTimeInterval = 0
+    /// True when the last built scene contained scrolling text (the render
+    /// loop keeps the display link alive while set).
+    public private(set) var sceneHasMarquee = false
 
     public init(fontCache: FontCache) {
         self.fontCache = fontCache
@@ -26,6 +34,8 @@ public final class SceneBuilder {
         atlas: GlyphAtlas
     ) -> DisplayList {
         var list = DisplayList()
+        activeAtlas = atlas
+        sceneHasMarquee = false
 
         // Bar background (drawn over the optional system-blur material).
         let barRadius = Float(settings.cornerRadius) * Float(scale)
@@ -44,6 +54,24 @@ public final class SceneBuilder {
         }
         if settings.glass && !SceneBuilder.nativeGlassBackdrops {
             barQuad.flags |= QuadInstance.flagGlass
+        }
+        // background.clip: punch item-shaped holes in the bar background.
+        for item in items where item.background.clip > 0 && item.drawing && item.isInBarFlow {
+            guard list.holes.count < DisplayList.maxHoles,
+                  let contentBox = contentBoxes[item.id], contentBox.width > 0 else { continue }
+            let contentHeight = max(
+                fontCache.measure(part: item.icon).height,
+                fontCache.measure(part: item.label).height)
+            let rect = SceneBuilder.backgroundRect(
+                item: item, contentBox: contentBox, contentHeight: contentHeight)
+            list.holes.append(HoleInstance(
+                origin: SceneBuilder.pixelOrigin(rect, scale: scale),
+                size: SceneBuilder.pixelSize(rect, scale: scale),
+                radius: item.background.cornerRadius * Float(scale),
+                _pad: SIMD3(repeating: 0)))
+        }
+        if !list.holes.isEmpty {
+            barQuad.flags |= QuadInstance.flagHoles
         }
         list.quads.append(barQuad)
 
@@ -99,6 +127,7 @@ public final class SceneBuilder {
         atlas: GlyphAtlas
     ) -> PopupScene {
         var scene = PopupScene()
+        activeAtlas = atlas
         let visible = members.filter { $0.drawing }
         guard !visible.isEmpty else { return scene }
 
@@ -231,14 +260,32 @@ public final class SceneBuilder {
                       scale: scale, atlas: atlas, clip: clip, into: &list)
             penX += CGFloat(gauge.diameter)
         }
+        if let alias = item.alias {
+            let display = alias.displaySize(backingScale: scale)
+            if let cgImage = alias.captured,
+               let entry = atlas.liveEntry(cgImage: cgImage, cacheKey: "alias:\(item.id)") {
+                let rect = CGRect(x: penX, y: centerY - display.height / 2,
+                                  width: display.width, height: display.height)
+                list.glyphs.append(GlyphInstance(
+                    origin: SIMD2(Float(rect.minX * scale), Float(rect.minY * scale)),
+                    size: SIMD2(Float(rect.width * scale), Float(rect.height * scale)),
+                    uvOrigin: entry.uvOrigin,
+                    uvSize: entry.uvSize,
+                    color: SIMD4(1, 1, 1, 1),
+                    flags: GlyphInstance.flagColorGlyph))
+            }
+            penX += display.width
+        }
         if item.gauge == nil, item.label.drawing {
             if item.label.customWidth >= 0 {
                 emitText(part: item.label, penX: penX, centerY: centerY,
-                         scale: scale, atlas: atlas, clip: clip, into: &list)
+                         scale: scale, atlas: atlas, clip: clip,
+                         marquee: item.scrollTexts, into: &list)
             } else {
                 penX += CGFloat(item.label.paddingLeft)
                 emitText(part: item.label, penX: penX, centerY: centerY,
-                         scale: scale, atlas: atlas, clip: clip, into: &list)
+                         scale: scale, atlas: atlas, clip: clip,
+                         marquee: item.scrollTexts, into: &list)
             }
         }
         // TODO(v1.5): per-part backgrounds (icon.background.* / label.background.*).
@@ -429,6 +476,29 @@ public final class SceneBuilder {
             quad.flags |= QuadInstance.flagGlass
         }
         list.quads.append(quad)
+
+        // background.image: aspect-fit inside the background rect, scaled.
+        if background.imageDrawing, !background.imageSource.isEmpty,
+           let atlas = activeAtlas,
+           let image = ImageState.resolve(source: background.imageSource) {
+            let fitHeight = rect.height * CGFloat(background.imageScale)
+            let aspect = image.size.height > 0 ? image.size.width / image.size.height : 1
+            let display = CGSize(width: fitHeight * aspect, height: fitHeight)
+            let key = "bgimg:\(background.imageSource)@\(Int(display.width))x\(Int(display.height))"
+            if let entry = atlas.entry(colorImage: image, cacheKey: key, sizePoints: display) {
+                let imageRect = CGRect(
+                    x: rect.midX - display.width / 2,
+                    y: rect.midY - display.height / 2,
+                    width: display.width, height: display.height)
+                list.glyphs.append(GlyphInstance(
+                    origin: SIMD2(Float(imageRect.minX * scale), Float(imageRect.minY * scale)),
+                    size: SIMD2(Float(imageRect.width * scale), Float(imageRect.height * scale)),
+                    uvOrigin: entry.uvOrigin,
+                    uvSize: entry.uvSize,
+                    color: SIMD4(1, 1, 1, 1),
+                    flags: GlyphInstance.flagColorGlyph))
+            }
+        }
     }
 
     /// Real Liquid Glass (NSGlassEffectView) exists on macOS 26+: the backdrop
@@ -440,6 +510,30 @@ public final class SceneBuilder {
         return false
     }()
 
+    // MARK: - Tooltip
+
+    /// Small dark bubble with one line of text (hover tooltips).
+    public func buildTooltip(text: String, scale: CGFloat, atlas: GlyphAtlas)
+        -> (list: DisplayList, sizePoints: CGSize) {
+        activeAtlas = atlas
+        var part = TextPart()
+        part.string = text
+        part.font.size = 11
+        part.color = YColor(argb: 0xFFFF_FFFF)
+        let ink = fontCache.measure(part: part)
+        let size = CGSize(width: ink.width + 20, height: max(ink.height + 10, 24))
+        var list = DisplayList()
+        var background = BackgroundStyle()
+        background.drawing = true
+        background.color = YColor(argb: 0xF220_2024)
+        background.cornerRadius = 6
+        emitBackground(background, rect: CGRect(origin: .zero, size: size),
+                       scale: scale, forceHeight: true, into: &list)
+        emitText(part: part, penX: 10, centerY: size.height / 2,
+                 scale: scale, atlas: atlas, clip: nil, into: &list)
+        return (list, size)
+    }
+
     // MARK: - Text
 
     private func emitText(
@@ -450,12 +544,14 @@ public final class SceneBuilder {
         atlas: GlyphAtlas,
         clip: CGRect?,
         centerInk: Bool = false,
+        marquee: Bool = false,
         into list: inout DisplayList
     ) {
         let text = part.displayString
         guard !text.isEmpty else { return }
         let color = part.effectiveColor.simd
         let partCenterY = centerY - CGFloat(part.yOffset)
+        var marqueeCycle: CGFloat = 0
 
         // Fixed-width parts: penX is the SLOT origin; paddings fold inside the
         // slot (sketchybar text_get_length override), content aligns with
@@ -469,10 +565,22 @@ public final class SceneBuilder {
                 - CGFloat(part.paddingLeft) - CGFloat(part.paddingRight) - ink
             let boxOrigin = penX
             penX += CGFloat(part.paddingLeft)
-            switch part.align {
-            case "c": penX += slack / 2
-            case "r": penX += slack
-            default: break
+            if marquee, slack < 0 {
+                // Overflowing marquee: scroll instead of clipping. The run is
+                // drawn twice, one cycle apart, for a seamless wrap.
+                sceneHasMarquee = true
+                marqueeCycle = ink + 24
+                let seconds = Double(max(part.scrollDuration, 1)) / 60.0
+                let speed = Double(marqueeCycle) / seconds
+                let offset = CGFloat(clock * speed).truncatingRemainder(
+                    dividingBy: marqueeCycle)
+                penX -= offset
+            } else {
+                switch part.align {
+                case "c": penX += slack / 2
+                case "r": penX += slack
+                default: break
+                }
             }
             let partBox = CGRect(
                 x: (boxOrigin * scale).rounded(),
@@ -520,19 +628,25 @@ public final class SceneBuilder {
             CTRunGetPositions(run, CFRange(location: 0, length: count), &positions)
 
             let roundingSlack = max(shaped.width - shaped.inkWidth, 0) / 2
-            for index in 0..<count {
-                guard let entry = atlas.entry(glyph: glyphs[index], font: runFont) else { continue }
-                // Ink-aligned (-inkMinX: ink starts at the pen) with the
-                // measurement's rounding slack split evenly — otherwise up to
-                // 1.5pt of slack pools on the right and single glyphs (the
-                // apple symbol) sit visibly left of center in their pill.
-                let glyphPenX = ((penX + positions[index].x - shaped.inkMinX + roundingSlack)
-                                 * scale).rounded()
-                if let instance = SceneBuilder.glyphInstance(
-                    origin: SIMD2(Float(glyphPenX) + entry.bearingPx.x,
-                                  Float(baselinePx) + entry.bearingPx.y),
-                    entry: entry, color: color, clip: clip) {
-                    list.glyphs.append(instance)
+            // Marquee wrap: a second pass one cycle to the right fills the gap
+            // as the first copy scrolls out; the slot clip trims both.
+            let passes: [CGFloat] = marqueeCycle > 0 ? [0, marqueeCycle] : [0]
+            for passOffset in passes {
+                for index in 0..<count {
+                    guard let entry = atlas.entry(glyph: glyphs[index], font: runFont) else { continue }
+                    // Ink-aligned (-inkMinX: ink starts at the pen) with the
+                    // measurement's rounding slack split evenly — otherwise up
+                    // to 1.5pt of slack pools on the right and single glyphs
+                    // (the apple symbol) sit visibly left of center.
+                    let glyphPenX = ((penX + passOffset + positions[index].x
+                                      - shaped.inkMinX + roundingSlack)
+                                     * scale).rounded()
+                    if let instance = SceneBuilder.glyphInstance(
+                        origin: SIMD2(Float(glyphPenX) + entry.bearingPx.x,
+                                      Float(baselinePx) + entry.bearingPx.y),
+                        entry: entry, color: color, clip: clip) {
+                        list.glyphs.append(instance)
+                    }
                 }
             }
         }

@@ -144,6 +144,54 @@ public final class GlyphAtlas {
                       bearing: SIMD2(0, 0), isColor: false)
     }
 
+    // MARK: - Live (replaceable) images — alias captures
+
+    private var liveRects: [String: (x: Int, y: Int, w: Int, h: Int)] = [:]
+
+    /// Upload a frequently-changing image (alias capture). Re-uses the same
+    /// atlas rect while the pixel size is stable so live captures don't leak
+    /// shelf space; a size change allocates a fresh rect.
+    public func liveEntry(cgImage: CGImage, cacheKey: String) -> Entry? {
+        let width = cgImage.width
+        let height = cgImage.height
+        guard width > 0, height > 0,
+              let context = GlyphAtlas.makeColorContext(width: width, height: height)
+        else { return nil }
+        context.interpolationQuality = .high
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let data = context.data else { return nil }
+
+        if let rect = liveRects[cacheKey], rect.w == width, rect.h == height {
+            let region = MTLRegion(
+                origin: MTLOrigin(x: rect.x, y: rect.y, z: 0),
+                size: MTLSize(width: width, height: height, depth: 1))
+            colorTexture.replace(region: region, mipmapLevel: 0, withBytes: data,
+                                 bytesPerRow: context.bytesPerRow)
+            let page = Float(GlyphAtlas.colorPageSize)
+            return Entry(
+                uvOrigin: SIMD2(Float(rect.x) / page, Float(rect.y) / page),
+                uvSize: SIMD2(Float(width) / page, Float(height) / page),
+                sizePx: SIMD2(Float(width), Float(height)),
+                bearingPx: SIMD2(0, 0), isColor: true)
+        }
+        guard let origin = colorPacker.allocate(width: width, height: height) else {
+            FileHandle.standardError.write(Data("[ybar] atlas full — alias capture skipped\n".utf8))
+            return nil
+        }
+        liveRects[cacheKey] = (origin.x, origin.y, width, height)
+        let region = MTLRegion(
+            origin: MTLOrigin(x: origin.x, y: origin.y, z: 0),
+            size: MTLSize(width: width, height: height, depth: 1))
+        colorTexture.replace(region: region, mipmapLevel: 0, withBytes: data,
+                             bytesPerRow: context.bytesPerRow)
+        let page = Float(GlyphAtlas.colorPageSize)
+        return Entry(
+            uvOrigin: SIMD2(Float(origin.x) / page, Float(origin.y) / page),
+            uvSize: SIMD2(Float(width) / page, Float(height) / page),
+            sizePx: SIMD2(Float(width), Float(height)),
+            bearingPx: SIMD2(0, 0), isColor: true)
+    }
+
     // MARK: - Images
 
     /// Rasterize an arbitrary image (app icons) into the color page.

@@ -29,6 +29,8 @@ public struct QuadInstance {
     public static let flagGradient: UInt32 = 1 << 0
     public static let flagGlass: UInt32 = 1 << 1
     public static let flagArc: UInt32 = 1 << 2
+    /// Bar background only: punch the DisplayList's hole rects out of this quad.
+    public static let flagHoles: UInt32 = 1 << 3
 
     public init(
         origin: SIMD2<Float>, size: SIMD2<Float>, radii: SIMD4<Float>,
@@ -95,15 +97,38 @@ public struct ShapeVertex {
 
 public struct Uniforms {
     public var viewportSize: SIMD2<Float>
+    /// Cutout count for quads carrying flagHoles.
+    public var holeCount: UInt32 = 0
+    var _pad: UInt32 = 0
 
-    public init(viewportSize: SIMD2<Float>) {
+    public init(viewportSize: SIMD2<Float>, holeCount: UInt32 = 0) {
         self.viewportSize = viewportSize
+        self.holeCount = holeCount
     }
 }
 
 /// The flat, paint-ordered output of a scene build: everything the GPU needs
 /// for one frame of one bar, in device pixels.
+/// A rounded-rect cutout in the bar background (background.clip).
+/// Layout must match the Metal-side Hole struct.
+public struct HoleInstance {
+    public var origin: SIMD2<Float>
+    public var size: SIMD2<Float>
+    public var radius: Float
+    public var _pad: SIMD3<Float>
+
+    public init(origin: SIMD2<Float>, size: SIMD2<Float>, radius: Float, _pad: SIMD3<Float>) {
+        self.origin = origin
+        self.size = size
+        self.radius = radius
+        self._pad = _pad
+    }
+}
+
 public struct DisplayList {
+    public static let maxHoles = 16
+    /// Cutouts applied to quads carrying flagHoles (the bar background).
+    public var holes: [HoleInstance] = []
     public var quads: [QuadInstance] = []
     /// Triangles drawn between quads and glyphs (graph fills/lines).
     public var triangles: [ShapeVertex] = []

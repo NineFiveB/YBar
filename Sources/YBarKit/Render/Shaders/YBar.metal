@@ -33,11 +33,21 @@ struct GlyphInstance {
 
 struct Uniforms {
     float2 viewportSize;
+    uint   holeCount;
+    uint   _pad;
+};
+
+struct Hole {
+    float2 origin;
+    float2 size;
+    float  radius;
+    float3 _pad;
 };
 
 constant uint kQuadFlagGradient   = 1u << 0;
 constant uint kQuadFlagGlass      = 1u << 1;
 constant uint kQuadFlagArc        = 1u << 2;
+constant uint kQuadFlagHoles      = 1u << 3;
 constant uint kGlyphFlagColor     = 1u << 0;
 
 // Vertex-pulled unit quad: vid 0..3 as a triangle strip.
@@ -103,9 +113,24 @@ static inline float sd_rounded_box(float2 p, float2 halfSize, float4 radii) {
     return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
 }
 
-fragment float4 quad_fragment(QuadVOut in [[stage_in]]) {
+fragment float4 quad_fragment(
+    QuadVOut in [[stage_in]],
+    constant Uniforms &uniforms [[buffer(1)]],
+    const device Hole *holes [[buffer(2)]]
+) {
     float d = sd_rounded_box(in.local, in.halfSize, in.radii);
     float aa = max(fwidth(d), 1e-4);
+    // background.clip cutouts: multiply coverage by "outside every hole".
+    float holeMask = 1.0;
+    if (in.flags & kQuadFlagHoles) {
+        for (uint i = 0; i < uniforms.holeCount; i++) {
+            Hole hole = holes[i];
+            float2 center = hole.origin + hole.size * 0.5;
+            float hd = sd_rounded_box(in.position.xy - center, hole.size * 0.5,
+                                      float4(hole.radius));
+            holeMask = min(holeMask, smoothstep(-aa, aa, hd));
+        }
+    }
 
     if (in.flags & kQuadFlagArc) {
         // Speedometer gauge: a 270-degree ring open at the bottom, filling
@@ -167,7 +192,7 @@ fragment float4 quad_fragment(QuadVOut in [[stage_in]]) {
         rgb = clamp(rgb + float3(light), 0.0, 1.0);
         alpha = clamp(alpha + light * 0.85, 0.0, 1.0);
     }
-    return float4(rgb, alpha);
+    return float4(rgb * holeMask, alpha * holeMask);
 }
 
 // ---------------------------------------------------------------- shapes

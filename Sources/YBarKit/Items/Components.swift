@@ -8,6 +8,7 @@ public enum ItemKind: String, Sendable {
     case graph
     case slider
     case bracket
+    case alias
 }
 
 /// Ring buffer of normalized samples (0...1), fed by `--push <name> <values…>`.
@@ -100,6 +101,10 @@ public final class ImageState {
         return cachedImage
     }
 
+    /// Shared resolver for every image consumer (image component,
+    /// background.image, aliases).
+    public static func resolve(source: String) -> NSImage? { load(source: source) }
+
     private static func load(source: String) -> NSImage? {
         guard !source.isEmpty else { return nil }
         if source.hasPrefix("sf.") {
@@ -126,6 +131,42 @@ public final class ImageState {
             return nil
         }
         return NSImage(contentsOfFile: source)
+    }
+}
+
+/// sketchybar alias: a live screen capture of another app's menu bar item,
+/// rendered inside the bar. The item's NAME is the spec: "Owner" or
+/// "Owner,Window Title". Captures via ScreenCaptureKit (Screen Recording
+/// permission) on the item's update_freq cadence (default 2s).
+@MainActor
+public final class AliasState {
+    /// Owning application name to match.
+    public let owner: String
+    /// Optional window-title substring to disambiguate.
+    public let windowTitle: String?
+    /// Display scale factor applied to the captured size (alias.scale).
+    public var scale: Float = 1
+    /// Latest capture and its pixel size.
+    public var captured: CGImage?
+    public var capturedPxSize: CGSize = .zero
+    /// The source window's global frame (for click forwarding).
+    public var windowFrame: CGRect = .zero
+    public var lastCapture: CFTimeInterval = 0
+
+    public init(spec: String) {
+        let parts = spec.split(separator: ",", maxSplits: 1).map {
+            $0.trimmingCharacters(in: .whitespaces)
+        }
+        owner = parts.first ?? spec
+        windowTitle = parts.count > 1 && !parts[1].isEmpty ? parts[1] : nil
+    }
+
+    /// On-bar size in points at the given backing scale.
+    public func displaySize(backingScale: CGFloat) -> CGSize {
+        guard capturedPxSize.width > 0 else { return CGSize(width: 20, height: 20) }
+        let factor = CGFloat(scale) / max(backingScale, 1)
+        return CGSize(width: capturedPxSize.width * factor,
+                      height: capturedPxSize.height * factor)
     }
 }
 

@@ -50,6 +50,7 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
     var socketServer: SocketServer!
 
     let workspaceProvider = WorkspaceProvider()
+    let aliasProvider = AliasProvider()
     let powerProvider = PowerProvider()
     let audioProvider = AudioProvider()
     let networkProvider = NetworkProvider()
@@ -79,6 +80,9 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         commandHandler = CommandHandler(
             barManager: barManager, eventBus: eventBus,
             scriptRunner: scriptRunner, scheduler: scheduler)
+        commandHandler.onAliasAdded = { [weak self] _ in
+            self?.aliasProvider.start()
+        }
         wireCommandHandler()
 
         let socketPath = WireFormat.socketPath(instanceName: instanceName)
@@ -192,6 +196,19 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                 name: "display_change",
                 info: "\(DisplayManager.screens().count)")
         }
+        aliasProvider.itemsProvider = { [weak self] in
+            self?.barManager.store.items.filter { $0.alias != nil } ?? []
+        }
+        aliasProvider.onCapture = { [weak self] in
+            self?.barManager.setNeedsRender()
+        }
+        barManager.onMarqueeDemand = { [weak self] active in
+            guard let self else { return }
+            self.scheduler.continuousDemand = active
+            if active, self.scheduler.onFrame == nil {
+                self.scheduler.onFrame = { [weak self] in self?.barManager.setNeedsRender() }
+            }
+        }
         barManager.onGlobalMouseEnter = { [weak self] in
             self?.eventBus.trigger(name: "mouse.entered.global")
         }
@@ -211,6 +228,17 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
             ]
             if !item.clickScript.isEmpty {
                 self.scriptRunner.run(script: item.clickScript, environment: environment)
+            }
+            // Alias click forwarding: no script and no Lua handler means the
+            // click belongs to the captured source item.
+            if item.kind == .alias, item.clickScript.isEmpty, !item.hasLuaHandlers,
+               let frame = item.alias?.windowFrame, frame != .zero {
+                let center = CGPoint(x: frame.midX, y: frame.midY)
+                for eventType in [CGEventType.leftMouseDown, .leftMouseUp] {
+                    CGEvent(mouseEventSource: nil, mouseType: eventType,
+                            mouseCursorPosition: center, mouseButton: .left)?
+                        .post(tap: .cghidEventTap)
+                }
             }
             self.triggerTargeted(item: item, eventName: "mouse.clicked", environment: environment)
         }

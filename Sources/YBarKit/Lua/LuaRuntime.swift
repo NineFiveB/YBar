@@ -494,6 +494,11 @@ public final class LuaRuntime {
             guard let item = resolve(position) else { return "[!] add failed: \(name) \(position)" }
             item.kind = .slider
             item.slider = SliderState(width: width ?? 100)
+        case "alias":
+            guard let item = resolve(position) else { return "[!] add failed: \(name) \(position)" }
+            item.kind = .alias
+            item.alias = AliasState(spec: name)
+            DaemonCore.shared?.aliasProvider.start()
         case "bracket":
             // position carries comma-separated members for brackets.
             let members = position.split(separator: ",").map(String.init)

@@ -1,4 +1,5 @@
 import AppKit
+import IOKit.pwr_mgt
 import Metal
 
 /// Weak hook registry so @Sendable system callbacks (global event monitors)
@@ -52,6 +53,27 @@ public final class BarManager {
     public var onGlobalMouseExit: (() -> Void)?
     /// The pointer entered a YBar window while previously inside none.
     public var onGlobalMouseEnter: (() -> Void)?
+    /// The last built scene contains marquee text (drives the display link).
+    public var onMarqueeDemand: ((Bool) -> Void)?
+    /// Waybar idle_inhibitor analogue: a power-management assertion that
+    /// keeps the display awake while active.
+    private var idleAssertion: IOPMAssertionID = 0
+
+    public func setIdleInhibit(_ active: Bool) {
+        guard active != settings.idleInhibit else { return }
+        settings.idleInhibit = active
+        if active {
+            var id = IOPMAssertionID(0)
+            let ok = IOPMAssertionCreateWithName(
+                kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
+                IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                "ybar idle inhibitor" as CFString, &id)
+            if ok == kIOReturnSuccess { idleAssertion = id }
+        } else if idleAssertion != 0 {
+            IOPMAssertionRelease(idleAssertion)
+            idleAssertion = 0
+        }
+    }
     private var pointerInsideSurfaces = Set<ObjectIdentifier>()
 
     public init() throws {
@@ -372,6 +394,7 @@ public final class BarManager {
         }
         surface.syncGlassBackdrops(glassSpecs)
 
+        sceneBuilder.clock = CACurrentMediaTime()
         let list = sceneBuilder.build(
             items: items,
             settings: settings,
@@ -379,6 +402,9 @@ public final class BarManager {
             barSize: barSize,
             scale: scale,
             atlas: atlas)
+        // Marquee text needs continuous frames; everything else stays
+        // damage-driven.
+        onMarqueeDemand?(sceneBuilder.sceneHasMarquee)
         if !renderer.render(list: list, layer: surface.hostView.metalLayer, atlas: atlas) {
             // Frame lost (display asleep / drawables exhausted): the damage flag
             // was already consumed, so reschedule or the update is never shown.
@@ -542,6 +568,48 @@ public final class BarManager {
             item.mouseOver = true
             onItemHover?(item, true)
         }
+        updateTooltip(for: item, on: surface)
+    }
+
+    // MARK: - Tooltips (Waybar analogue: hover text bubble after a delay)
+
+    private var tooltipSurface: PopupSurface?
+    private var tooltipWork: DispatchWorkItem?
+
+    private func updateTooltip(for item: Item?, on surface: BarSurface) {
+        tooltipWork?.cancel()
+        tooltipWork = nil
+        hideTooltip()
+        guard let item, !item.tooltip.isEmpty else { return }
+        let work = DispatchWorkItem { [weak self] in
+            self?.showTooltip(for: item, on: surface)
+        }
+        tooltipWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+    }
+
+    private func showTooltip(for item: Item, on surface: BarSurface) {
+        guard surface.hoveredItemID == item.id,
+              let frame = surface.itemFrames.first(where: { $0.itemID == item.id })?.frame,
+              let atlas = atlas(for: surface.scale) else { return }
+        let built = sceneBuilder.buildTooltip(
+            text: item.tooltip, scale: surface.scale, atlas: atlas)
+        let tooltip = tooltipSurface ?? PopupSurface(hostItemID: -1, device: device)
+        tooltipSurface = tooltip
+        tooltip.panel.hasShadow = false
+        let barFrame = surface.panelFrame
+        let anchor = CGRect(
+            x: barFrame.minX + frame.minX,
+            y: barFrame.maxY - frame.maxY,
+            width: frame.width,
+            height: frame.height)
+        tooltip.present(anchor: anchor, size: built.sizePoints,
+                        barPosition: settings.position, yOffset: 4, align: "c")
+        _ = renderer.render(list: built.list, layer: tooltip.hostView.metalLayer, atlas: atlas)
+    }
+
+    public func hideTooltip() {
+        tooltipSurface?.close()
     }
 
     public func hitTest(point: CGPoint, on surface: BarSurface) -> Item? {

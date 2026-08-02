@@ -13,6 +13,8 @@ public final class CommandHandler {
 
     /// Daemon control hooks.
     public var onReload: ((String?) -> Void)?
+    /// A new alias item needs its capture loop armed.
+    public var onAliasAdded: ((Item) -> Void)?
     public var onExit: (() -> Void)?
     public var onHotloadToggle: ((Bool) -> Void)?
     /// Forced provider re-queries keyed by event name (`--trigger volume_change` etc.).
@@ -256,6 +258,20 @@ public final class CommandHandler {
     }
 
     private func handleAdd(args: [String]) -> String? {
+        // --add alias "<Owner>[,Window Title]" <position> [scale]
+        if args.first == "alias" {
+            guard args.count >= 3, let position = ItemPosition.parse(args[2]) else {
+                return "[!] usage: --add alias \"Owner[,Window]\" <position>"
+            }
+            guard let item = barManager.store.add(name: args[1], position: position) else {
+                return "[!] item exists: \(args[1])"
+            }
+            item.kind = .alias
+            item.alias = AliasState(spec: args[1])
+            onAliasAdded?(item)
+            barManager.setNeedsRender()
+            return nil
+        }
         guard let kind = args.first else { return "[!] --add needs a type" }
         switch kind {
         case "item":

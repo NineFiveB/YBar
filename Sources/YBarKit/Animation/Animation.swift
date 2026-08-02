@@ -128,6 +128,14 @@ public final class AnimationScheduler {
 
     public var isAnimating: Bool { !animations.isEmpty }
 
+    /// Keeps the display link alive with zero property animations (marquee
+    /// text): each frame still fires onFrame so the scene re-encodes.
+    public var continuousDemand = false {
+        didSet {
+            if continuousDemand { startLinkIfNeeded() } else { stopLinkIfIdle() }
+        }
+    }
+
     func animate(key: String, from: AnimValue, to: AnimValue,
                  durationFrames: Int, curve: AnimationCurve,
                  apply: @escaping (AnimValue) -> Void,
@@ -167,14 +175,14 @@ public final class AnimationScheduler {
     }
 
     private func startLinkIfNeeded() {
-        guard displayLink == nil, isAnimating else { return }
+        guard displayLink == nil, isAnimating || continuousDemand else { return }
         guard let link = makeDisplayLink?(self, #selector(step(_:))) else { return }
         link.add(to: .main, forMode: .common)
         displayLink = link
     }
 
     private func stopLinkIfIdle() {
-        guard animations.isEmpty else { return }
+        guard animations.isEmpty, !continuousDemand else { return }
         displayLink?.invalidate()
         displayLink = nil
     }

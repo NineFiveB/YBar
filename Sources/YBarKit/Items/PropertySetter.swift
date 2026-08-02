@@ -94,7 +94,15 @@ public enum PropertySetter {
             return setDisplayAssociation(item, value, ctx)
         case "blur_radius":
             return setFloat(item, \Item.blurRadius, "blur_radius", value, ctx)
-        case "scroll_texts", "padding_top", "padding_bottom",
+        case "scroll_texts":
+            guard let flag = parseBool(value) else { return "[!] invalid boolean: \(value)" }
+            item.scrollTexts = flag
+            ctx.invalidate()
+            return nil
+        case "tooltip":
+            item.tooltip = value
+            return nil
+        case "padding_top", "padding_bottom",
              "space", "associated_space", "ignore_association", "mach_helper", "shadow":
             // Accepted-and-ignored for sketchybar config compatibility.
             return nil
@@ -106,6 +114,19 @@ public enum PropertySetter {
             return setGauge(item, rest, value, ctx)
         case "image":
             return setImage(item, rest, value, ctx)
+        case "alias":
+            guard let alias = item.alias else { return "[!] \(item.name) is not an alias" }
+            switch rest.first {
+            case "scale":
+                guard let scale = Float(value), scale > 0 else { return "[!] invalid alias.scale: \(value)" }
+                alias.scale = scale
+                ctx.invalidate()
+                return nil
+            case "color", "update_freq":
+                return nil  // accepted (tinting not implemented; update_freq is item-level)
+            default:
+                return "[?] unknown property: alias.\(rest.joined(separator: "."))"
+            }
         case "popup":
             return setPopup(item, rest, value, ctx)
         default:
@@ -423,6 +444,10 @@ public enum PropertySetter {
                             "\(prefix).padding_right", value, ctx)
         case "y_offset":
             return setFloat(item, base.appending(path: \TextPart.yOffset), "\(prefix).y_offset", value, ctx)
+        case "scroll_duration":
+            guard let frames = Int(value), frames > 0 else { return "[!] invalid scroll_duration: \(value)" }
+            item[keyPath: base.appending(path: \TextPart.scrollDuration)] = frames
+            return nil
         case "max_chars":
             guard let count = Int(value), count >= 0 else { return "[!] invalid max_chars: \(value)" }
             item[keyPath: base.appending(path: \TextPart.maxChars)] = count
@@ -495,6 +520,27 @@ public enum PropertySetter {
         switch head {
         case "drawing":
             return setBool(item, base.appending(path: \BackgroundStyle.drawing), value, ctx)
+        case "image":
+            switch rest.first {
+            case nil, "string":
+                item[keyPath: base.appending(path: \BackgroundStyle.imageSource)] = value
+                item[keyPath: base.appending(path: \BackgroundStyle.drawing)] = true
+            case "scale":
+                guard let scale = Float(value), scale > 0 else { return "[!] invalid image.scale: \(value)" }
+                item[keyPath: base.appending(path: \BackgroundStyle.imageScale)] = scale
+            case "drawing":
+                guard let flag = parseBool(value) else { return "[!] invalid boolean: \(value)" }
+                item[keyPath: base.appending(path: \BackgroundStyle.imageDrawing)] = flag
+            default:
+                return nil  // corner_radius/border sub-keys accepted (no-op v1)
+            }
+            ctx.invalidate()
+            return nil
+        case "clip":
+            guard let clip = Float(value), clip >= 0 else { return "[!] invalid clip: \(value)" }
+            item[keyPath: base.appending(path: \BackgroundStyle.clip)] = clip
+            ctx.invalidate()
+            return nil
         case "color":
             // sketchybar parity: setting a background color enables drawing.
             item[keyPath: base.appending(path: \BackgroundStyle.drawing)] = true
