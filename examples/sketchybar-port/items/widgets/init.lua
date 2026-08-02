@@ -1,6 +1,5 @@
 require("items.widgets.battery")
 require("items.widgets.bluetooth")
-require("items.widgets.airpods")
 require("items.widgets.wifi")
 require("items.widgets.cpu")
 require("items.widgets.menubar")
