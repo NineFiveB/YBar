@@ -198,6 +198,12 @@ public final class SceneBuilder {
         // Icon, sandwich content, then label (paddings advance the pen even
         // for empty strings — sketchybar parity). Fixed-width parts receive
         // the SLOT origin; their paddings/alignment resolve inside emitText.
+        if let image = item.image, image.drawing, !image.source.isEmpty {
+            penX += CGFloat(image.paddingLeft)
+            emitImage(image, penX: penX, centerY: centerY, scale: scale,
+                      atlas: atlas, into: &list)
+            penX += CGFloat(image.size) + CGFloat(image.paddingRight)
+        }
         if item.icon.drawing {
             if item.icon.customWidth >= 0 {
                 emitText(part: item.icon, penX: penX, centerY: centerY,
@@ -209,12 +215,6 @@ public final class SceneBuilder {
                          scale: scale, atlas: atlas, clip: clip, centerInk: true, into: &list)
                 penX += iconSize.width + CGFloat(item.icon.paddingRight)
             }
-        }
-        if let image = item.image, image.drawing, !image.source.isEmpty {
-            penX += CGFloat(image.paddingLeft)
-            emitImage(image, penX: penX, centerY: centerY, scale: scale,
-                      atlas: atlas, into: &list)
-            penX += CGFloat(image.size) + CGFloat(image.paddingRight)
         }
         if let graph = item.graph {
             emitGraph(graph, item: item, penX: penX, contentBox: contentBox,
