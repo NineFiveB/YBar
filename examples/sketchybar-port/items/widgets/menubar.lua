@@ -1,6 +1,7 @@
 local colors = require("colors")
 local icons = require("icons")
 local settings = require("settings")
+local app_icons = require("helpers.app_icons")
 
 -- YBAR PORT: Bartender-style collapsible menu for background apps'
 -- native menu bar items (Proton, OneDrive, Creative Cloud, …). The
@@ -97,18 +98,18 @@ for i = 1, max_rows do
     icon = {
       string = "",
       color = colors.white,
-      font = { size = 12.0 },
-      width = popup_width - 90,
+      font = "sketchybar-app-font:Regular:15.0",
+      width = 30,
       align = "left",
-      padding_left = inset + 6,
+      padding_left = inset + 4,
     },
     label = {
       string = "",
-      color = colors.grey,
-      font = { size = 11.0 },
-      width = 80,
-      align = "right",
-      padding_right = inset,
+      color = colors.white,
+      font = { size = 12.0 },
+      width = popup_width - 30 - inset - 4,
+      align = "left",
+      padding_left = 7,
     },
   })
 end
@@ -136,10 +137,22 @@ local show_hidden_row = sbar.add("item", {
     string = "",
     align = "right",
     color = colors.grey,
-    font = { size = 11.0 },
+    font = { size = 11.0, style = settings.font.style_map["Semibold"] },
     width = popup_width / 2,
     padding_right = inset,
   },
+})
+
+local hint_row = sbar.add("item", {
+  position = popup_pos,
+  width = popup_width,
+  align = "center",
+  icon = {
+    string = "click opens · right-click hides",
+    color = colors.with_alpha(colors.grey, 0.7),
+    font = { size = 10.0 },
+  },
+  label = { drawing = false },
 })
 
 -- ── State ──────────────────────────────────────────────────────────────────
@@ -148,6 +161,20 @@ local visible_map = {}    -- row i -> items_cache entry
 local hidden_set = {}
 local show_hidden = false
 local no_access = false
+local refreshing = false
+
+local spinner_frames = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
+local spinner_index = 0
+
+local function spin()
+  if not refreshing then
+    header:set({ label = { string = "" } })
+    return
+  end
+  spinner_index = spinner_index % #spinner_frames + 1
+  header:set({ label = { string = spinner_frames[spinner_index] } })
+  sbar.delay(0.1, spin)
+end
 
 local function load_hidden()
   hidden_set = {}
@@ -167,11 +194,30 @@ local function save_hidden()
   f:close()
 end
 
+-- "CleanMyMac Menu" -> "CleanMyMac": strip helper-app suffixes for display.
+local function pretty_name(name)
+  return (name:gsub(" Menu$", ""):gsub(" Helper$", ""):gsub(" Agent$", ""))
+end
+
 local function display_name(entry)
+  local name = pretty_name(entry.name)
   if entry.count > 1 then
-    return entry.name .. " (" .. (entry.index + 1) .. ")"
+    return name .. " (" .. (entry.index + 1) .. ")"
   end
-  return entry.name
+  return name
+end
+
+-- Supplement the port's map for apps it doesn't know; the generic box
+-- fallback renders dimmed so it reads as a placeholder, not an icon.
+local extra_icons = {
+  ["CleanMyMac"] = ":desktop:",
+}
+
+local function icon_for(entry)
+  local name = pretty_name(entry.name)
+  local glyph = app_icons[entry.name] or app_icons[name] or extra_icons[name]
+  if glyph then return glyph, false end
+  return app_icons["Default"], true
 end
 
 local function populate()
@@ -193,13 +239,17 @@ local function populate()
   for i, row in ipairs(rows) do
     local entry = not no_access and visible_map[i] or nil
     if entry then
+      local glyph, is_default = icon_for(entry)
       row:set({
         drawing = true,
         icon = {
-          string = display_name(entry),
+          string = glyph,
+          color = (entry.hidden or is_default) and colors.grey or colors.white,
+        },
+        label = {
+          string = display_name(entry) .. (entry.hidden and "  ·  hidden" or ""),
           color = entry.hidden and colors.grey or colors.white,
         },
-        label = { string = entry.hidden and "Hidden" or "" },
       })
     else
       row:set({ drawing = false })
@@ -211,10 +261,14 @@ local function populate()
     icon = { string = show_hidden and "Hide Hidden" or "Show Hidden" },
     label = { string = hidden_count > 0 and tostring(hidden_count) or "" },
   })
+  hint_row:set({ drawing = not no_access })
 end
 
 local function refresh()
+  refreshing = true
+  spin()
   sbar.exec("'" .. helper:gsub("'", "'\\''") .. "' list 2>/dev/null", function(out)
+    refreshing = false
     no_access = out:match("NOAX") ~= nil
     if not no_access then
       items_cache = {}
@@ -229,7 +283,9 @@ local function refresh()
           }
         end
       end
-      table.sort(items_cache, function(a, b) return a.name:lower() < b.name:lower() end)
+      table.sort(items_cache, function(a, b)
+        return pretty_name(a.name):lower() < pretty_name(b.name):lower()
+      end)
     end
     populate()
   end)
