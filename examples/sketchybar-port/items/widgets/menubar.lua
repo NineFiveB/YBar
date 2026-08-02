@@ -218,7 +218,7 @@ local function populate()
 
   local hint = "click opens · right-click hides"
   if hidden_count > 0 and not show_hidden then
-    hint = hint .. " · ⌥ shows " .. hidden_count .. " hidden"
+    hint = hint .. " · hold ⌥ for " .. hidden_count .. " hidden"
   end
   hint_row:set({ drawing = not no_access, icon = { string = hint } })
 end
@@ -294,6 +294,17 @@ end
 
 chevron:subscribe("mouse.clicked", toggle_popup)
 chevron:subscribe("mouse.exited.global", hide_popup)
+
+-- Live reveal: holding ⌥ while the popup is open shows the hidden set,
+-- releasing hides it again (immune to click-routing quirks).
+chevron:subscribe("modifier_change", function(env)
+  if bracket:query().popup.drawing ~= "on" then return end
+  local want = env.MODIFIER == "alt"
+  if want ~= show_hidden then
+    show_hidden = want
+    populate()
+  end
+end)
 
 load_hidden()
 refresh()

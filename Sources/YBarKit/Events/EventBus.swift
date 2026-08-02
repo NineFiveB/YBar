@@ -17,7 +17,7 @@ public final class EventBus {
         "system_woke", "system_will_sleep",
         "mouse.entered", "mouse.exited", "mouse.clicked", "mouse.scrolled",
         "volume_change", "power_source_change", "battery_change", "wifi_change",
-        "system_stats", "mouse.exited.global",
+        "system_stats", "mouse.exited.global", "modifier_change",
     ]
 
     public private(set) var definitions: [EventDefinition] = []

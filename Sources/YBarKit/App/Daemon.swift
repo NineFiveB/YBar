@@ -57,6 +57,8 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
 
     var routineTimer: Timer?
     var configURL: URL?
+    /// Last reported modifier state (modifier_change dedupe).
+    var lastModifier = "none"
     var luaRuntime: LuaRuntime?
 
     init(explicitConfigPath: String?) throws {
@@ -221,6 +223,23 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                     "SCROLL_DELTA": "\(Int(delta))",
                     "MODIFIER": modifier,
                 ])
+        }
+        // Modifier-key changes as an event (live ⌥-to-reveal UX). Both
+        // monitors are needed: the local one sees events while the pointer
+        // is over our windows, the global one covers everywhere else.
+        let reportFlags: (NSEvent.ModifierFlags) -> Void = { [weak self] flags in
+            let name = MetalHostView.modifierName(flags)
+            guard let self, name != self.lastModifier else { return }
+            self.lastModifier = name
+            self.eventBus.trigger(name: "modifier_change",
+                                  extraEnvironment: ["MODIFIER": name])
+        }
+        NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { event in
+            MainActor.assumeIsolated { reportFlags(event.modifierFlags) }
+        }
+        NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
+            MainActor.assumeIsolated { reportFlags(event.modifierFlags) }
+            return event
         }
         barManager.onSliderDragStarted = { [weak self] item in
             // An in-flight percentage animation would fight the drag every frame.
