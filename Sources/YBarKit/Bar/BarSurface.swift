@@ -99,6 +99,11 @@ public final class BarSurface {
         let frame = BarSurface.frame(for: settings, on: screen)
         panel.setFrame(frame, display: true)
         panel.level = settings.level.windowLevel
+        panel.hasShadow = settings.shadow
+        // sticky=off pins the bar to the space it was created on.
+        panel.collectionBehavior = settings.sticky
+            ? [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+            : [.moveToActiveSpace, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         effectView.isHidden = settings.blurRadius <= 0
 
         effectView.frame = panel.contentView?.bounds ?? .zero

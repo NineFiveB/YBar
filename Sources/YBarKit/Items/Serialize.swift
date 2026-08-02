@@ -173,6 +173,9 @@ public enum Serialize {
                     "w": frame.size.width, "h": frame.size.height,
                 ] as [String: Any],
                 "scale": screen.backingScaleFactor,
+                "main": screen == NSScreen.main,
+                "DirectDisplayID": (screen.deviceDescription[
+                    NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0,
             ]
         }
     }

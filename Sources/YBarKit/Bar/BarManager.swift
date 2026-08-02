@@ -50,6 +50,8 @@ public final class BarManager {
     public var onSliderDragStarted: ((Item) -> Void)?
     /// The pointer left every YBar window (bar + popups) — `mouse.exited.global`.
     public var onGlobalMouseExit: (() -> Void)?
+    /// The pointer entered a YBar window while previously inside none.
+    public var onGlobalMouseEnter: (() -> Void)?
     private var pointerInsideSurfaces = Set<ObjectIdentifier>()
 
     public init() throws {
@@ -248,7 +250,7 @@ public final class BarManager {
                 onItemClicked?(item, info)
             }
         case .moved:
-            pointerInsideSurfaces.insert(ObjectIdentifier(popup))
+            noteSurfaceEntered(ObjectIdentifier(popup))
             let hovered = member(at: info.point)
             guard popup.hoveredItemID != hovered?.id else { return }
             if let previousID = popup.hoveredItemID,
@@ -476,7 +478,7 @@ public final class BarManager {
                 onItemScrolled?(item, info.scrollDelta, info.modifier)
             }
         case .moved:
-            pointerInsideSurfaces.insert(ObjectIdentifier(surface))
+            noteSurfaceEntered(ObjectIdentifier(surface))
             let hovered = hitTest(point: info.point, on: surface)
             updateHover(surface: surface, to: hovered)
         case .exited:
@@ -484,6 +486,12 @@ public final class BarManager {
             updateHover(surface: surface, to: nil)
             scheduleGlobalExitCheck()
         }
+    }
+
+    private func noteSurfaceEntered(_ id: ObjectIdentifier) {
+        let wasEmpty = pointerInsideSurfaces.isEmpty
+        pointerInsideSurfaces.insert(id)
+        if wasEmpty { onGlobalMouseEnter?() }
     }
 
     /// Debounced: crossing from the bar into its popup must not fire a global

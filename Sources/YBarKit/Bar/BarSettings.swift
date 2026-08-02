@@ -53,6 +53,8 @@ public struct BarSettings: Sendable {
     public var hidden: Bool = false
     public var level: BarLevel = .behindWindows
     public var sticky: Bool = true
+    /// Native window shadow under the whole bar (sketchybar --bar shadow).
+    public var shadow: Bool = false
     public var displayPolicy: DisplayPolicy = .all
     /// Width of the notch dead zone separating centerLeft/centerRight flows.
     /// Auto-detected from safe-area insets when 0 on a notched display.

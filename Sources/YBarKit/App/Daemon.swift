@@ -181,6 +181,9 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                     "CPU_FRACTION": String(format: "%.2f", cpu),
                     "MEMORY_USAGE": "\(Int((memory * 100).rounded()))",
                     "MEMORY_FRACTION": String(format: "%.2f", memory),
+                    "DISK_FREE_GB": DaemonCore.diskGB().free,
+                    "DISK_TOTAL_GB": DaemonCore.diskGB().total,
+                    "THERMAL_STATE": DaemonCore.thermalStateName(),
                 ])
         }
 
@@ -188,6 +191,9 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
             self?.eventBus.trigger(
                 name: "display_change",
                 info: "\(DisplayManager.screens().count)")
+        }
+        barManager.onGlobalMouseEnter = { [weak self] in
+            self?.eventBus.trigger(name: "mouse.entered.global")
         }
         barManager.onGlobalMouseExit = { [weak self] in
             self?.eventBus.trigger(name: "mouse.exited.global")
@@ -257,6 +263,29 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                 self.scriptRunner.run(script: item.clickScript, environment: environment)
             }
             self.triggerTargeted(item: item, eventName: "mouse.clicked", environment: environment)
+        }
+    }
+
+    /// Free/total capacity of the user data volume, in whole GB strings.
+    static func diskGB() -> (free: String, total: String) {
+        let url = URL(fileURLWithPath: NSHomeDirectory())
+        let values = try? url.resourceValues(forKeys: [
+            .volumeAvailableCapacityForImportantUsageKey, .volumeTotalCapacityKey,
+        ])
+        let free = (values?.volumeAvailableCapacityForImportantUsage).map {
+            "\(Int($0 / 1_000_000_000))" } ?? ""
+        let total = (values?.volumeTotalCapacity).map {
+            "\(Int(Double($0) / 1_000_000_000))" } ?? ""
+        return (free, total)
+    }
+
+    static func thermalStateName() -> String {
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal: return "nominal"
+        case .fair: return "fair"
+        case .serious: return "serious"
+        case .critical: return "critical"
+        @unknown default: return "unknown"
         }
     }
 

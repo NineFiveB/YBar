@@ -193,6 +193,48 @@ public final class CommandHandler {
                 }
                 barManager.setNeedsRender()
 
+            case "move":
+                guard batch.args.count == 3,
+                      batch.args[1] == "before" || batch.args[1] == "after" else {
+                    emit("[!] usage: --move <name> before|after <anchor>")
+                    continue
+                }
+                if !barManager.store.move(name: batch.args[0], anchor: batch.args[2],
+                                          before: batch.args[1] == "before") {
+                    emit("[!] could not move \(batch.args[0])")
+                }
+                barManager.setNeedsRender()
+
+            case "reorder":
+                if !barManager.store.reorder(names: batch.args) {
+                    emit("[!] could not reorder (unknown names?)")
+                }
+                barManager.setNeedsRender()
+
+            case "rename":
+                guard batch.args.count == 2 else {
+                    emit("[!] usage: --rename <old> <new>")
+                    continue
+                }
+                if !barManager.store.rename(from: batch.args[0], to: batch.args[1]) {
+                    emit("[!] could not rename \(batch.args[0])")
+                }
+
+            case "clone":
+                guard batch.args.count >= 2 else {
+                    emit("[!] usage: --clone <new-name> <source> [before|after]")
+                    continue
+                }
+                if barManager.store.clone(source: batch.args[1], as: batch.args[0]) == nil {
+                    emit("[!] could not clone \(batch.args[1])")
+                } else {
+                    if batch.args.count == 3 {
+                        _ = barManager.store.move(name: batch.args[0], anchor: batch.args[1],
+                                                  before: batch.args[2] == "before")
+                    }
+                    barManager.setNeedsRender()
+                }
+
             case "reload":
                 onReload?(batch.args.first)
 

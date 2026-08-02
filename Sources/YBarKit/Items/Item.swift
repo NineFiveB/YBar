@@ -83,6 +83,9 @@ public final class Item {
         script = prototype.script
         clickScript = prototype.clickScript
         updateFrequency = prototype.updateFrequency
+        blurRadius = prototype.blurRadius
+        customWidth = prototype.customWidth
+        align = prototype.align
     }
 
     public var isVisible: Bool {
@@ -172,6 +175,63 @@ public final class ItemStore {
         item.applyDefaults(from: defaults)
         items.append(item)
         return item
+    }
+
+    /// Move an item before/after a reference item (sketchybar --move).
+    public func move(name: String, anchor: String, before: Bool) -> Bool {
+        guard let from = items.firstIndex(where: { $0.name == name }),
+              name != anchor else { return false }
+        let item = items.remove(at: from)
+        guard let to = items.firstIndex(where: { $0.name == anchor }) else {
+            items.insert(item, at: from)
+            return false
+        }
+        items.insert(item, at: before ? to : to + 1)
+        return true
+    }
+
+    /// Re-specify ordering for the named items (sketchybar --reorder):
+    /// listed items take each other's slots in the given order; everything
+    /// else keeps its position.
+    public func reorder(names: [String]) -> Bool {
+        let slots = items.indices.filter { names.contains(items[$0].name) }
+        let ordered = names.compactMap { name in items.first(where: { $0.name == name }) }
+        guard slots.count == ordered.count, !slots.isEmpty else { return false }
+        for (slot, item) in zip(slots, ordered) {
+            items[slot] = item
+        }
+        return true
+    }
+
+    /// Rename a live item, fixing bracket member lists and popup hosts.
+    public func rename(from oldName: String, to newName: String) -> Bool {
+        guard item(named: newName) == nil,
+              let item = item(named: oldName) else { return false }
+        item.name = newName
+        for other in items {
+            if let index = other.members.firstIndex(of: oldName) {
+                other.members[index] = newName
+            }
+            if other.popupHost == oldName {
+                other.popupHost = newName
+            }
+        }
+        return true
+    }
+
+    /// Duplicate an item with all its properties (sketchybar --clone).
+    public func clone(source sourceName: String, as newName: String) -> Item? {
+        guard item(named: newName) == nil,
+              let source = item(named: sourceName),
+              let copy = add(name: newName, position: source.position) else { return nil }
+        copy.applyDefaults(from: source)
+        copy.drawing = source.drawing
+        copy.customWidth = source.customWidth
+        copy.align = source.align
+        copy.blurRadius = source.blurRadius
+        copy.members = source.members
+        copy.popupHost = source.popupHost
+        return copy
     }
 
     public func remove(name: String) -> Bool {

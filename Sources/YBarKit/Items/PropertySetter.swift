@@ -90,7 +90,7 @@ public enum PropertySetter {
             return setFloat(item, \Item.paddingLeft, "padding_left", value, ctx)
         case "padding_right":
             return setFloat(item, \Item.paddingRight, "padding_right", value, ctx)
-        case "display":
+        case "display", "associated_display":
             return setDisplayAssociation(item, value, ctx)
         case "blur_radius":
             return setFloat(item, \Item.blurRadius, "blur_radius", value, ctx)
