@@ -5,7 +5,21 @@
 SCRATCH := $(HOME)/.cache/ybar-build
 BIN     := $(SCRATCH)/out/Products/Debug/ybar
 
-.PHONY: build test run stop clean
+.PHONY: build test run stop clean app
+
+# App bundle: gives the daemon its own TCC identity so privacy prompts
+# (Bluetooth, Calendar, Apple Events) are attributed to YBar and grants
+# cover the daemon plus every helper it spawns. Launch with:
+#   open -g ~/Applications/YBar.app --args -c <config.lua>
+APP_DIR := $(HOME)/Applications/YBar.app
+
+app: build
+	rm -rf $(APP_DIR)
+	mkdir -p $(APP_DIR)/Contents/MacOS $(APP_DIR)/Contents/Resources
+	cp packaging/Info.plist $(APP_DIR)/Contents/Info.plist
+	cp $(BIN) $(APP_DIR)/Contents/MacOS/ybar
+	cp -R $(SCRATCH)/out/Products/Debug/YBar_YBarKit.bundle $(APP_DIR)/Contents/Resources/
+	codesign --force --sign - --identifier com.ybar.YBar $(APP_DIR)
 
 build:
 	swift build --scratch-path $(SCRATCH)

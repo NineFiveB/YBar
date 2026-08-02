@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>com.ybar.YBar</string>
+	<key>CFBundleName</key>
+	<string>YBar</string>
+	<key>CFBundleExecutable</key>
+	<string>ybar</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<!-- TCC usage descriptions: running as an app bundle makes YBar its own
+	     privacy identity, so these prompts are attributed to YBar instead of
+	     whatever terminal happened to spawn the daemon (which, lacking the
+	     keys, gets helpers silently killed instead of prompted). -->
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>YBar lists and controls your Bluetooth devices from the bar.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>YBar automates apps you ask it to from bar widgets.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>YBar shows your upcoming events in the calendar popup.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>YBar shows your upcoming events in the calendar popup.</string>
+</dict>
+</plist>
