@@ -140,10 +140,6 @@ add_row("System Settings…", "open -a 'System Settings'",
 add_row("App Store", "open -a 'App Store'",
   { glyph = "sf.storefront" })
 add_separator()
-add_row("Recent Items",
-  "'" .. menus_bin:gsub("'", "'\\''") .. "' -s 0",
-  { chevron = "›" })
-add_separator()
 local force_quit_row = add_row("Force Quit",
   [[osascript -e 'tell application "System Events" to key code 53 using {command down, option down}']],
   { shortcut = "⌥⇧⌘⎋" })
