@@ -169,7 +169,16 @@ public final class GlyphAtlas {
               let context = GlyphAtlas.makeColorContext(width: width, height: height)
         else { return nil }
         context.interpolationQuality = .high
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        // Aspect-fit: non-square sources (SF symbols are often wide) letterbox
+        // inside the square cell instead of stretching.
+        let sourceSize = CGSize(width: cgImage.width, height: cgImage.height)
+        let fit = min(CGFloat(width) / sourceSize.width, CGFloat(height) / sourceSize.height)
+        let drawSize = CGSize(width: sourceSize.width * fit, height: sourceSize.height * fit)
+        context.draw(cgImage, in: CGRect(
+            x: (CGFloat(width) - drawSize.width) / 2,
+            y: (CGFloat(height) - drawSize.height) / 2,
+            width: drawSize.width,
+            height: drawSize.height))
         return upload(context: context, width: width, height: height,
                       bearing: SIMD2(0, 0), isColor: true)
     }

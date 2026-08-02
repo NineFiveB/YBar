@@ -144,19 +144,26 @@ for i = 1, max_devices do
     position = popup_pos,
     drawing = false,
     width = popup_width,
+    align = "left",
     icon = {
       string = "",
       color = colors.white,
       font = { size = 13.0 },
-      width = 30,
+      width = 44,
       align = "left",
-      padding_left = inset + 6,
+      padding_left = 18,
+    },
+    image = {
+      string = "",
+      size = 17,
+      padding_left = 18,
+      padding_right = 9,
     },
     label = {
       string = "",
       color = colors.white,
       font = { size = 13.0 },
-      width = popup_width - 30 - inset - 6,
+      width = popup_width - 44 - inset,
       align = "left",
     },
   })
@@ -164,13 +171,14 @@ for i = 1, max_devices do
     position = popup_pos,
     drawing = false,
     width = popup_width,
+    align = "left",
     icon = {
       string = "",
       color = colors.grey,
       font = { size = 11.0 },
-      width = popup_width - 20,
+      width = popup_width - 44,
       align = "left",
-      padding_left = inset + 36,
+      padding_left = 44,
     },
     label = { drawing = false },
   })
@@ -185,19 +193,20 @@ for i = 1, max_devices do
     position = popup_pos,
     drawing = false,
     width = popup_width,
+    align = "left",
     icon = {
       string = "\u{F00AF}",
       color = colors.grey,
       font = { family = nf_family, size = 12.0 },
-      width = 30,
+      width = 44,
       align = "left",
-      padding_left = inset + 6,
+      padding_left = 18,
     },
     label = {
       string = "",
       color = colors.white,
       font = { size = 12.0 },
-      width = popup_width - 30 - inset - 6,
+      width = popup_width - 44 - inset,
       align = "left",
     },
   })
@@ -266,15 +275,26 @@ local function populate()
         status = status .. " · " .. dev.battery .. "%"
       end
       local glyph = type_icons[dev.dtype]
+      local sf_image = nil
+      if not glyph then
+        if dev.name:match("Watch") then
+          sf_image = "sf.applewatch"
+        elseif dev.name:match("TV") then
+          sf_image = "sf.appletv"
+        end
+      end
       paired_name_rows[i]:set({
         drawing = true,
-        icon = glyph and {
+        image = { string = sf_image or "" },
+        icon = sf_image and { width = 0 } or (glyph and {
+          width = 44,
           string = glyph,
           font = { family = settings.font.text, size = 13.0 },
         } or {
+          width = 44,
           string = bt_logo,
           font = { family = nf_family, size = 13.0 },
-        },
+        }),
         label = { string = dev.name },
       })
       paired_status_rows[i]:set({

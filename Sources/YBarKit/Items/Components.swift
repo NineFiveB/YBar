@@ -102,6 +102,16 @@ public final class ImageState {
 
     private static func load(source: String) -> NSImage? {
         guard !source.isEmpty else { return nil }
+        if source.hasPrefix("sf.") {
+            // SF symbol by NAME — immune to the PUA codepoint drift between
+            // SF releases. Rendered white for dark-theme rows.
+            let name = String(source.dropFirst(3))
+            guard let symbol = NSImage(
+                systemSymbolName: name, accessibilityDescription: nil) else { return nil }
+            let configuration = NSImage.SymbolConfiguration(pointSize: 32, weight: .regular)
+                .applying(.init(paletteColors: [.white]))
+            return symbol.withSymbolConfiguration(configuration) ?? symbol
+        }
         if source.hasPrefix("app.") {
             let name = String(source.dropFirst(4))
             if let app = NSWorkspace.shared.runningApplications.first(where: {
