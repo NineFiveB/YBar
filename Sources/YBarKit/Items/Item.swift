@@ -18,6 +18,7 @@ public final class Item {
     public var graph: GraphState?
     public var slider: SliderState?
     public var gauge: GaugeState?
+    public var image: ImageState?
     /// Bracket member item names (kind == .bracket).
     public var members: [String] = []
     /// Host item name for `position == .popup`.
@@ -89,7 +90,8 @@ public final class Item {
         // empty parts still occupies its paddings.
         drawing && (icon.drawing || label.drawing
                     || background.drawing || customWidth >= 0
-                    || graph != nil || slider != nil || gauge != nil)
+                    || graph != nil || slider != nil || gauge != nil
+                    || image?.drawing == true)
     }
 
     /// Participates in the bar's cursor flow (brackets derive their geometry
@@ -100,10 +102,11 @@ public final class Item {
 
     /// Width of the sandwich content between icon and label (points).
     public var contentWidth: CGFloat {
-        if let graph { return CGFloat(graph.capacity) }
-        if let slider { return CGFloat(slider.width) }
-        if let gauge { return CGFloat(gauge.diameter) }
-        return 0
+        var width: CGFloat = image?.advance ?? 0
+        if let graph { width += CGFloat(graph.capacity) }
+        else if let slider { width += CGFloat(slider.width) }
+        else if let gauge { width += CGFloat(gauge.diameter) }
+        return width
     }
 }
 

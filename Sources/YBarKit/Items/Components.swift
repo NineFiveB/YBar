@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 
@@ -67,6 +68,54 @@ public final class SliderState {
 
     public func percentage(forLocalX x: CGFloat) -> Float {
         min(100, max(0, Float(x / CGFloat(width)) * 100))
+    }
+}
+
+/// Bitmap image rendered inline before the icon (a ybar extension).
+/// Source forms: "app.<App Name>" resolves to that app's real icon
+/// (running app first, then /Applications), anything else is a file path.
+@MainActor
+public final class ImageState {
+    public var source: String = ""
+    /// Square display size in points.
+    public var size: Float = 18
+    public var drawing = true
+    public var paddingLeft: Float = 0
+    public var paddingRight: Float = 0
+
+    private var cachedSource: String?
+    private var cachedImage: NSImage?
+
+    public init() {}
+
+    public var advance: CGFloat {
+        drawing && !source.isEmpty
+            ? CGFloat(size) + CGFloat(paddingLeft) + CGFloat(paddingRight) : 0
+    }
+
+    public func resolvedImage() -> NSImage? {
+        if cachedSource == source { return cachedImage }
+        cachedSource = source
+        cachedImage = ImageState.load(source: source)
+        return cachedImage
+    }
+
+    private static func load(source: String) -> NSImage? {
+        guard !source.isEmpty else { return nil }
+        if source.hasPrefix("app.") {
+            let name = String(source.dropFirst(4))
+            if let app = NSWorkspace.shared.runningApplications.first(where: {
+                $0.localizedName == name
+            }), let icon = app.icon {
+                return icon
+            }
+            let path = "/Applications/\(name).app"
+            if FileManager.default.fileExists(atPath: path) {
+                return NSWorkspace.shared.icon(forFile: path)
+            }
+            return nil
+        }
+        return NSImage(contentsOfFile: source)
     }
 }
 

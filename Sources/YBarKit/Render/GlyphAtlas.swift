@@ -144,6 +144,36 @@ public final class GlyphAtlas {
                       bearing: SIMD2(0, 0), isColor: false)
     }
 
+    // MARK: - Images
+
+    /// Rasterize an arbitrary image (app icons) into the color page.
+    /// `sizePoints` is the on-bar display size; the bitmap is rendered at
+    /// the atlas scale for crispness. Cached by key like symbols.
+    public func entry(colorImage image: NSImage, cacheKey: String, sizePoints: CGSize) -> Entry? {
+        if let cached = symbolEntries[cacheKey] { return cached }
+        let entry = rasterizeColorImage(image: image, sizePoints: sizePoints)
+        symbolEntries[cacheKey] = entry
+        return entry
+    }
+
+    private func rasterizeColorImage(image: NSImage, sizePoints: CGSize) -> Entry? {
+        let width = Int(ceil(sizePoints.width * scale))
+        let height = Int(ceil(sizePoints.height * scale))
+        guard width > 0, height > 0 else { return nil }
+
+        var proposedRect = CGRect(origin: .zero, size: sizePoints)
+        let hints: [NSImageRep.HintKey: Any] = [
+            .ctm: NSAffineTransform(transform: AffineTransform(scale: scale))
+        ]
+        guard let cgImage = image.cgImage(forProposedRect: &proposedRect, context: nil, hints: hints),
+              let context = GlyphAtlas.makeColorContext(width: width, height: height)
+        else { return nil }
+        context.interpolationQuality = .high
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return upload(context: context, width: width, height: height,
+                      bearing: SIMD2(0, 0), isColor: true)
+    }
+
     // MARK: - Upload
 
     private func upload(context: CGContext, width: Int, height: Int,

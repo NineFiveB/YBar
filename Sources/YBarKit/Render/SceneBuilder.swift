@@ -109,7 +109,8 @@ public final class SceneBuilder {
             let width = Layout.contentLength(item: member, measured: measured)
             let contentHeight = max(iconSize.height, labelSize.height,
                                     CGFloat(member.background.height),
-                                    CGFloat(member.gauge?.diameter ?? 0))
+                                    CGFloat(member.gauge?.diameter ?? 0),
+                                    CGFloat(member.image?.drawing == true ? member.image!.size : 0))
             return (member.id, CGSize(width: width, height: max(contentHeight + 8, 22)),
                     CGFloat(member.paddingLeft), CGFloat(member.paddingRight))
         }
@@ -202,6 +203,12 @@ public final class SceneBuilder {
                 penX += iconSize.width + CGFloat(item.icon.paddingRight)
             }
         }
+        if let image = item.image, image.drawing, !image.source.isEmpty {
+            penX += CGFloat(image.paddingLeft)
+            emitImage(image, penX: penX, centerY: centerY, scale: scale,
+                      atlas: atlas, into: &list)
+            penX += CGFloat(image.size) + CGFloat(image.paddingRight)
+        }
         if let graph = item.graph {
             emitGraph(graph, item: item, penX: penX, contentBox: contentBox,
                       centerY: centerY, scale: scale, into: &list)
@@ -274,6 +281,34 @@ public final class SceneBuilder {
         let lineColor = graph.lineColor.simd
         list.triangles.append(contentsOf: tessellation.fill.map { ShapeVertex(position: $0, color: fillColor) })
         list.triangles.append(contentsOf: tessellation.line.map { ShapeVertex(position: $0, color: lineColor) })
+    }
+
+    /// Bitmap image (app icon) via the atlas color page, vertically centered.
+    private func emitImage(
+        _ image: ImageState,
+        penX: CGFloat,
+        centerY: CGFloat,
+        scale: CGFloat,
+        atlas: GlyphAtlas,
+        into list: inout DisplayList
+    ) {
+        guard let nsImage = image.resolvedImage() else { return }
+        let sizePoints = CGSize(width: CGFloat(image.size), height: CGFloat(image.size))
+        let key = "img:\(image.source)@\(image.size)"
+        guard let entry = atlas.entry(colorImage: nsImage, cacheKey: key,
+                                      sizePoints: sizePoints) else { return }
+        let rect = CGRect(
+            x: penX,
+            y: centerY - sizePoints.height / 2,
+            width: sizePoints.width,
+            height: sizePoints.height)
+        list.glyphs.append(GlyphInstance(
+            origin: SIMD2(Float(rect.minX * scale), Float(rect.minY * scale)),
+            size: SIMD2(Float(rect.width * scale), Float(rect.height * scale)),
+            uvOrigin: entry.uvOrigin,
+            uvSize: entry.uvSize,
+            color: SIMD4(1, 1, 1, 1),
+            flags: GlyphInstance.flagColorGlyph))
     }
 
     /// Speedometer arc (flagArc quad) with the item's label centered in the

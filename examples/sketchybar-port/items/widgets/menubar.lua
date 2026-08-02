@@ -1,7 +1,6 @@
 local colors = require("colors")
 local icons = require("icons")
 local settings = require("settings")
-local app_icons = require("helpers.app_icons")
 
 -- YBAR PORT: Bartender-style collapsible menu for background apps'
 -- native menu bar items (Proton, OneDrive, Creative Cloud, …). The
@@ -95,21 +94,20 @@ for i = 1, max_rows do
     position = popup_pos,
     drawing = false,
     width = popup_width,
-    icon = {
+    icon = { drawing = false },
+    -- Real app icons via the engine's image component ("app.<Name>").
+    image = {
       string = "",
-      color = colors.white,
-      font = "sketchybar-app-font:Regular:15.0",
-      width = 30,
-      align = "left",
+      size = 18,
       padding_left = inset + 4,
+      padding_right = 8,
     },
     label = {
       string = "",
       color = colors.white,
       font = { size = 12.0 },
-      width = popup_width - 30 - inset - 4,
+      width = popup_width - 18 - inset - 12,
       align = "left",
-      padding_left = 7,
     },
   })
 end
@@ -207,19 +205,6 @@ local function display_name(entry)
   return name
 end
 
--- Supplement the port's map for apps it doesn't know; the generic box
--- fallback renders dimmed so it reads as a placeholder, not an icon.
-local extra_icons = {
-  ["CleanMyMac"] = ":desktop:",
-}
-
-local function icon_for(entry)
-  local name = pretty_name(entry.name)
-  local glyph = app_icons[entry.name] or app_icons[name] or extra_icons[name]
-  if glyph then return glyph, false end
-  return app_icons["Default"], true
-end
-
 local function populate()
   access_row:set({ drawing = no_access })
 
@@ -239,13 +224,9 @@ local function populate()
   for i, row in ipairs(rows) do
     local entry = not no_access and visible_map[i] or nil
     if entry then
-      local glyph, is_default = icon_for(entry)
       row:set({
         drawing = true,
-        icon = {
-          string = glyph,
-          color = (entry.hidden or is_default) and colors.grey or colors.white,
-        },
+        image = { string = "app." .. entry.name },
         label = {
           string = display_name(entry) .. (entry.hidden and "  ·  hidden" or ""),
           color = entry.hidden and colors.grey or colors.white,

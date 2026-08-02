@@ -104,6 +104,8 @@ public enum PropertySetter {
             return setSlider(item, rest, value, ctx)
         case "gauge":
             return setGauge(item, rest, value, ctx)
+        case "image":
+            return setImage(item, rest, value, ctx)
         case "popup":
             return setPopup(item, rest, value, ctx)
         default:
@@ -129,6 +131,33 @@ public enum PropertySetter {
                                  value: value, ctx: ctx) { graph.lineWidth = $0 }
         default:
             return "[?] unknown property: graph.\(path.joined(separator: "."))"
+        }
+    }
+
+    private static func setImage(_ item: Item, _ path: ArraySlice<Substring>,
+                                 _ value: String, _ ctx: PropertyContext) -> String? {
+        // Lazily attach: any image.* set (or bare image=<source>) enables it.
+        if item.image == nil { item.image = ImageState() }
+        guard let image = item.image else { return nil }
+        switch path.first {
+        case nil, "string":
+            image.source = value
+            return nil
+        case "drawing":
+            guard let flag = parseBool(value) else { return "[!] invalid image.drawing: \(value)" }
+            image.drawing = flag
+            return nil
+        case "size":
+            return setFloatValue(key: "item.\(item.id).image.size", current: image.size,
+                                 value: value, ctx: ctx) { image.size = max(1, $0) }
+        case "padding_left":
+            return setFloatValue(key: "item.\(item.id).image.padding_left", current: image.paddingLeft,
+                                 value: value, ctx: ctx) { image.paddingLeft = $0 }
+        case "padding_right":
+            return setFloatValue(key: "item.\(item.id).image.padding_right", current: image.paddingRight,
+                                 value: value, ctx: ctx) { image.paddingRight = $0 }
+        default:
+            return "[?] unknown property: image.\(path.joined(separator: "."))"
         }
     }
 

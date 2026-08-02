@@ -97,6 +97,13 @@ public enum Serialize {
                 "highlight_color": hex(slider.highlightColor),
             ] as [String: Any]
         }
+        if let image = item.image {
+            dictionary["image"] = [
+                "string": image.source,
+                "size": image.size,
+                "drawing": image.drawing ? "on" : "off",
+            ] as [String: Any]
+        }
         if let gauge = item.gauge {
             dictionary["gauge"] = [
                 "percentage": gauge.percentage,
