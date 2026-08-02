@@ -124,7 +124,47 @@ end
 -- seconds to answer, and an empty reply means "not ready", not "no
 -- workspaces" — hiding every space on it would blank the bar until the next
 -- manual switch. Retry a few times instead.
+-- Instant phase: the event already names the focused workspace — the
+-- cross-fade and the focused pill's reveal must not wait for the
+-- aerospace query round-trip.
+local function apply_focus(focused)
+  for sid, space in pairs(spaces) do
+    local selected = (sid == focused)
+    -- Focus cross-fade: explicit colors (booleans like highlight cannot
+    -- interpolate) — the newly focused pill brightens while the old one
+    -- dims, with a gray selection fill like the calendar's today pill.
+    -- Short curve: perceived switch latency lives in this fade's onset.
+    sbar.animate("tanh", 12, function()
+      space:set({
+        icon = { color = colors.white },
+        label = { color = selected and colors.white or colors.grey },
+        background = {
+          color = selected and colors.with_alpha(colors.grey, 0.5) or colors.bg1,
+          border_color = selected and colors.black or colors.bg2,
+        },
+      })
+      brackets[sid]:set({
+        background = { border_color = selected and colors.grey or colors.bg2 },
+      })
+    end)
+  end
+
+  local space = spaces[focused]
+  if space and space:query().geometry.drawing == "off" then
+    desired_visible[focused] = true
+    space:set({ drawing = true, width = 0 })
+    sbar.set("space.padding." .. focused, { drawing = true, width = 0 })
+    sbar.animate("tanh", 20, function()
+      space:set({ width = "dynamic" })
+      sbar.set("space.padding." .. focused, { width = settings.group_paddings })
+    end)
+  end
+end
+
 local function update_spaces(focused, attempt)
+  if focused and focused ~= "" and (attempt or 0) == 0 then
+    apply_focus(focused)
+  end
   sbar.exec("aerospace list-workspaces --monitor all --empty no 2>/dev/null", function(nonempty)
     local visible = {}
     for raw_ws in nonempty:gmatch("[^\r\n]+") do
@@ -139,26 +179,8 @@ local function update_spaces(focused, attempt)
 
     for sid, space in pairs(spaces) do
       local show = visible[sid] == true
-      local selected = (sid == focused)
       local was_shown = space:query().geometry.drawing == "on"
       desired_visible[sid] = show
-
-      -- Focus cross-fade: explicit colors (booleans like highlight cannot
-      -- interpolate) — the newly focused pill brightens while the old one
-      -- dims, with a gray selection fill like the calendar's today pill.
-      sbar.animate("tanh", 20, function()
-        space:set({
-          icon = { color = colors.white },
-          label = { color = selected and colors.white or colors.grey },
-          background = {
-            color = selected and colors.with_alpha(colors.grey, 0.5) or colors.bg1,
-            border_color = selected and colors.black or colors.bg2,
-          },
-        })
-        brackets[sid]:set({
-          background = { border_color = selected and colors.grey or colors.bg2 },
-        })
-      end)
 
       if show and not was_shown then
         -- Slide in: appear at zero width, animate to natural.
