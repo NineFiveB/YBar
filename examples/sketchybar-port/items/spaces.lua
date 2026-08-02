@@ -161,18 +161,24 @@ local function apply_focus(focused)
   end
 end
 
-local function update_spaces(focused, attempt)
-  if focused and focused ~= "" and (attempt or 0) == 0 then
-    apply_focus(focused)
-  end
+-- Reconcile generation: rapid switching debounces into one query burst,
+-- and late callbacks from superseded switches are dropped instead of
+-- repainting stale state out of order.
+local reconcile_gen = 0
+local reconcile
+
+reconcile = function(focused, attempt, gen)
   sbar.exec("aerospace list-workspaces --monitor all --empty no 2>/dev/null", function(nonempty)
+    if gen ~= reconcile_gen then return end
     local visible = {}
     for raw_ws in nonempty:gmatch("[^\r\n]+") do
       local ws = raw_ws:match("^%s*(.-)%s*$")
       if ws ~= "" then visible[ws] = true end
     end
     if next(visible) == nil and (attempt or 0) < 5 then
-      sbar.exec("sleep 2", function() update_spaces(focused, (attempt or 0) + 1) end)
+      sbar.exec("sleep 2", function()
+        if gen == reconcile_gen then reconcile(focused, (attempt or 0) + 1, gen) end
+      end)
       return
     end
     if focused and focused ~= "" then visible[focused] = true end
@@ -206,6 +212,17 @@ local function update_spaces(focused, attempt)
       end
       if show then update_windows(sid) end
     end
+  end)
+end
+
+local function update_spaces(focused)
+  if focused and focused ~= "" then
+    apply_focus(focused)          -- instant, per switch
+  end
+  reconcile_gen = reconcile_gen + 1
+  local gen = reconcile_gen
+  sbar.delay(0.12, function()     -- debounce: one reconcile after a burst
+    if gen == reconcile_gen then reconcile(focused, 0, gen) end
   end)
 end
 

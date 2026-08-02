@@ -117,6 +117,20 @@ public enum CLIClient {
             argv.removeFirst()
         }
 
+        // AeroSpace hook fast path: `exec-on-workspace-change` exports its
+        // payload as environment variables. Folding them into the trigger here
+        // lets the hook invoke ybar directly — no shell wrapper needed for
+        // `$AEROSPACE_FOCUSED_WORKSPACE` interpolation (one fewer process
+        // spawn on every workspace switch).
+        if argv.first == "--trigger",
+           !argv.contains(where: { $0.hasPrefix("FOCUSED_WORKSPACE=") }),
+           let focused = ProcessInfo.processInfo.environment["AEROSPACE_FOCUSED_WORKSPACE"] {
+            argv.append("FOCUSED_WORKSPACE=\(focused)")
+            if let previous = ProcessInfo.processInfo.environment["AEROSPACE_PREV_WORKSPACE"] {
+                argv.append("PREV_WORKSPACE=\(previous)")
+            }
+        }
+
         let instanceName = Version.instanceName
         let socketPath = WireFormat.socketPath(instanceName: instanceName)
         do {
