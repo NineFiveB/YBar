@@ -14,7 +14,7 @@ return {
   transparent = 0x00000000,
 
   bar = {
-    bg = 0x00000000,         -- capsules float on nothing
+    bg = 0xb31c1c1e,         -- native menu bar darkness over the glass strip
     border = 0x00000000,
   },
   popup = {
