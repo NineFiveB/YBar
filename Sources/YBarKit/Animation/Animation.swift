@@ -70,9 +70,11 @@ public enum AnimValue {
     }
 }
 
-/// One in-flight property animation. Same-key animations chain sequentially
-/// (sketchybar semantics: a new animation on an animating property queues from
-/// the previous final value).
+/// One in-flight property animation. A new animation on an animating property
+/// RETARGETS it: the in-flight (and any queued) animation is dropped and the
+/// new one steers from the current live value. Chaining (sketchybar semantics)
+/// piles a full animation onto the queue for every hover enter/exit, so a few
+/// pointer sweeps leave items visibly animating for seconds ("stuck").
 @MainActor
 final class PropertyAnimation {
     let key: String
@@ -84,7 +86,6 @@ final class PropertyAnimation {
     /// Runs once when the animation reaches its final value (not on cancel).
     let onComplete: (() -> Void)?
     var startTime: TimeInterval?
-    var pending: PropertyAnimation?
 
     init(key: String, from: AnimValue, to: AnimValue, duration: TimeInterval,
          curve: AnimationCurve, apply: @escaping (AnimValue) -> Void,
@@ -144,16 +145,10 @@ public final class AnimationScheduler {
         let animation = PropertyAnimation(
             key: key, from: from, to: to, duration: duration, curve: curve,
             apply: apply, onComplete: onComplete)
-        if let existing = animations[key] {
-            // Chain after the last queued animation, starting from its target.
-            var tail = existing
-            while let next = tail.pending { tail = next }
-            animation.from = tail.to
-            tail.pending = animation
-        } else {
-            animations[key] = animation
-            startLinkIfNeeded()
-        }
+        // Retarget: `from` is the property's current (possibly mid-flight)
+        // value, so superseding the existing animation steers smoothly.
+        animations[key] = animation
+        startLinkIfNeeded()
     }
 
     /// Cancel any animation on this key (direct sets supersede animations).
@@ -193,11 +188,7 @@ public final class AnimationScheduler {
         for (key, animation) in animations {
             if !animation.tick(now: now) {
                 animation.onComplete?()
-                if let next = animation.pending {
-                    animations[key] = next
-                } else {
-                    finishedKeys.append(key)
-                }
+                finishedKeys.append(key)
             }
         }
         finishedKeys.forEach { animations.removeValue(forKey: $0) }
