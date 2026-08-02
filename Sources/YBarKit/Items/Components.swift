@@ -144,6 +144,10 @@ public final class GaugeState {
 public struct PopupState: Sendable {
     public var isOpen = false
     public var horizontal = false
+    /// Flow-layout mode (a ybar extension): when > 0, members flow
+    /// left-to-right and wrap at this content width — full-width members
+    /// (width == wrap_width) occupy their own line, narrow ones form grids.
+    public var wrapWidth: Float = 0
     /// Fixed row height; 0 = each row sizes to its content.
     public var cellHeight: Float = 0
     public var yOffset: Float = 0
@@ -235,9 +239,44 @@ public enum ComponentGeometry {
         rows: [(itemID: Int, size: CGSize, paddingLeft: CGFloat, paddingRight: CGFloat)],
         cellHeight: CGFloat,
         horizontal: Bool,
+        wrapWidth: CGFloat = 0,
         inset: CGFloat
     ) -> (boxes: [Int: CGRect], contentSize: CGSize) {
         var boxes: [Int: CGRect] = [:]
+        if wrapWidth > 0 {
+            // Flow layout: members run left-to-right and wrap at wrapWidth.
+            // Each line's members center vertically on the line's height.
+            var y = inset
+            var line: [(itemID: Int, x: CGFloat, width: CGFloat, height: CGFloat)] = []
+            var x = inset
+            var lineHeight: CGFloat = 0
+
+            func flushLine() {
+                for cell in line {
+                    boxes[cell.itemID] = CGRect(
+                        x: cell.x,
+                        y: y + (lineHeight - cell.height) / 2,
+                        width: cell.width,
+                        height: cell.height)
+                }
+                y += lineHeight
+                line = []
+                x = inset
+                lineHeight = 0
+            }
+
+            for row in rows {
+                let advance = row.paddingLeft + row.size.width + row.paddingRight
+                if !line.isEmpty, x + advance > inset + wrapWidth {
+                    flushLine()
+                }
+                line.append((row.itemID, x + row.paddingLeft, row.size.width, row.size.height))
+                x += advance
+                lineHeight = max(lineHeight, row.size.height)
+            }
+            flushLine()
+            return (boxes, CGSize(width: wrapWidth + 2 * inset, height: y + inset))
+        }
         if horizontal {
             var x = inset
             var maxHeight: CGFloat = 0

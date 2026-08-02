@@ -116,6 +116,7 @@ public enum Serialize {
         dictionary["popup"] = [
             "drawing": item.popup.isOpen ? "on" : "off",
             "horizontal": item.popup.horizontal,
+            "wrap_width": item.popup.wrapWidth,
             "height": item.popup.cellHeight,
             "auto_close": item.popup.autoClose,
         ] as [String: Any]

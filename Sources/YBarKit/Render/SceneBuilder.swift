@@ -119,6 +119,7 @@ public final class SceneBuilder {
             rows: rows,
             cellHeight: CGFloat(host.popup.cellHeight),
             horizontal: host.popup.horizontal,
+            wrapWidth: CGFloat(host.popup.wrapWidth),
             inset: 6)
         scene.sizePoints = layout.contentSize
 

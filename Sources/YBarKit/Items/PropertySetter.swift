@@ -276,6 +276,11 @@ public enum PropertySetter {
             item.popup.horizontal = flag
             ctx.invalidate()
             return nil
+        case "wrap_width":
+            guard let width = Float(value) else { return "[!] invalid wrap_width: \(value)" }
+            item.popup.wrapWidth = max(0, width)
+            ctx.invalidate()
+            return nil
         case "auto_close":
             guard let flag = parseBool(value) else { return "[!] invalid boolean: \(value)" }
             item.popup.autoClose = flag
