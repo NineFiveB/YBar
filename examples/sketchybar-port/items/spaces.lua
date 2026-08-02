@@ -143,12 +143,17 @@ local function update_spaces(focused, attempt)
       local was_shown = space:query().geometry.drawing == "on"
       desired_visible[sid] = show
 
-      -- Highlight and border changes fade instead of snapping.
+      -- Focus cross-fade: explicit colors (booleans like highlight cannot
+      -- interpolate) — the newly focused pill brightens while the old one
+      -- dims, with a gray selection fill like the calendar's today pill.
       sbar.animate("tanh", 20, function()
         space:set({
-          icon = { highlight = selected },
-          label = { highlight = selected },
-          background = { border_color = selected and colors.black or colors.bg2 },
+          icon = { color = colors.white },
+          label = { color = selected and colors.white or colors.grey },
+          background = {
+            color = selected and colors.with_alpha(colors.grey, 0.5) or colors.bg1,
+            border_color = selected and colors.black or colors.bg2,
+          },
         })
         brackets[sid]:set({
           background = { border_color = selected and colors.grey or colors.bg2 },
