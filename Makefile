@@ -5,7 +5,7 @@
 SCRATCH := $(HOME)/.cache/ybar-build
 BIN     := $(SCRATCH)/out/Products/Debug/ybar
 
-.PHONY: build test run stop clean app
+.PHONY: build test run stop clean app release
 
 # App bundle: gives the daemon its own TCC identity so privacy prompts
 # (Bluetooth, Calendar, Apple Events) are attributed to YBar and grants
@@ -27,6 +27,26 @@ app: build
 
 build:
 	swift build --scratch-path $(SCRATCH)
+
+# Distribution zip. Staged inside the scratch tree — never ~/Applications —
+# because codesign must run outside the iCloud-synced repo (same xattr race
+# as `build`). Note the resulting zip's signature is local-only: on any other
+# machine the download fails Gatekeeper until re-signed (docs/INSTALL.md).
+VERSION ?= 0.1.0
+STAGE   := $(SCRATCH)/stage/YBar.app
+
+release:
+	swift build -c release --scratch-path $(SCRATCH)
+	rm -rf $(SCRATCH)/stage
+	mkdir -p $(STAGE)/Contents/MacOS $(STAGE)/Contents/Resources
+	cp packaging/Info.plist $(STAGE)/Contents/Info.plist
+	cp $(SCRATCH)/release/ybar $(STAGE)/Contents/MacOS/ybar
+	cp -R $(SCRATCH)/release/YBar_YBarKit.bundle $(STAGE)/Contents/Resources/
+	codesign --force --sign "$(SIGN_ID)" --identifier com.ybar.YBar $(STAGE)
+	mkdir -p dist
+	rm -f dist/YBar-$(VERSION).zip
+	ditto -c -k --keepParent $(STAGE) dist/YBar-$(VERSION).zip
+	shasum -a 256 dist/YBar-$(VERSION).zip
 
 # -load-plugin-library: the CLT build planner intermittently misses the
 # TestingMacros plugin in its testing/ subdirectory (docs/BUILDING.md).
