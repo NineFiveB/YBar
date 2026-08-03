@@ -92,7 +92,12 @@ public enum BarPropertySetter {
             guard let flag = PropertySetter.parseBool(value) else { return "[!] invalid boolean: \(value)" }
             manager.settings.glass = flag
             return nil
-        case "font_smoothing", "shadow", "show_in_fullscreen":
+        case "fullscreen_show", "show_in_fullscreen":
+            guard let flag = PropertySetter.parseBool(value) else { return "[!] invalid boolean: \(value)" }
+            manager.settings.fullscreenShow = flag
+            manager.updateFullscreenElevation()
+            return nil
+        case "font_smoothing", "shadow":
             // Accepted for config compatibility; not applicable to the public-API v1 surface.
             return nil
         default:

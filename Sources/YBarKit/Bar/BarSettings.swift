@@ -50,6 +50,11 @@ public struct BarSettings: Sendable {
     public var blurRadius: Float = 0
     /// Liquid-glass sheen/rim on the bar background quad.
     public var glass: Bool = false
+    /// Auto-raise to status level while the active Space hosts a fullscreen
+    /// window, so the bar stays visible over native-fullscreen Spaces
+    /// (fullScreenAuxiliary already carries the panel onto them; only the
+    /// window level needs to clear the fullscreen window's).
+    public var fullscreenShow: Bool = false
     public var hidden: Bool = false
     public var level: BarLevel = .behindWindows
     public var sticky: Bool = true

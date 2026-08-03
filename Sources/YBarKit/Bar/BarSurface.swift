@@ -33,6 +33,9 @@ public final class BarSurface {
     private let glassHost: NSView?
     /// Bar-wide Liquid Glass backdrop (--bar glass=on), behind the pill glass.
     private var barGlass: NSView?
+    /// fullscreen_show: temporarily at status level while the active Space
+    /// hosts a fullscreen window. Survives apply() until cleared.
+    private(set) var elevated = false
 
     public var onMouse: ((MouseEventInfo, BarSurface) -> Void)?
 
@@ -100,7 +103,7 @@ public final class BarSurface {
         self.screen = screen
         let frame = BarSurface.frame(for: settings, on: screen)
         panel.setFrame(frame, display: true)
-        panel.level = settings.level.windowLevel
+        panel.level = elevated ? .statusBar : settings.level.windowLevel
         panel.hasShadow = settings.shadow
         // sticky=off pins the bar to the space it was created on.
         panel.collectionBehavior = settings.sticky
@@ -140,6 +143,14 @@ public final class BarSurface {
     public func close() {
         panel.orderOut(nil)
         panel.close()
+    }
+
+    /// Raise to status level (over a fullscreen window) or restore the
+    /// configured level. No-op when the state already matches.
+    func setElevated(_ raise: Bool, settings: BarSettings) {
+        guard elevated != raise else { return }
+        elevated = raise
+        panel.level = raise ? .statusBar : settings.level.windowLevel
     }
 
     /// Sync the per-item glass backdrop views to the latest layout. `rect` is

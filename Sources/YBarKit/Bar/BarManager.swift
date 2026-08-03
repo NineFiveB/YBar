@@ -115,6 +115,40 @@ public final class BarManager {
         rebuildSurfaces()
     }
 
+    /// fullscreen_show: raise each surface over the active Space's fullscreen
+    /// window, or restore its configured level. Called on active-space changes
+    /// (Daemon) and when the property toggles.
+    public func updateFullscreenElevation() {
+        for surface in surfaces {
+            let raise = settings.fullscreenShow
+                && BarManager.hasFullscreenWindow(on: surface.screen)
+            surface.setElevated(raise, settings: settings)
+        }
+    }
+
+    /// A fullscreen Space is fronted by a layer-0 window covering the entire
+    /// screen frame (normal maximized windows stop at the visible frame).
+    static func hasFullscreenWindow(on screen: NSScreen) -> Bool {
+        let list = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+            as? [[String: Any]] ?? []
+        let frame = screen.frame
+        for entry in list {
+            guard (entry[kCGWindowLayer as String] as? Int) == 0,
+                  let bounds = entry[kCGWindowBounds as String] as? [String: CGFloat]
+            else { continue }
+            // CG global coordinates share x with AppKit; y is flipped, so
+            // match on x/width/height only (height covering the full screen
+            // is the fullscreen signal).
+            if abs((bounds["X"] ?? 0) - frame.minX) < 1,
+               abs((bounds["Width"] ?? 0) - frame.width) < 1,
+               abs((bounds["Height"] ?? 0) - frame.height) < 1 {
+                return true
+            }
+        }
+        return false
+    }
+
     public func shutdown() {
         displayManager.stop()
         surfaces.forEach { $0.close() }

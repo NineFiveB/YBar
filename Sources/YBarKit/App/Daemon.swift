@@ -50,6 +50,7 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
     var socketServer: SocketServer!
 
     let workspaceProvider = WorkspaceProvider()
+    let mediaProvider = MediaProvider()
     let aliasProvider = AliasProvider()
     let powerProvider = PowerProvider()
     let audioProvider = AudioProvider()
@@ -161,6 +162,11 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                 // display=active items follow keyboard focus across screens.
                 self?.barManager.setNeedsRender()
             }
+            if name == "space_change" || name == "front_app_switched" {
+                // fullscreen_show: the active Space (or a fullscreen toggle
+                // that keeps focus) may have changed fullscreen-ness.
+                self?.barManager.updateFullscreenElevation()
+            }
         }
         workspaceProvider.start()
 
@@ -168,6 +174,11 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
             self?.eventBus.trigger(name: name, info: info)
         }
         powerProvider.start()
+
+        mediaProvider.onEvent = { [weak self] name, info, env in
+            self?.eventBus.trigger(name: name, info: info, extraEnvironment: env)
+        }
+        mediaProvider.start()
 
         audioProvider.onEvent = { [weak self] name, info in
             self?.eventBus.trigger(name: name, info: info)
