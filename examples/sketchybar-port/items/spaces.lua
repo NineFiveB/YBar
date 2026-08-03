@@ -51,11 +51,13 @@ for _, sid in ipairs(workspaces) do
     },
     padding_right = 1,
     padding_left = 1,
+    -- No background border: the bracket ring is the pill's only outline.
+    -- A second 1pt border at the background edge reads as a detached line
+    -- inside the ring (the "double outline" gap).
     background = {
       color = colors.bg1,
-      border_width = 1,
+      border_width = 0,
       height = 26,
-      border_color = colors.black,
     },
     popup = { background = { border_width = 5, border_color = colors.black } },
     -- Left click focuses the workspace via AeroSpace.
@@ -155,7 +157,6 @@ local function restore_pill(sid)
       padding_right = is_empty and 12 or 4,
     },
     label = { width = "dynamic", padding_left = 4, padding_right = 8, drawing = not is_empty },
-    background = { border_width = 1 },
   })
   brackets[sid]:set({ background = { border_width = bracket_border(sid) } })
   sbar.set("space.padding." .. sid,
@@ -192,7 +193,6 @@ local function collapse_pill(sid)
       padding_right = 0,
       icon = { width = 0, padding_left = 0, padding_right = 0 },
       label = { width = 0, padding_left = 0, padding_right = 0 },
-      background = { border_width = 0 },
     })
     brackets[sid]:set({ background = { border_width = 0 } })
     -- The spacer's full footprint is width + its default 5/5 item paddings;
@@ -228,7 +228,6 @@ local function apply_focus(focused)
       label = { color = selected and colors.white or colors.grey },
       background = {
         color = selected and colors.with_alpha(colors.grey, 0.5) or colors.bg1,
-        border_color = selected and colors.black or colors.bg2,
       },
     })
     brackets[sid]:set({
