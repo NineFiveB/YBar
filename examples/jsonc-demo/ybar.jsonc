@@ -1,0 +1,60 @@
+// YBar declarative config (JSONC). Run with:  ybar -c examples/jsonc-demo/ybar.jsonc
+// Line and /* block */ comments plus trailing commas are allowed. Every entry
+// maps onto the same commands the CLI uses: "bar" -> --bar, "defaults" ->
+// --default, "events" -> --add event, and each item -> --add / --set /
+// --subscribe. Values: strings pass through verbatim (colors are 0xAARRGGBB
+// strings), numbers stay numbers, booleans become on/off. Property keys are
+// the full dotted sketchybar namespace ("icon.color.alpha", "label.font", ...).
+{
+  "bar": {
+    "height": 32,
+    "color": "0xdd1e1e2e",
+    "topmost": true, // -> topmost=on
+  },
+
+  /* Shared item defaults — a hidden prototype copied into every later item. */
+  "defaults": {
+    "icon.color": "0xffcdd6f4",
+    "label.color": "0xffcdd6f4",
+    "icon.padding_left": 8,
+    "icon.padding_right": 4,
+    "label.padding_right": 8,
+  },
+
+  // Custom events usable in "subscribe" below and via `ybar --trigger <name>`.
+  "events": ["demo_refresh"],
+
+  // Items are created in array order (their order on the bar).
+  "items": [
+    {
+      "name": "clock",
+      "position": "right",
+      "props": {
+        "icon": "sf:clock",
+        "update_freq": 10, // seconds between script runs
+        "script": "ybar --set \"$NAME\" label=\"$(date '+%a %d %H:%M')\"",
+      },
+      "subscribe": ["system_woke", "demo_refresh"],
+    },
+    {
+      "name": "battery",
+      "position": "right",
+      "props": {
+        "icon": "sf:battery.75percent",
+        "icon.color": "0xffa6e3a1",
+        "script": "ybar --set \"$NAME\" label=\"$INFO%\"",
+      },
+      "subscribe": ["power_source_change", "battery_change"],
+    },
+    {
+      // A bracket groups members under one background.
+      "bracket": ["clock", "battery"],
+      "name": "status_group",
+      "props": {
+        "background.color": "0x33ffffff",
+        "background.corner_radius": 8,
+        "background.height": 24,
+      },
+    },
+  ],
+}
