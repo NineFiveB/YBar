@@ -456,10 +456,15 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         runConfig(at: url)
     }
 
-    /// `.lua` configs run in the embedded YbarLua runtime; anything else is an
-    /// executable script driving the CLI (sketchybar model).
+    /// `.lua` configs run in the embedded YbarLua runtime, `.json`/`.jsonc`
+    /// configs load declaratively; anything else is an executable script
+    /// driving the CLI (sketchybar model).
     private func runConfig(at url: URL) {
-        if url.pathExtension == "lua" {
+        if url.pathExtension == "json" || url.pathExtension == "jsonc" {
+            JSONCConfig.run(at: url) { [weak self] arguments in
+                self?.commandHandler.handle(arguments: arguments) ?? ""
+            }
+        } else if url.pathExtension == "lua" {
             if luaRuntime == nil {
                 let runtime = LuaRuntime(
                     barManager: barManager, eventBus: eventBus, scheduler: scheduler)
