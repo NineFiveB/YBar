@@ -71,4 +71,4 @@ YBar stands on the shoulders of [sketchybar](https://github.com/FelixKratz/Sketc
 
 ## License
 
-TBD.
+[GPL-3.0](LICENSE).
