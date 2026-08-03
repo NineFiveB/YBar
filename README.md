@@ -24,11 +24,14 @@ ybar --query hello                    # live state as JSON
 
 **Rendering & layout**
 - Bar window per display (borderless non-activating panel; behind-windows / floating / cover-menu-bar levels; all Spaces), menu-bar-autohide aware (including the macOS 26 settings location)
+- `fullscreen_show=on` keeps the bar visible over **native-fullscreen Spaces** — auto-raises above the fullscreen window, restores on regular Spaces (public APIs; no SkyLight needed)
 - SDF rounded rects (per-corner radii, borders, gradients, shadows), glyph atlas with font fallback, color emoji, tinted SF Symbols (`icon=sf:wifi`), ink-precise text metrics matching sketchybar's pixel behavior
 - Five-cursor item layout (`left right center q e`, notch-aware), fixed widths with align slack and clipping, `--default` prototypes
 
 **Components**
 - Brackets, anchored popups (auto-close, alignment), graphs, draggable sliders
+- **Alias items** — live ScreenCaptureKit captures of other apps' menu bar items (`--add alias "App[,Window]"`)
+- **Marquee text** (`scroll_texts`), **hover tooltips**, `background.image` + `background.clip` cutouts, **idle inhibitor**
 - **Arc gauges** — speedometer-style rings with the label centered in the dial (`gauge.*`)
 - **Images** — `image.string` renders real app icons (`app.<Name>`), SF symbols by name (`sf.<symbol>`, immune to PUA codepoint drift), or image files, through the atlas color page
 - **Popup flow layout** — `popup.wrap_width` wraps members into grids (calendar month grids, tile dashboards); blank rows collapse into slim separators
@@ -36,16 +39,25 @@ ybar --query hello                    # live state as JSON
 **Scripting & events**
 - Embedded **Lua 5.4** config runtime (`ybarrc.lua`, in-process, Lua-first event dispatch) alongside the shell/CLI contract (`NAME/SENDER/INFO/BUTTON/MODIFIER` env)
 - Message-scoped `--animate <curve> <frames>` (`linear sin quadratic tanh exp circ bounce overshoot`), per-channel color lerp in linear space, `width=dynamic` sentinel animation
-- Events: mouse enter/exit/click/scroll (+ global exit), `front_app_switched`, `space_change`, wake/sleep, `power_source_change`, `volume_change`, `wifi_change`, `system_stats`, **`modifier_change`** (live ⌥-held UX), **`app_launched` / `app_terminated`**
+- Events: mouse enter/exit/click/scroll (+ global exit), `front_app_switched`, `space_change`, wake/sleep, `power_source_change`, `volume_change`, `wifi_change`, `system_stats`, **`modifier_change`** (live ⌥-held UX), **`app_launched` / `app_terminated`**, **`media_change`** (Music/Spotify now-playing via distributed notifications — no private MediaRemote)
 - Native providers: NSWorkspace, IOKit battery, CoreAudio volume, NWPathMonitor, in-process CPU/memory stats
 - AeroSpace integration: the workspace-change hook can invoke `ybar --trigger` directly (the CLI folds `$AEROSPACE_FOCUSED_WORKSPACE` from its environment), with debounced, generation-guarded refreshes for rapid switching
 
 **Packaging & privacy**
 - `make app` builds a minimal **app bundle** so the daemon owns its TCC identity — Bluetooth, Calendar, and Apple Events prompts attribute to YBar instead of your terminal, and grants cover every helper the daemon spawns
 
+## Install
+
+```sh
+brew tap NineFiveB/ybar https://github.com/NineFiveB/YBar.git
+brew install --HEAD ybar
+```
+
+See [docs/INSTALL.md](docs/INSTALL.md) for the release-zip route, first-run privacy-permission walkthrough, stable local signing (keeps TCC grants across rebuilds), and login autostart.
+
 ## Planned
 
-SkyLight opt-in surface (bar over native-fullscreen Spaces) · media/now-playing widget · alias items via ScreenCaptureKit · stable signing + Homebrew cask · yabai adapter · JSONC config tier.
+Space→item association (SkyLight) · per-display `hidden` · `notch_offset` · `font.features` · `popup.topmost` · `--reload` · media artwork in the now-playing popup · taskbar (window list) example widget.
 
 ## Build
 
@@ -60,10 +72,13 @@ open -g ~/Applications/YBar.app --args -c <your ybarrc.lua>
 
 ## Config
 
-Two equivalent surfaces, mixable at will:
+Three surfaces, mixable at will:
 
 - **Lua**: point the daemon at a `ybarrc.lua`; it runs inside the daemon with an `ybar.*` API (items as live objects, closures as event handlers, `animate`/`exec`/`delay`), plus a sketchybar-compatibility shim exposing the `sbar` API for existing SbarLua configs.
 - **CLI**: any shell script or REPL can drive the same live-object model over the socket at runtime — the bar is not a parsed file.
+- **JSONC**: point `-c` at a `.jsonc` file for a declarative bar — comments and trailing commas allowed, translated through the same command layer ([example](examples/jsonc-demo/ybar.jsonc)).
+
+The example config's workspace pills speak **AeroSpace** natively and fall back to a **yabai** adapter (native macOS Spaces) when yabai is installed instead.
 
 ## Acknowledgments
 
