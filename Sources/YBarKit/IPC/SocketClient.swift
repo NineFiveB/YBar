@@ -131,6 +131,20 @@ public enum CLIClient {
             }
         }
 
+        // Same fast path for yabai signals: `yabai -m signal --add ...
+        // action="ybar --trigger yabai_space_change"` exports its payload as
+        // $YABAI_* environment variables — fold every one into the trigger so
+        // signal actions need no shell wrapper for interpolation.
+        if argv.first == "--trigger" {
+            for (key, value) in ProcessInfo.processInfo.environment
+            where key.hasPrefix("YABAI_") {
+                let name = String(key.dropFirst("YABAI_".count))
+                if !argv.contains(where: { $0.hasPrefix("\(name)=") }) {
+                    argv.append("\(name)=\(value)")
+                }
+            }
+        }
+
         let instanceName = Version.instanceName
         let socketPath = WireFormat.socketPath(instanceName: instanceName)
         do {

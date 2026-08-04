@@ -1,0 +1,20 @@
+#!/usr/bin/env sh
+# YBar integration for yabai — append to your ~/.yabairc (or source it).
+# Signals push window/space changes to the bar instantly; without them the
+# yabai spaces adapter falls back to NSWorkspace events + a 5s poll.
+# The ybar CLI folds every $YABAI_* signal variable into the trigger env,
+# so no shell interpolation wrappers are needed.
+
+ybar="/opt/homebrew/bin/ybar"
+
+# Space switches and Mission Control exits (space create/destroy/reorder).
+yabai -m signal --add event=space_changed         action="$ybar --trigger yabai_space_change"
+yabai -m signal --add event=display_changed       action="$ybar --trigger yabai_space_change"
+yabai -m signal --add event=mission_control_exit  action="$ybar --trigger yabai_space_change"
+
+# Window lifecycle — none of these emit an OS-level event the bar could see.
+yabai -m signal --add event=window_created        action="$ybar --trigger yabai_window_change"
+yabai -m signal --add event=window_destroyed      action="$ybar --trigger yabai_window_change"
+yabai -m signal --add event=window_minimized      action="$ybar --trigger yabai_window_change"
+yabai -m signal --add event=window_deminimized    action="$ybar --trigger yabai_window_change"
+yabai -m signal --add event=window_moved          action="$ybar --trigger yabai_window_change"

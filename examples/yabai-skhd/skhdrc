@@ -1,0 +1,37 @@
+# YBar integration for skhd — append to your ~/.config/skhd/skhdrc.
+# Mode declarations report every transition to the bar, which shows the
+# active mode as a highlighted pill (widgets.skhd_mode) and hides it in
+# default mode. Bindings below are the common yabai starter set — adapt.
+
+ybar="/opt/homebrew/bin/ybar"
+
+# Modes: entering (or leaving) any mode updates the bar pill.
+:: default    : /opt/homebrew/bin/ybar --trigger skhd_mode_changed MODE=default
+:: resize @   : /opt/homebrew/bin/ybar --trigger skhd_mode_changed MODE=resize
+:: window @   : /opt/homebrew/bin/ybar --trigger skhd_mode_changed MODE=window
+
+# Mode entry/exit.
+ctrl - r ; resize
+ctrl - w ; window
+resize, window < escape ; default
+
+# Space switching (yabai scripting addition required for --focus).
+alt - 1 : yabai -m space --focus 1
+alt - 2 : yabai -m space --focus 2
+alt - 3 : yabai -m space --focus 3
+alt - 4 : yabai -m space --focus 4
+alt - 5 : yabai -m space --focus 5
+
+# Resize mode: arrows grow/shrink the focused window, escape exits.
+resize < left  : yabai -m window --resize left:-40:0
+resize < right : yabai -m window --resize left:40:0
+resize < up    : yabai -m window --resize top:0:-40
+resize < down  : yabai -m window --resize top:0:40
+
+# Window mode: throw the focused window to a space.
+window < 1 : yabai -m window --space 1; skhd -k "escape"
+window < 2 : yabai -m window --space 2; skhd -k "escape"
+window < 3 : yabai -m window --space 3; skhd -k "escape"
+
+# Toggle the bar's app-menus swap from the keyboard.
+hyper - m : /opt/homebrew/bin/ybar --trigger swap_menus_and_spaces

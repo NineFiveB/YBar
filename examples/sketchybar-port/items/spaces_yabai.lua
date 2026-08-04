@@ -19,6 +19,13 @@ end
 -- yabai pills instead of dying on an unknown event.
 sbar.add("event", "aerospace_workspace_change")
 
+-- yabai signals (see examples/yabai-skhd/yabairc): window create/destroy/
+-- minimize emit no OS-level event at all, so without signals those changes
+-- wait for the 5s routine poll. The CLI folds every $YABAI_* signal variable
+-- into the trigger env automatically.
+sbar.add("event", "yabai_space_change")
+sbar.add("event", "yabai_window_change")
+
 -- Native Spaces are numbered 1..N in Mission Control order and can be created
 -- and destroyed at runtime — and yabai may not be answering at config load —
 -- so a fixed set of pills is created up front and reconcile hides the indices
@@ -49,11 +56,11 @@ for sid = 1, MAX_SPACES do
     },
     padding_right = 1,
     padding_left = 1,
+    -- No background border: the bracket ring is the pill's only outline.
     background = {
       color = colors.bg1,
-      border_width = 1,
+      border_width = 0,
       height = 26,
-      border_color = colors.black,
     },
     popup = { background = { border_width = 5, border_color = colors.black } },
     -- Left click focuses the space (needs yabai's scripting addition on
@@ -153,7 +160,6 @@ local function restore_pill(sid)
       padding_right = is_empty and 12 or 4,
     },
     label = { width = "dynamic", padding_left = 4, padding_right = 8, drawing = not is_empty },
-    background = { border_width = 1 },
   })
   brackets[sid]:set({ background = { border_width = bracket_border(sid) } })
   sbar.set("space.padding." .. sid,
@@ -190,7 +196,6 @@ local function collapse_pill(sid)
       padding_right = 0,
       icon = { width = 0, padding_left = 0, padding_right = 0 },
       label = { width = 0, padding_left = 0, padding_right = 0 },
-      background = { border_width = 0 },
     })
     brackets[sid]:set({ background = { border_width = 0 } })
     -- The spacer's full footprint is width + its default 5/5 item paddings;
@@ -222,7 +227,6 @@ local function apply_focus(focused)
       label = { color = selected and colors.white or colors.grey },
       background = {
         color = selected and colors.with_alpha(colors.grey, 0.5) or colors.bg1,
-        border_color = selected and colors.black or colors.bg2,
       },
     })
     brackets[sid]:set({
@@ -354,8 +358,17 @@ space_observer:subscribe({ "app_launched", "app_terminated" }, function()
   query_and_update()
 end)
 
+-- yabai signals give instant window-level updates when configured
+-- (examples/yabai-skhd/yabairc); the routine poll below stays as the
+-- fallback when they are not.
+space_observer:subscribe({ "yabai_space_change", "yabai_window_change" }, function()
+  if MENUS_VISIBLE then return end
+  query_and_update()
+end)
+
 -- Minimize/window-close emit no OS-level event at all — a light routine
--- poll reconciles those within seconds.
+-- poll reconciles those within seconds (redundant once signals are wired,
+-- but harmless).
 space_observer:subscribe("routine", function() query_and_update() end)
 
 -- Initial paint at config load.
