@@ -241,19 +241,8 @@ local bt_power = true
 local access_denied = false
 local busy = false
 
--- Spinner beside "Nearby Devices" while an inquiry runs.
-local spinner_frames = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
-local spinner_index = 0
-
-local function spin()
-  if not busy then
-    nearby_header:set({ label = { string = "" } })
-    return
-  end
-  spinner_index = spinner_index % #spinner_frames + 1
-  nearby_header:set({ label = { string = spinner_frames[spinner_index] } })
-  sbar.delay(0.1, spin)
-end
+-- Spinner beside "Nearby Devices" while an inquiry runs (SF circular spinner).
+local spinner = require("helpers.spinner").attach(nearby_header)
 
 -- ── Populate ───────────────────────────────────────────────────────────────
 local function populate()
@@ -357,9 +346,10 @@ end
 local function run_inquiry()
   if busy or access_denied or not bt_power then return end
   busy = true
-  spin()
+  spinner.start()
   sbar.exec(blueutil("--inquiry 8") .. " 2>/dev/null", function(output)
     busy = false
+    spinner.stop()
     local paired_addrs = {}
     for _, dev in ipairs(paired_cache) do paired_addrs[dev.address:lower()] = true end
     nearby_cache = {}
@@ -458,6 +448,7 @@ for i, row in ipairs(nearby_rows) do
         .. " && echo ok || echo fail",
       function(result)
         busy = false
+        spinner.stop()
         if result:match("ok") then
           table.remove(nearby_cache, i)
           populate()

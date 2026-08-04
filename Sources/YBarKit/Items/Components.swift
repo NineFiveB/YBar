@@ -83,8 +83,13 @@ public final class ImageState {
     public var drawing = true
     public var paddingLeft: Float = 0
     public var paddingRight: Float = 0
+    /// Clockwise rotation in degrees (spinners: cycle or --animate this).
+    public var rotation: Float = 0
+    /// "l" (default): image leads the content; "r": image trails the label.
+    public var align: String = "l"
 
     private var cachedSource: String?
+    private var cachedRotation: Float = 0
     private var cachedImage: NSImage?
 
     public init() {}
@@ -95,10 +100,27 @@ public final class ImageState {
     }
 
     public func resolvedImage() -> NSImage? {
-        if cachedSource == source { return cachedImage }
+        if cachedSource == source, cachedRotation == rotation { return cachedImage }
         cachedSource = source
-        cachedImage = ImageState.load(source: source)
+        cachedRotation = rotation
+        let base = ImageState.load(source: source)
+        let turns = rotation.truncatingRemainder(dividingBy: 360)
+        cachedImage = turns == 0 ? base : base.map { ImageState.rotated($0, degrees: turns) }
         return cachedImage
+    }
+
+    /// Redraw rotated about the center on the same square canvas (corners of
+    /// non-square-ish art may clip; symbol glyphs carry enough padding).
+    static func rotated(_ image: NSImage, degrees: Float) -> NSImage {
+        let size = image.size
+        return NSImage(size: size, flipped: false) { rect in
+            guard let context = NSGraphicsContext.current?.cgContext else { return false }
+            context.translateBy(x: rect.midX, y: rect.midY)
+            context.rotate(by: -CGFloat(degrees) * .pi / 180)
+            image.draw(in: CGRect(x: -size.width / 2, y: -size.height / 2,
+                                  width: size.width, height: size.height))
+            return true
+        }
     }
 
     /// Shared resolver for every image consumer (image component,

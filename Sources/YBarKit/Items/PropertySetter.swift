@@ -177,6 +177,13 @@ public enum PropertySetter {
         case "padding_right":
             return setFloatValue(key: "item.\(item.id).image.padding_right", current: image.paddingRight,
                                  value: value, ctx: ctx) { image.paddingRight = $0 }
+        case "rotation":
+            return setFloatValue(key: "item.\(item.id).image.rotation", current: image.rotation,
+                                 value: value, ctx: ctx) { image.rotation = $0 }
+        case "align":
+            image.align = value.hasPrefix("r") ? "r" : "l"
+            ctx.invalidate()
+            return nil
         default:
             return "[?] unknown property: image.\(path.joined(separator: "."))"
         }

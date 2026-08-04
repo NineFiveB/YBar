@@ -227,7 +227,7 @@ public final class SceneBuilder {
         // Icon, sandwich content, then label (paddings advance the pen even
         // for empty strings — sketchybar parity). Fixed-width parts receive
         // the SLOT origin; their paddings/alignment resolve inside emitText.
-        if let image = item.image, image.drawing, !image.source.isEmpty {
+        if let image = item.image, image.drawing, !image.source.isEmpty, image.align != "r" {
             penX += CGFloat(image.paddingLeft)
             emitImage(image, penX: penX, centerY: centerY, scale: scale,
                       atlas: atlas, into: &list)
@@ -281,12 +281,20 @@ public final class SceneBuilder {
                 emitText(part: item.label, penX: penX, centerY: centerY,
                          scale: scale, atlas: atlas, clip: clip,
                          marquee: item.scrollTexts, into: &list)
+                penX += CGFloat(item.label.customWidth)
             } else {
                 penX += CGFloat(item.label.paddingLeft)
                 emitText(part: item.label, penX: penX, centerY: centerY,
                          scale: scale, atlas: atlas, clip: clip,
                          marquee: item.scrollTexts, into: &list)
+                penX += labelSize.width + CGFloat(item.label.paddingRight)
             }
+        }
+        // image.align=r: the image trails the label (spinner beside a title).
+        if let image = item.image, image.drawing, !image.source.isEmpty, image.align == "r" {
+            penX += CGFloat(image.paddingLeft)
+            emitImage(image, penX: penX, centerY: centerY, scale: scale,
+                      atlas: atlas, into: &list)
         }
         // TODO(v1.5): per-part backgrounds (icon.background.* / label.background.*).
     }
@@ -348,7 +356,7 @@ public final class SceneBuilder {
     ) {
         guard let nsImage = image.resolvedImage() else { return }
         let sizePoints = CGSize(width: CGFloat(image.size), height: CGFloat(image.size))
-        let key = "img:\(image.source)@\(image.size)"
+        let key = "img:\(image.source)@\(image.size)r\(Int(image.rotation.rounded()))"
         guard let entry = atlas.entry(colorImage: nsImage, cacheKey: key,
                                       sizePoints: sizePoints) else { return }
         let rect = CGRect(

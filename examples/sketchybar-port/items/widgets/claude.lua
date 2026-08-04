@@ -39,6 +39,9 @@ local claude_padding = sbar.add("item", "widgets.claude.padding", {
   drawing = false,
 })
 
+-- Circular spinner beside the count while any session is streaming.
+local spinner = require("helpers.spinner").attach(claude, { size = 12 })
+
 local function refresh()
   sbar.exec("'" .. probe:gsub("'", "'\\''") .. "'", function(out)
     local active, working = out:match("(%d+)%s+(%d+)")
@@ -52,6 +55,7 @@ local function refresh()
       label = { string = tostring(active), color = color },
     })
     claude_padding:set({ drawing = show })
+    if show and working > 0 then spinner.start() else spinner.stop() end
   end)
 end
 

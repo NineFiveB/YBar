@@ -222,19 +222,8 @@ local wifi_power = true
 local is_connected = false
 local scan_running = false
 
--- Spinner beside "Other Networks" while a scan runs.
-local spinner_frames = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
-local spinner_index = 0
-
-local function spin()
-  if not scan_running then
-    other_header:set({ label = { string = "" } })
-    return
-  end
-  spinner_index = spinner_index % #spinner_frames + 1
-  other_header:set({ label = { string = spinner_frames[spinner_index] } })
-  sbar.delay(0.1, spin)
-end
+-- Spinner beside "Other Networks" while a scan runs (SF circular spinner).
+local spinner = require("helpers.spinner").attach(other_header)
 
 local function right_glyphs(net)
   return (net.secured and (glyph_lock .. "  ") or "") .. glyph_wifi
@@ -318,12 +307,13 @@ end
 local function run_scan()
   if scan_running or not wifi_power then return end
   scan_running = true
-  spin()
+  spinner.start()
   sbar.exec(
     "system_profiler SPAirPortDataType -json 2>/dev/null | python3 '"
       .. wifi_scan_py:gsub("'", "'\\''") .. "'",
     function(output)
       scan_running = false
+      spinner.stop()
       local nets = {}
       for line in output:gmatch("[^\r\n]+") do
         local cur, name, rssi, sec = line:match("^(%d)\t(.-)\t(%-?%d+)\t(%d)$")
