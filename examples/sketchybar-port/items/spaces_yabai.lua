@@ -77,7 +77,11 @@ for sid = 1, MAX_SPACES do
       color = colors.transparent,
       border_color = colors.bg2,
       height = 28,
-      border_width = 2,
+      -- 0, not 2: bracket_border() sets 2 the moment a space is confirmed
+      -- non-empty, but a space that hasn't appeared in a query yet (a
+      -- brand-new workspace) never runs that path before its first reveal —
+      -- defaulting to "no ring" avoids a one-frame flash on that reveal.
+      border_width = 0,
     },
   })
 

@@ -2,8 +2,10 @@
 # Mode declarations report every transition to the bar, which shows the
 # active mode as a highlighted pill (widgets.skhd_mode) and hides it in
 # default mode. Bindings below are the common yabai starter set — adapt.
-
-ybar="/opt/homebrew/bin/ybar"
+#
+# skhd's config is its own hotkey DSL, not shell — no variable assignment
+# (a stray `ybar="..."` line here throws "undeclared identifier" and drops
+# the rest of the file); every action spells out the literal path.
 
 # Modes: entering (or leaving) any mode updates the bar pill.
 :: default    : /opt/homebrew/bin/ybar --trigger skhd_mode_changed MODE=default

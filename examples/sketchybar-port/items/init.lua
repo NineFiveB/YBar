@@ -1,15 +1,33 @@
 require("items.apple")
 require("items.menus")
 
--- Workspace pills: AeroSpace wins when both tilers are installed; a lone
--- yabai install drives native Spaces via the builtin space_change event.
--- Neither installed falls back to the AeroSpace module, which idles quietly
--- on empty query results.
+-- Workspace pills: pick whichever tiler is actually RUNNING, not just
+-- installed. Binary presence alone is the wrong signal once a machine has
+-- both installed (a real, common case — e.g. trying yabai without
+-- uninstalling AeroSpace first): AeroSpace's own adapter queries its CLI
+-- synchronously at config load and creates zero pills if the app isn't
+-- live, even though the aerospace binary is sitting right there.
+-- Neither running (e.g. fresh boot, before login items launch) falls back
+-- to binary presence, then to the AeroSpace module, which idles quietly on
+-- empty query results until the app appears.
+local function running(process_name)
+  return os.execute("pgrep -x " .. process_name .. " >/dev/null 2>&1") == true
+end
 local function installed(name)
   return os.execute("test -x /opt/homebrew/bin/" .. name) == true
       or os.execute("test -x /usr/local/bin/" .. name) == true
 end
-if installed("yabai") and not installed("aerospace") then
+
+local use_yabai
+if running("yabai") and not running("AeroSpace") then
+  use_yabai = true
+elseif running("AeroSpace") then
+  use_yabai = false
+else
+  use_yabai = installed("yabai") and not installed("aerospace")
+end
+
+if use_yabai then
   require("items.spaces_yabai")
 else
   require("items.spaces")
@@ -17,9 +35,3 @@ end
 require("items.front_app")
 require("items.calendar")
 require("items.widgets")
-
--- YBAR PORT: the media widget is not ported — it depends on the media_change
--- event (private MediaRemote framework, entitlement-locked since macOS 15.3).
--- When YBar ships its platform-binary now-playing adapter, port items/media.lua
--- on top of it.
--- require("items.media")
