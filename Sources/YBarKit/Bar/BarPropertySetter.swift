@@ -73,6 +73,8 @@ public enum BarPropertySetter {
             return setFloat(manager, \BarManager.settings.notchWidth, "notch_width", value, context)
         case "notch_offset":
             return setFloat(manager, \BarManager.settings.notchOffset, "notch_offset", value, context)
+        case "notch_display_height":
+            return setFloat(manager, \BarManager.settings.notchDisplayHeight, "notch_display_height", value, context)
         case "display":
             switch value {
             case "all":
@@ -97,7 +99,7 @@ public enum BarPropertySetter {
             manager.settings.fullscreenShow = flag
             manager.updateFullscreenElevation()
             return nil
-        case "font_smoothing", "shadow":
+        case "font_smoothing":
             // Accepted for config compatibility; not applicable to the public-API v1 surface.
             return nil
         default:

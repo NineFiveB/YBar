@@ -227,7 +227,14 @@ public final class BarSurface {
     static func frame(for settings: BarSettings, on screen: NSScreen) -> CGRect {
         let screenFrame = screen.frame
         let width = screenFrame.width - 2 * CGFloat(settings.margin)
-        let height = CGFloat(settings.height)
+        // Notched displays can override height and take an extra offset, so
+        // one config sits flush on externals and clears the camera housing
+        // on the built-in (sketchybar's notch_display_height/notch_offset).
+        let notched = screen.safeAreaInsets.top > 0
+        let height = notched && settings.notchDisplayHeight > 0
+            ? CGFloat(settings.notchDisplayHeight)
+            : CGFloat(settings.height)
+        let notchOffset = notched ? CGFloat(settings.notchOffset) : 0
         let x = screenFrame.minX + CGFloat(settings.margin)
 
         let y: CGFloat
@@ -245,11 +252,19 @@ public final class BarSurface {
             } else {
                 topEdge = min(screenFrame.maxY, screen.visibleFrame.maxY)
             }
-            y = topEdge - height - CGFloat(settings.yOffset)
+            y = topEdge - height - CGFloat(settings.yOffset) - notchOffset
         case .bottom:
-            y = screenFrame.minY + CGFloat(settings.yOffset)
+            y = screenFrame.minY + CGFloat(settings.yOffset) + notchOffset
         }
         return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    /// The screen's physical notch width in points (0 without a notch).
+    static func physicalNotchWidth(of screen: NSScreen) -> CGFloat {
+        guard screen.safeAreaInsets.top > 0,
+              let left = screen.auxiliaryTopLeftArea,
+              let right = screen.auxiliaryTopRightArea else { return 0 }
+        return max(0, screen.frame.width - left.width - right.width)
     }
 
     /// Is "Automatically hide and show the menu bar" enabled?

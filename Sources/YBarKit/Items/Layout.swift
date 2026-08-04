@@ -62,11 +62,15 @@ public enum Layout {
         items: [Item],
         barSize: CGSize,
         settings: BarSettings,
+        notchWidth: CGFloat? = nil,
         measure: (Item) -> MeasuredContent
     ) -> Result {
         var result = Result()
         let width = barSize.width
-        let notchHalf = CGFloat(settings.notchWidth) / 2
+        // Per-surface override: 0 on un-notched displays, the physical (or
+        // configured) width on notched ones. nil falls back to the raw
+        // setting (tests, single-display callers).
+        let notchHalf = (notchWidth ?? CGFloat(settings.notchWidth)) / 2
 
         func place(_ item: Item, x: CGFloat, measured: MeasuredContent) {
             let length = contentLength(item: item, measured: measured)

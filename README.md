@@ -27,6 +27,7 @@ ybar --query hello                    # live state as JSON
 - `fullscreen_show=on` keeps the bar visible over **native-fullscreen Spaces** — auto-raises above the fullscreen window, restores on regular Spaces (public APIs; no SkyLight needed)
 - SDF rounded rects (per-corner radii, borders, gradients, shadows), glyph atlas with font fallback, color emoji, tinted SF Symbols (`icon=sf:wifi`), ink-precise text metrics matching sketchybar's pixel behavior
 - Five-cursor item layout (`left right center q e`, notch-aware), fixed widths with align slack and clipping, `--default` prototypes
+- Per-setup notch handling: the `q`/`e` dead zone exists only on physically notched displays (`notch_width=0` auto-detects the housing width), `notch_offset` drops the bar below the camera on notched screens only, `notch_display_height` gives them their own bar height
 
 **Components**
 - Brackets, anchored popups (auto-close, alignment), graphs, draggable sliders
@@ -57,7 +58,7 @@ See [docs/INSTALL.md](docs/INSTALL.md) for the release-zip route, first-run priv
 
 ## Planned
 
-Space→item association (SkyLight) · per-display `hidden` · `notch_offset` · `font.features` · `popup.topmost` · `--reload` · media artwork in the now-playing popup · taskbar (window list) example widget.
+Space→item association (SkyLight) · per-display `hidden` · `font.features` · `popup.topmost` · `--reload` · media artwork in the now-playing popup · taskbar (window list) example widget.
 
 ## Build
 

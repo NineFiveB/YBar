@@ -392,7 +392,18 @@ public final class BarManager {
         guard let atlas = atlas(for: scale) else { return }
 
         let items = visibleItems(on: surface)
-        let result = Layout.perform(items: items, barSize: barSize, settings: settings) { [fontCache] item in
+        // q/e dead zone only where a notch physically exists; notch_width=0
+        // auto-detects the housing width on that screen.
+        let notchWidth: CGFloat
+        if surface.screen.safeAreaInsets.top > 0 {
+            notchWidth = settings.notchWidth > 0
+                ? CGFloat(settings.notchWidth)
+                : BarSurface.physicalNotchWidth(of: surface.screen)
+        } else {
+            notchWidth = 0
+        }
+        let result = Layout.perform(items: items, barSize: barSize, settings: settings,
+                                    notchWidth: notchWidth) { [fontCache] item in
             MeasuredContent(
                 iconSize: fontCache.measure(part: item.icon),
                 labelSize: fontCache.measure(part: item.label))

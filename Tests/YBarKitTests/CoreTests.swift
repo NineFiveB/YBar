@@ -182,6 +182,24 @@ import Testing
         #expect(e.frame.minX == 600)
     }
 
+    @Test func notchWidthOverrideBeatsSettings() {
+        let q = makeItem("q", .centerLeft)
+        let e = makeItem("e", .centerRight)
+        var settings = BarSettings()
+        settings.notchWidth = 200
+        // Per-surface override: an un-notched display passes 0 and the
+        // center flows meet in the middle regardless of the setting.
+        Layout.perform(items: [q, e], barSize: CGSize(width: 1000, height: 30),
+                       settings: settings, notchWidth: 0, measure: fixedMeasure)
+        #expect(q.frame.maxX == 500)
+        #expect(e.frame.minX == 500)
+        // A notched display passes its physical width when the setting is 0.
+        Layout.perform(items: [q, e], barSize: CGSize(width: 1000, height: 30),
+                       settings: settings, notchWidth: 300, measure: fixedMeasure)
+        #expect(q.frame.maxX == 350)
+        #expect(e.frame.minX == 650)
+    }
+
     @Test func fixedWidthOverridesContent() {
         let a = makeItem("a", .left)
         a.customWidth = 200

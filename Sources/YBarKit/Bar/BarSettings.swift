@@ -63,10 +63,17 @@ public struct BarSettings: Sendable {
     /// Display-sleep inhibition active (--bar idle_inhibit).
     public var idleInhibit: Bool = false
     public var displayPolicy: DisplayPolicy = .all
-    /// Width of the notch dead zone separating centerLeft/centerRight flows.
-    /// Auto-detected from safe-area insets when 0 on a notched display.
+    /// Width of the notch dead zone separating centerLeft/centerRight flows
+    /// on notched displays (un-notched displays get no dead zone). 0 =
+    /// auto-detect the physical notch width from the screen's auxiliary
+    /// top areas.
     public var notchWidth: Float = 200
+    /// Additional y offset applied only on notched displays (sketchybar
+    /// parity) — lets one config sit flush on externals and drop below the
+    /// camera housing on the built-in.
     public var notchOffset: Float = 0
+    /// Bar height override on notched displays; 0 = use `height`.
+    public var notchDisplayHeight: Float = 0
 
     public init() {}
 

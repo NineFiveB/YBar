@@ -49,6 +49,8 @@ public enum Serialize {
             "sticky": settings.sticky,
             "idle_inhibit": settings.idleInhibit,
             "notch_width": settings.notchWidth,
+            "notch_offset": settings.notchOffset,
+            "notch_display_height": settings.notchDisplayHeight,
             "items": manager.store.items.map(\.name),
         ]
     }
