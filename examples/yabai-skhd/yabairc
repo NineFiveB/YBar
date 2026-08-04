@@ -1,28 +1,91 @@
 #!/usr/bin/env sh
-# YBar integration for yabai — append to your ~/.yabairc (or source it).
+# A complete, working ~/.yabairc for use alongside YBar.
+#
+# Two sections:
+#   1. Window-manager basics - delete this half if you already have your own
+#      yabairc and are only here for the YBar wiring.
+#   2. YBar integration - the signals that push state to the bar.
+#
+# Install: cp examples/yabai-skhd/yabairc ~/.yabairc && chmod +x ~/.yabairc
+#          yabai --restart-service
+
+# ---------------------------------------------------------------- 1. basics
+
+# yabai's built-in default layout is "float" (i.e. no tiling at all). Tiling
+# only happens if you ask for it - this is the single most common reason a
+# fresh yabai install "does nothing".
+yabai -m config layout                      bsp
+
+# Reserve the strip YBar occupies so tiled windows stop below it rather than
+# underneath. Must match your bar's height (the glass theme ships height=40);
+# format is <main|all|off>:<top>:<bottom>.
+yabai -m config external_bar               all:40:0
+
+# Gaps and padding.
+yabai -m config top_padding                  8
+yabai -m config bottom_padding               8
+yabai -m config left_padding                 8
+yabai -m config right_padding                8
+yabai -m config window_gap                   8
+
+# Focus/mouse behaviour.
+yabai -m config mouse_follows_focus         off
+yabai -m config focus_follows_mouse         off
+yabai -m config window_placement     second_child
+yabai -m config window_zoom_persist         off
+yabai -m config split_ratio                 0.50
+yabai -m config auto_balance                off
+
+# Hold this modifier to drag windows with the mouse (move / resize).
+yabai -m config mouse_modifier               alt
+yabai -m config mouse_action1               move
+yabai -m config mouse_action2             resize
+yabai -m config mouse_drop_action           swap
+
+# Apps that behave badly when tiled. Add your own with:
+#   yabai -m query --windows | grep app     (to find the exact name)
+yabai -m rule --add app="^Finder$"                       manage=off
+yabai -m rule --add app="^Passwords$"                    manage=off
+yabai -m rule --add app="^Transmission$"                 manage=off
+yabai -m rule --add app="^System Settings$"              manage=off
+yabai -m rule --add app="^Calculator$"                   manage=off
+yabai -m rule --add app="^Archive Utility$"              manage=off
+
+# ------------------------------------------------------- 2. YBar integration
 # Signals push window/space changes to the bar instantly; without them the
-# yabai spaces adapter falls back to NSWorkspace events + a 5s poll.
+# yabai spaces adapter falls back to NSWorkspace events plus a 5s poll.
 # The ybar CLI folds every $YABAI_* signal variable into the trigger env,
 # so no shell interpolation wrappers are needed.
 
 ybar="/opt/homebrew/bin/ybar"
 
-# Space switches and Mission Control exits (space create/destroy/reorder).
-yabai -m signal --add event=space_changed         action="$ybar --trigger yabai_space_change"
-yabai -m signal --add event=display_changed       action="$ybar --trigger yabai_space_change"
-yabai -m signal --add event=mission_control_exit  action="$ybar --trigger yabai_space_change"
+# Active space / display changed, and Mission Control edits (space reorders).
+yabai -m signal --add event=space_changed             action="$ybar --trigger yabai_space_change"
+yabai -m signal --add event=display_changed           action="$ybar --trigger yabai_space_change"
+yabai -m signal --add event=mission_control_exit      action="$ybar --trigger yabai_space_change"
 
-# Window lifecycle — none of these emit an OS-level event the bar could see.
-yabai -m signal --add event=window_created        action="$ybar --trigger yabai_window_change"
-yabai -m signal --add event=window_destroyed      action="$ybar --trigger yabai_window_change"
-yabai -m signal --add event=window_minimized      action="$ybar --trigger yabai_window_change"
-yabai -m signal --add event=window_deminimized    action="$ybar --trigger yabai_window_change"
-yabai -m signal --add event=window_moved          action="$ybar --trigger yabai_window_change"
+# Spaces added/removed. These only ever fire when the scripting addition is
+# loaded (creating and destroying spaces requires it); harmless no-ops otherwise.
+yabai -m signal --add event=space_created             action="$ybar --trigger yabai_space_change"
+yabai -m signal --add event=space_destroyed           action="$ybar --trigger yabai_space_change"
 
-# Float apps that don't behave well tiled — carried over from an AeroSpace
-# on-window-detected rule (Finder, Passwords, Transmission). Without this,
-# skhdrc's focus/move hotkeys (alt-hjkl / alt-shift-hjkl) treat these as
-# regular tiled windows and navigation gets confusing around them.
-yabai -m rule --add app="^Finder$" manage=off
-yabai -m rule --add app="^Passwords$" manage=off
-yabai -m rule --add app="^Transmission$" manage=off
+# Monitor hotplug re-homes spaces across displays, so the space strip has to
+# re-query rather than trust its cached indices.
+yabai -m signal --add event=display_added             action="$ybar --trigger yabai_space_change"
+yabai -m signal --add event=display_removed           action="$ybar --trigger yabai_space_change"
+
+# Window lifecycle - none of these emit an OS-level event the bar could see.
+yabai -m signal --add event=window_created            action="$ybar --trigger yabai_window_change"
+yabai -m signal --add event=window_destroyed          action="$ybar --trigger yabai_window_change"
+yabai -m signal --add event=window_minimized          action="$ybar --trigger yabai_window_change"
+yabai -m signal --add event=window_deminimized        action="$ybar --trigger yabai_window_change"
+yabai -m signal --add event=window_moved              action="$ybar --trigger yabai_window_change"
+
+# Cheap focus tracking, so the app-icon row keeps up.
+yabai -m signal --add event=window_focused            action="$ybar --trigger yabai_window_change"
+yabai -m signal --add event=application_front_switched action="$ybar --trigger yabai_window_change"
+
+# KNOWN LIMITATION: yabai has no signal for "window sent to a DIFFERENT space"
+# (window_moved is position-within-a-space only). Verified by testing: such a
+# move reaches the bar via the yabai adapter's 5s routine poll, so expect up to
+# ~5s of lag there specifically. Not worth re-investigating - no event exists.
