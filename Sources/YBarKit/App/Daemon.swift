@@ -394,6 +394,18 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                 self?.statsProvider.start()
                 self?.statsProvider.sample()
             },
+            "media_change": { [weak self] in
+                // Replay the last seen playback state — the provider is
+                // notification-driven, so a bare trigger (or a config reload
+                // mid-song) would otherwise dispatch with no MEDIA_* env and
+                // widgets would read it as "stopped".
+                guard let self, !self.mediaProvider.current.isEmpty else { return }
+                let env = self.mediaProvider.current
+                self.eventBus.trigger(
+                    name: "media_change",
+                    info: env["MEDIA_STATE"] ?? "",
+                    extraEnvironment: env)
+            },
         ]
         commandHandler.dispatchItem = { [weak self] item, environment in
             self?.dispatchItemScript(item: item, environment: environment)
@@ -519,6 +531,14 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
             hotload.noteReloadHappened()
             runConfig(at: configURL)
         }
+        // Settings were reset above; without re-evaluating, a bar elevated
+        // over a fullscreen Space stays stuck at status level (or, with the
+        // new config's fullscreen_show, stays buried) until the next
+        // workspace event.
+        barManager.updateFullscreenElevation()
+        // A reload mid-song would otherwise leave the now-playing pill
+        // hidden until the next track change.
+        commandHandler.forcedQueries["media_change"]?()
         barManager.setNeedsRender()
     }
 }

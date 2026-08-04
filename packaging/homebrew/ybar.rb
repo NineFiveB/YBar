@@ -7,7 +7,9 @@ class Ybar < Formula
   desc "Metal-rendered, sketchybar-compatible macOS status bar"
   homepage "https://github.com/NineFiveB/YBar"
   url "https://github.com/NineFiveB/YBar/archive/refs/tags/v0.1.0.tar.gz"
-  # Placeholder until v0.1.0 is tagged; set from `make release` output.
+  # Placeholder until v0.1.0 is tagged. This is the SOURCE tarball's hash
+  # (curl -L <url above> | shasum -a 256) — NOT the app-zip hash that
+  # `make release` prints, which is a different, machine-signed artifact.
   sha256 "TBD-set-on-release"
   license "GPL-3.0-only"
   head "https://github.com/NineFiveB/YBar.git", branch: "main"
@@ -35,6 +37,9 @@ class Ybar < Formula
            "--identifier", "com.ybar.YBar", app
 
     bin.install_symlink app/"Contents/MacOS/ybar"
+
+    # Starter configs land in share/ybar/examples (docs/INSTALL.md points here).
+    pkgshare.install "examples"
   end
 
   def caveats

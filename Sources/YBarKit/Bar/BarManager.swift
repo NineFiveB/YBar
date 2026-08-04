@@ -126,25 +126,34 @@ public final class BarManager {
         }
     }
 
-    /// A fullscreen Space is fronted by a layer-0 window covering the entire
-    /// screen frame (normal maximized windows stop at the visible frame).
+    /// A fullscreen Space is fronted by a layer-0 window covering the screen
+    /// frame — either fully, or minus the reserved camera-housing strip on
+    /// notched displays (safeAreaInsets.top + 1pt separator), which is where
+    /// apps that don't draw under the notch are laid out.
     static func hasFullscreenWindow(on screen: NSScreen) -> Bool {
         let list = CGWindowListCopyWindowInfo(
             [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
             as? [[String: Any]] ?? []
         let frame = screen.frame
+        // CG global coordinates share x with AppKit; y counts down from the
+        // primary screen's top edge. Matching y too keeps a fullscreen window
+        // on one display from elevating bars on same-sized siblings.
+        let primaryMaxY = NSScreen.screens.first?.frame.maxY ?? frame.maxY
+        let expectedY = primaryMaxY - frame.maxY
+        let notchInset = screen.safeAreaInsets.top > 0 ? screen.safeAreaInsets.top + 1 : 0
         for entry in list {
             guard (entry[kCGWindowLayer as String] as? Int) == 0,
                   let bounds = entry[kCGWindowBounds as String] as? [String: CGFloat]
             else { continue }
-            // CG global coordinates share x with AppKit; y is flipped, so
-            // match on x/width/height only (height covering the full screen
-            // is the fullscreen signal).
-            if abs((bounds["X"] ?? 0) - frame.minX) < 1,
-               abs((bounds["Width"] ?? 0) - frame.width) < 1,
-               abs((bounds["Height"] ?? 0) - frame.height) < 1 {
-                return true
-            }
+            guard abs((bounds["X"] ?? 0) - frame.minX) < 1,
+                  abs((bounds["Width"] ?? 0) - frame.width) < 1 else { continue }
+            let y = bounds["Y"] ?? 0
+            let height = bounds["Height"] ?? 0
+            let fullFrame = abs(height - frame.height) < 1 && abs(y - expectedY) < 1
+            let belowNotch = notchInset > 0
+                && abs(height - (frame.height - notchInset)) < 2
+                && abs(y - (expectedY + notchInset)) < 2
+            if fullFrame || belowNotch { return true }
         }
         return false
     }
@@ -179,6 +188,9 @@ public final class BarManager {
             surfaces.append(surface)
         }
         onSurfacesRebuilt?()
+        // Fresh surfaces start un-elevated; re-evaluate or a bar rebuilt
+        // while on a fullscreen Space (monitor hot-plug) stays buried.
+        updateFullscreenElevation()
         setNeedsRender()
     }
 

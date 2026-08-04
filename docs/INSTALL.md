@@ -63,10 +63,15 @@ codesign/xattr race — details in [BUILDING.md](BUILDING.md).
 
 YBar looks for a config at `~/.config/ybar/ybarrc.lua` (also `ybarrc`,
 `~/.ybarrc.lua`, `~/.ybarrc`), or takes an explicit path via `-c`. Start from
-an example:
+an example — Homebrew installs them under `$(brew --prefix)/share/ybar/examples`,
+a git clone has them in `examples/`:
 
 ```sh
 mkdir -p ~/.config/ybar
+# Homebrew install:
+cp "$(brew --prefix)/share/ybar/examples/ybarrc.lua" ~/.config/ybar/ybarrc.lua
+open -g "$(brew --prefix)/opt/ybar/YBar.app" --args -c ~/.config/ybar/ybarrc.lua
+# Manual build (from the clone):
 cp examples/ybarrc.lua ~/.config/ybar/ybarrc.lua
 open -g ~/Applications/YBar.app --args -c ~/.config/ybar/ybarrc.lua
 ```

@@ -59,6 +59,10 @@ public enum JSONCConfig {
                 FileHandle.standardError.write(Data("\(output)\n".utf8))
             }
         }
+        // Boot population: the Lua tier ends with ybar.update() and shell
+        // configs write --update themselves; without it, subscription-driven
+        // items (no update_freq) stay blank until their event next fires.
+        if !batches.isEmpty { _ = handler(["--update"]) }
     }
 
     /// Full pipeline: JSONC text → ordered command argv arrays.
@@ -169,6 +173,13 @@ public enum JSONCConfig {
     static func translate(_ root: [String: Any]) throws -> [[String]] {
         var commands: [[String]] = []
 
+        // Valid JSON with a misspelled section ("item", "default") would
+        // otherwise produce an empty bar with zero diagnostics.
+        let knownSections: Set<String> = ["bar", "defaults", "events", "items"]
+        for key in root.keys where !knownSections.contains(key) {
+            warn("unknown top-level key \"\(key)\" (expected bar/defaults/events/items)")
+        }
+
         if let bar = root["bar"] {
             guard let bar = bar as? [String: Any] else {
                 throw ConfigError.badEntry("\"bar\" must be an object")
@@ -204,11 +215,19 @@ public enum JSONCConfig {
         return commands
     }
 
+    private static func warn(_ message: String) {
+        FileHandle.standardError.write(Data("[?] jsonc: \(message)\n".utf8))
+    }
+
     private static func translateItem(
         _ element: Any, at index: Int, into commands: inout [[String]]
     ) throws {
         guard let entry = element as? [String: Any] else {
             throw ConfigError.badEntry("items[\(index)] must be an object")
+        }
+        let knownKeys: Set<String> = ["name", "bracket", "position", "props", "subscribe"]
+        for key in entry.keys where !knownKeys.contains(key) {
+            warn("items[\(index)]: unknown key \"\(key)\" (expected name/bracket/position/props/subscribe)")
         }
         guard let name = entry["name"] as? String, !name.isEmpty else {
             throw ConfigError.badEntry("items[\(index)] needs a \"name\"")

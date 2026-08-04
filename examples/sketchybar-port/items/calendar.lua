@@ -21,7 +21,7 @@ local cal = sbar.add("item", "calendar", {
     padding_left = 8,
     font = {
       style = settings.font.style_map["Regular"],
-      size = 12.0,
+      size = 13.0,   -- same size as the time label
     },
   },
   label = {
