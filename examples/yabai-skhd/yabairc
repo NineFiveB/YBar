@@ -18,3 +18,11 @@ yabai -m signal --add event=window_destroyed      action="$ybar --trigger yabai_
 yabai -m signal --add event=window_minimized      action="$ybar --trigger yabai_window_change"
 yabai -m signal --add event=window_deminimized    action="$ybar --trigger yabai_window_change"
 yabai -m signal --add event=window_moved          action="$ybar --trigger yabai_window_change"
+
+# Float apps that don't behave well tiled — carried over from an AeroSpace
+# on-window-detected rule (Finder, Passwords, Transmission). Without this,
+# skhdrc's focus/move hotkeys (alt-hjkl / alt-shift-hjkl) treat these as
+# regular tiled windows and navigation gets confusing around them.
+yabai -m rule --add app="^Finder$" manage=off
+yabai -m rule --add app="^Passwords$" manage=off
+yabai -m rule --add app="^Transmission$" manage=off

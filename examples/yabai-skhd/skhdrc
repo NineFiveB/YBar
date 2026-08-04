@@ -1,39 +1,129 @@
 # YBar integration for skhd — append to your ~/.config/skhd/skhdrc.
-# Mode declarations report every transition to the bar, which shows the
-# active mode as a highlighted pill (widgets.skhd_mode) and hides it in
-# default mode. Bindings below are the common yabai starter set — adapt.
+# A faithful translation of a real ~/.aerospace.toml's [mode.main.binding]
+# and [mode.service.binding] into yabai/skhd equivalents. yabai's bsp/
+# stack/float model isn't identical to AeroSpace's tiling tree, so a few
+# bindings are the closest available analog rather than an exact match —
+# called out inline. Mode transitions report to the bar's mode pill
+# (widgets.skhd_mode), which AeroSpace's on-mode-changed hook doesn't have
+# a YBar equivalent for otherwise.
 #
 # skhd's config is its own hotkey DSL, not shell — no variable assignment
 # (a stray `ybar="..."` line here throws "undeclared identifier" and drops
 # the rest of the file); every action spells out the literal path.
+#
+# CURRENT LIMITATION on this machine (confirmed by live testing, not
+# assumed): `yabai -m space --focus`/`--display` need the scripting
+# addition, which needs System Integrity Protection partially disabled.
+# Bindings that call them are included and will start working the moment
+# the scripting addition is installed — until then they're silent no-ops.
+# Everything else below (focus, move/warp, resize, moving a window TO a
+# space, floating, minimize) works today without it — verified live.
 
-# Modes: entering (or leaving) any mode updates the bar pill.
 :: default    : /opt/homebrew/bin/ybar --trigger skhd_mode_changed MODE=default
-:: resize @   : /opt/homebrew/bin/ybar --trigger skhd_mode_changed MODE=resize
-:: window @   : /opt/homebrew/bin/ybar --trigger skhd_mode_changed MODE=window
+:: service @  : /opt/homebrew/bin/ybar --trigger skhd_mode_changed MODE=service
 
-# Mode entry/exit.
-ctrl - r ; resize
-ctrl - w ; window
-resize, window < escape ; default
+# ---------------------------------------------------------------- main mode
 
-# Space switching (yabai scripting addition required for --focus).
+# Minimize the focused window and move focus to the next one in this space.
+# (aerospace: custom cmd-m binding that manually minimized + walked the
+# tiling tree to the next window — yabai's own --focus next replaces that
+# whole dance.)
+cmd - m : yabai -m window --minimize; yabai -m window --focus next
+
+# Layout. Approximate: AeroSpace's "layout tiles horizontal vertical" /
+# "layout accordion horizontal vertical" toggle a container's orientation
+# and stacking within its own tree; yabai's bsp/stack are per-SPACE modes,
+# not per-container, so these are the closest single-key equivalents.
+# Key literals: this skhd build has NO named punctuation keys (verified
+# against its own tokenizer source — only word keys like "escape"/"space"
+# and arrows/f-keys/media keys exist) — every punctuation binding below
+# uses the raw kVK_ANSI_* hex keycode instead (grammar: key = literal |
+# keycode, keycode = apple kVK_<Key> hex value).
+# 0x2C = kVK_ANSI_Slash, 0x2B = kVK_ANSI_Comma.
+alt - 0x2C : yabai -m window --toggle split
+alt - 0x2B : yabai -m space --layout $(yabai -m query --spaces --space | /usr/bin/python3 -c "import json,sys; print('bsp' if json.load(sys.stdin)['type']=='stack' else 'stack')")
+
+# Focus.
+alt - h : yabai -m window --focus west
+alt - j : yabai -m window --focus south
+alt - k : yabai -m window --focus north
+alt - l : yabai -m window --focus east
+
+# Move. (aerospace "move" == yabai "warp": re-insert the window at the
+# target position.)
+alt + shift - h : yabai -m window --warp west
+alt + shift - j : yabai -m window --warp south
+alt + shift - k : yabai -m window --warp north
+alt + shift - l : yabai -m window --warp east
+
+# Resize. Approximate: AeroSpace's "resize smart ±50" grows/shrinks the
+# window along whichever axis makes sense for its position in the tree;
+# yabai has no single-flag equivalent, so this resizes from the right edge.
+# 0x1B = kVK_ANSI_Minus, 0x18 = kVK_ANSI_Equal.
+alt - 0x1B : yabai -m window --resize right:-50:0
+alt - 0x18 : yabai -m window --resize right:50:0
+
+# Workspace switch. See the CURRENT LIMITATION note above — needs SA.
 alt - 1 : yabai -m space --focus 1
 alt - 2 : yabai -m space --focus 2
 alt - 3 : yabai -m space --focus 3
 alt - 4 : yabai -m space --focus 4
 alt - 5 : yabai -m space --focus 5
+alt - 6 : yabai -m space --focus 6
+alt - 7 : yabai -m space --focus 7
 
-# Resize mode: arrows grow/shrink the focused window, escape exits.
-resize < left  : yabai -m window --resize left:-40:0
-resize < right : yabai -m window --resize left:40:0
-resize < up    : yabai -m window --resize top:0:-40
-resize < down  : yabai -m window --resize top:0:40
+# Move the focused window to a space WITHOUT following it (matches
+# AeroSpace's move-node-to-workspace default). Verified live: works today,
+# no SA needed.
+alt + shift - 1 : yabai -m window --space 1
+alt + shift - 2 : yabai -m window --space 2
+alt + shift - 3 : yabai -m window --space 3
+alt + shift - 4 : yabai -m window --space 4
+alt + shift - 5 : yabai -m window --space 5
+alt + shift - 6 : yabai -m window --space 6
+alt + shift - 7 : yabai -m window --space 7
 
-# Window mode: throw the focused window to a space.
-window < 1 : yabai -m window --space 1; skhd -k "escape"
-window < 2 : yabai -m window --space 2; skhd -k "escape"
-window < 3 : yabai -m window --space 3; skhd -k "escape"
+# Back-and-forth between the last two focused spaces (needs SA, same as
+# the numbered switches above).
+alt - tab : yabai -m space --focus recent
 
-# Toggle the bar's app-menus swap from the keyboard.
+# Move the current space to the next display (explicitly documented as
+# needing SA, per `man yabai`).
+alt + shift - tab : yabai -m space --display next
+
+# Enter the service submode. 0x29 = kVK_ANSI_Semicolon (the bare ';'
+# character can't be used as a literal key here — it's also skhd's own
+# mode-transition syntax character, e.g. `key ; mode`).
+alt + shift - 0x29 ; service
+
+# ------------------------------------------------------------- service mode
+# (aerospace's mode.service.binding)
+#
+# Deliberate simplification from the AeroSpace original: AeroSpace's service
+# actions each auto-return to main mode after firing (single-shot). Chaining
+# a self-triggered synthetic escape to replicate that here risks recursing
+# into this very binding if escape is ever also bound to a command in this
+# mode — not worth it for a convenience. Stay in service mode (like the
+# resize mode above) and exit explicitly with escape instead.
+service < escape ; default
+
+# Reset the focused space's split ratios to default (closest analog to
+# AeroSpace's flatten-workspace-tree "reset layout").
+service < r : yabai -m space --equalize
+
+# Toggle the focused window between floating and tiled.
+service < f : yabai -m window --toggle float
+
+# Close every window in the current space except the focused one.
+service < backspace : yabai -m query --windows --space | /usr/bin/python3 -c "import json,sys,subprocess; w=json.load(sys.stdin); f=[x['id'] for x in w if x['has-focus']]; [subprocess.run(['yabai','-m','window',str(x['id']),'--close']) for x in w if x['id'] not in f]"
+
+service < alt + shift - h : yabai -m window --warp west
+service < alt + shift - j : yabai -m window --warp south
+service < alt + shift - k : yabai -m window --warp north
+service < alt + shift - l : yabai -m window --warp east
+
+# ------------------------------------------------------------------- extra
+
+# Toggle the bar's app-menus swap from the keyboard (YBar-specific, no
+# AeroSpace equivalent — "hyper" is skhd's built-in cmd+alt+ctrl+shift alias).
 hyper - m : /opt/homebrew/bin/ybar --trigger swap_menus_and_spaces
