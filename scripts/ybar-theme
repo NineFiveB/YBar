@@ -15,7 +15,13 @@ set -e
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 themes_dir="$HOME/.config/ybar/themes"
 state_file="$HOME/.config/ybar/current-theme"
-app="$HOME/Applications/YBar.app"
+find_app() {
+    for candidate in "$HOME/Applications/YBar.app" "/Applications/YBar.app" \
+        "$(brew --prefix 2>/dev/null)/opt/ybar/YBar.app"; do
+        [ -d "$candidate" ] && { echo "$candidate"; return 0; }
+    done
+    return 1
+}
 
 theme_entry() {
     # echo the config path for a theme directory, if any
@@ -26,7 +32,8 @@ theme_entry() {
 }
 
 collect() {
-    for dir in "$repo_dir/examples"/*/ "$themes_dir"/*/; do
+    brew_share="$(brew --prefix 2>/dev/null)/share/ybar/examples"
+    for dir in "$repo_dir/examples"/*/ "$brew_share"/*/ "$themes_dir"/*/; do
         [ -d "$dir" ] || continue
         entry=$(theme_entry "${dir%/}") || continue
         printf '%s\t%s\n' "$(basename "$dir")" "$entry"
@@ -47,6 +54,7 @@ use)
     [ -n "$2" ] || { echo "usage: ybar-theme use <name>" >&2; exit 2; }
     entry=$(collect | awk -F '\t' -v n="$2" '$1 == n { print $2; exit }')
     [ -n "$entry" ] || { echo "unknown theme: $2 (try: ybar-theme list)" >&2; exit 1; }
+    app=$(find_app) || { echo "YBar.app not found (make app, or brew install)" >&2; exit 1; }
     mkdir -p "$(dirname "$state_file")"
     echo "$2" > "$state_file"
     pkill -f "YBar.app/Contents" 2>/dev/null || true

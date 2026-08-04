@@ -30,7 +30,7 @@ make build     # = swift build --scratch-path ~/.cache/ybar-build
 2. The fix is two symlinks inside the (stable) products directory:
 
 ```sh
-SCRATCH=~/.cache/ybar-build/out/Products/Debug
+SCRATCH=~/.cache/ybar-build/debug
 mkdir -p $SCRATCH/YBarKitTests.xctest/Contents/Frameworks
 ln -sfn /Library/Developer/CommandLineTools/Library/Developer/Frameworks/Testing.framework \
         $SCRATCH/YBarKitTests.xctest/Contents/Frameworks/Testing.framework

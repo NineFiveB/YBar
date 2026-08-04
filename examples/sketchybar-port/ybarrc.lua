@@ -10,7 +10,8 @@
 -- YBAR PORT: helper binaries/scripts (menus, calendar events, bluetooth
 -- battery, system stats, AltServer click) still live in the original
 -- sketchybar tree — adjust if yours is elsewhere.
-SKETCHYBAR_CONFIG = os.getenv("HOME") .. "/Documents/Development/sketchybar-setup/config"
+-- Helpers are vendored in THIS directory.
+SKETCHYBAR_CONFIG = (debug.getinfo(1, "S").source:match("@?(.*/)") or "./"):gsub("/$", "")
 
 sbar = require("sketchybar")
 

@@ -63,7 +63,12 @@ extension ScriptRunner {
     /// (aerospace, blueutil, battery ... live there).
     static func augmentedPATH(_ current: String?) -> String {
         var path = current ?? "/usr/bin:/bin:/usr/sbin:/sbin"
-        for extra in ["/opt/homebrew/bin", "/usr/local/bin"] where !path.split(separator: ":").contains(Substring(extra)) {
+        // The daemon's own directory first: config scripts call `ybar` and
+        // the binary may live in an app bundle or brew keg, not on PATH.
+        let selfDir = (Bundle.main.executablePath as NSString?)?.deletingLastPathComponent
+        var extras = ["/opt/homebrew/bin", "/usr/local/bin"]
+        if let selfDir { extras.insert(selfDir, at: 0) }
+        for extra in extras where !path.split(separator: ":").contains(Substring(extra)) {
             path += ":" + extra
         }
         return path

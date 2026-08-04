@@ -12,9 +12,17 @@ sbar.add("event", "aerospace_workspace_change")
 -- Discover every workspace AeroSpace knows about (synchronous, runs once at
 -- config load). Persistent workspaces that are empty are hidden until they
 -- contain a window or become focused (see update_spaces).
+-- Absolute path: io.popen at config load runs with the daemon's own PATH,
+-- which lacks /opt/homebrew/bin when launched from Finder or a LaunchAgent.
+AEROSPACE = "/opt/homebrew/bin/aerospace"
+if not os.execute("test -x " .. AEROSPACE) then
+  AEROSPACE = "/usr/local/bin/aerospace"
+  if not os.execute("test -x " .. AEROSPACE) then AEROSPACE = "aerospace" end
+end
+
 local function aerospace_workspaces()
   local list = {}
-  local handle = io.popen("aerospace list-workspaces --all 2>/dev/null")
+  local handle = io.popen(AEROSPACE .. " list-workspaces --all 2>/dev/null")
   if handle then
     for line in handle:lines() do
       local ws = line:match("^%s*(.-)%s*$")
@@ -61,7 +69,7 @@ for _, sid in ipairs(workspaces) do
     },
     popup = { background = { border_width = 5, border_color = colors.black } },
     -- Left click focuses the workspace via AeroSpace.
-    click_script = "aerospace workspace " .. sid,
+    click_script = AEROSPACE .. " workspace " .. sid,
     drawing = false,
   })
 
@@ -105,7 +113,7 @@ end
 -- Fetch the app icons for a workspace and render them as the space label.
 local function update_windows(sid)
   sbar.exec(
-    "aerospace list-windows --workspace " .. sid .. " --format '%{app-name}' 2>/dev/null",
+    AEROSPACE .. " list-windows --workspace " .. sid .. " --format '%{app-name}' 2>/dev/null",
     function(windows)
       local icon_line = ""
       local seen = {}
@@ -256,7 +264,7 @@ local reconcile_gen = 0
 local reconcile
 
 reconcile = function(focused, attempt, gen)
-  sbar.exec("aerospace list-workspaces --monitor all --empty no 2>/dev/null", function(nonempty)
+  sbar.exec(AEROSPACE .. " list-workspaces --monitor all --empty no 2>/dev/null", function(nonempty)
     if gen ~= reconcile_gen then return end
     -- The menus may have swapped in while this query was in flight; a
     -- reveal now would draw pills over the open app menus, and nothing
@@ -314,7 +322,7 @@ end)
 -- Query the focused workspace and repaint — used for the initial paint and
 -- the post-wake resync, with retries while AeroSpace is still starting up.
 local function query_and_update(attempt)
-  sbar.exec("aerospace list-workspaces --focused 2>/dev/null", function(focused)
+  sbar.exec(AEROSPACE .. " list-workspaces --focused 2>/dev/null", function(focused)
     focused = focused:gsub("%s+", "")
     if focused == "" and (attempt or 0) < 5 then
       sbar.exec("sleep 2", function() query_and_update((attempt or 0) + 1) end)

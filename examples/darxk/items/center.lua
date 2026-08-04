@@ -31,7 +31,7 @@ local updates = sbar.add("item", "darxk.updates", {
   click_script = "open -a Terminal",
 })
 updates:subscribe({ "forced", "routine", "system_woke" }, function()
-  sbar.exec("/opt/homebrew/bin/brew outdated --quiet 2>/dev/null | wc -l", function(out)
+  sbar.exec("PATH=/opt/homebrew/bin:/usr/local/bin:$PATH brew outdated --quiet 2>/dev/null | wc -l", function(out)
     local count = tonumber(out:match("%d+")) or 0
     local color = count == 0 and colors.green
       or (count < 10 and colors.warn or colors.red)

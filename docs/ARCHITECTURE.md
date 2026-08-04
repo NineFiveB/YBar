@@ -1,6 +1,6 @@
 # YBar Architecture
 
-This document is the synthesis of a deep dissection of sketchybar v2.24.0's source, a survey of Waybar's config/module model, and research into Metal 2D rendering and modern macOS windowing (macOS 15 Sequoia / 26 Tahoe). It is the authoritative design for YBar v1. Research reports live in the project history; sketchybar `file:line` references refer to its `src/` tree.
+This document is the synthesis of a deep dissection of sketchybar v2.24.0's source, a survey of Waybar's config/module model, and research into Metal 2D rendering and modern macOS windowing (macOS 15 Sequoia / 26 Tahoe). It is the authoritative design for YBar v1 (historical: the "v1.5" items below have since shipped). Research reports live in the project history; sketchybar `file:line` references refer to its `src/` tree.
 
 ## 1. Overview
 
@@ -160,7 +160,7 @@ Concurrency: Swift 6 language mode; model layer is `@MainActor`; providers hop c
 
 ## 11. Milestones
 
-- **M0 — skeleton**: builds; bar window per display at correct frame/level; Metal clear + SDF bar background; `--bar color=…` over IPC works. ✅ acceptance: bar visible on all spaces, idle GPU ≈ 0.
+- **M0 — skeleton**: builds; bar window per display at correct frame/level; Metal clear + SDF bar background; `--bar color=…` over IPC works. Acceptance: bar visible on all spaces, idle GPU ≈ 0.
 - **M1 — items & text**: `--add item`, `--set icon=/label=` with fonts/colors/padding/backgrounds, five-cursor layout, `--query`. Glyph atlas with fallback + SF Symbols + emoji.
 - **M2 — events & scripts**: EventBus, script runner + env contract, `--subscribe/--trigger/--add event` + distributed notifications, clock/power/audio/workspace providers, `update_freq`, config exec + hotload, mouse events + click scripts.
 - **M3 — animation**: `--animate`, curves incl. spring, animated layout (items slide on add/remove/width change).

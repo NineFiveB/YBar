@@ -186,6 +186,9 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         networkProvider.onEvent = { [weak self] name, info in
             self?.eventBus.trigger(name: name, info: info)
         }
+        DaemonHooks.shared.requestLocation = { [weak self] in
+            self?.networkProvider.requestLocationAuthorization()
+        }
 
         statsProvider.onSample = { [weak self] cpu, memory in
             self?.eventBus.trigger(

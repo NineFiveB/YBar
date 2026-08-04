@@ -3,9 +3,11 @@
 # bundles and codesign then rejects them as "detritus". A scratch path outside
 # the synced tree sidesteps the race entirely. See docs/BUILDING.md.
 SCRATCH := $(HOME)/.cache/ybar-build
-BIN     := $(SCRATCH)/out/Products/Debug/ybar
+# debug/ is stable across SwiftPM build systems (a symlink on the
+# swiftbuild layout, the real directory on classic).
+BIN     := $(SCRATCH)/debug/ybar
 
-.PHONY: build test run stop clean app release
+.PHONY: build test run stop clean app helpers release
 
 # App bundle: gives the daemon its own TCC identity so privacy prompts
 # (Bluetooth, Calendar, Apple Events) are attributed to YBar and grants
@@ -22,11 +24,19 @@ app: build
 	mkdir -p $(APP_DIR)/Contents/MacOS $(APP_DIR)/Contents/Resources
 	cp packaging/Info.plist $(APP_DIR)/Contents/Info.plist
 	cp $(BIN) $(APP_DIR)/Contents/MacOS/ybar
-	cp -R $(SCRATCH)/out/Products/Debug/YBar_YBarKit.bundle $(APP_DIR)/Contents/Resources/
+	cp -R $(SCRATCH)/debug/YBar_YBarKit.bundle $(APP_DIR)/Contents/Resources/
 	codesign --force --sign "$(SIGN_ID)" --identifier com.ybar.YBar $(APP_DIR)
 
 build:
 	swift build --scratch-path $(SCRATCH)
+
+# Example-config helper binaries (gitignored; the sketchybar-port and glass
+# themes need them for the app-menus row and the Background widget).
+HELPERS := examples/sketchybar-port/helpers
+helpers:
+	mkdir -p $(HELPERS)/bin
+	swiftc -O $(HELPERS)/statusitems.swift -o $(HELPERS)/bin/statusitems
+	$(MAKE) -C $(HELPERS)/menus
 
 # Distribution zip. Staged inside the scratch tree — never ~/Applications —
 # because codesign must run outside the iCloud-synced repo (same xattr race

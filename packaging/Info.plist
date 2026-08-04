@@ -30,5 +30,9 @@
 	<string>YBar shows your upcoming events in the calendar popup.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>YBar shows your upcoming events in the calendar popup.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>YBar reads the current Wi-Fi network name for the network widget.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>YBar reads the current Wi-Fi network name for the network widget.</string>
 </dict>
 </plist>

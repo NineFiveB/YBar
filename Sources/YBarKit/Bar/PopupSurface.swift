@@ -33,6 +33,8 @@ public final class PopupSurface {
         panel.level = .popUpMenu
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
 
+        var madeGlass: NSView?
+        #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
             let glass = NSGlassEffectView()
             // Regular (frosted) glass, matching system menus/popovers: a popup
@@ -41,7 +43,11 @@ public final class PopupSurface {
             // over the wallpaper strip where nothing bleeds.
             glass.style = .regular
             glass.appearance = NSAppearance(named: .darkAqua)
-            backdropView = glass
+            madeGlass = glass
+        }
+        #endif
+        if let madeGlass {
+            backdropView = madeGlass
         } else {
             let effect = NSVisualEffectView()
             effect.blendingMode = .behindWindow
@@ -98,9 +104,13 @@ public final class PopupSurface {
     public func setGlass(enabled: Bool, cornerRadius: CGFloat) {
         backdropView.isHidden = !enabled
         guard enabled else { return }
+        #if compiler(>=6.2)
         if #available(macOS 26.0, *), let glass = backdropView as? NSGlassEffectView {
             glass.cornerRadius = cornerRadius
-        } else if let effect = backdropView as? NSVisualEffectView {
+            return
+        }
+        #endif
+        if let effect = backdropView as? NSVisualEffectView {
             effect.maskImage = BarSurface.roundedMask(radius: cornerRadius)
         }
     }

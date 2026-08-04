@@ -13,8 +13,16 @@
 --   cp -R examples/sketchybar-glass/* ~/.config/ybar/
 --   (then adjust PORT_DIR below to ~/.config/ybar-port-files)
 
-PORT_DIR = os.getenv("HOME") .. "/Documents/Development/YBar/examples/sketchybar-port"
--- All helpers are vendored with the port now — the config is self-contained.
+-- The port tree ships beside this theme in the repo; a theme installed via
+-- ybar-theme lands in ~/.config/ybar/themes instead, so fall back there.
+local config_dir = debug.getinfo(1, "S").source:match("@?(.*/)") or "./"
+PORT_DIR = config_dir .. "../sketchybar-port"
+do
+  local probe = io.open(PORT_DIR .. "/sketchybar.lua", "r")
+  if probe then probe:close()
+  else PORT_DIR = os.getenv("HOME") .. "/.config/ybar/themes/sketchybar-port" end
+end
+-- All helpers are vendored with the port — the config is self-contained.
 SKETCHYBAR_CONFIG = PORT_DIR
 
 -- The glass dir (already first on package.path) wins for colors/bar/default;

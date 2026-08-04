@@ -24,6 +24,14 @@ public final class GlyphAtlas {
         let fontName: String
         let fontSize: CGFloat
         let glyph: CGGlyph
+
+        /// Quarter-point size buckets: an animated font size otherwise mints
+        /// a fresh atlas entry per interpolation frame until the page fills.
+        init(fontName: String, fontSize: CGFloat, glyph: CGGlyph) {
+            self.fontName = fontName
+            self.fontSize = (fontSize * 4).rounded() / 4
+            self.glyph = glyph
+        }
     }
 
     public let scale: CGFloat

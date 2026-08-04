@@ -71,6 +71,10 @@ public final class BarSurface {
         effectView.frame = container.bounds
         hostView.frame = container.bounds
         container.addSubview(effectView)
+        // compiler(>=6.2) tracks the macOS 26 SDK: older toolchains lack the
+        // NSGlassEffectView symbols entirely, so glass compiles out and the
+        // runtime blur fallbacks carry the look.
+        #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
             let merger = NSGlassEffectContainerView()
             merger.frame = container.bounds
@@ -84,6 +88,9 @@ public final class BarSurface {
         } else {
             glassHost = nil
         }
+        #else
+        glassHost = nil
+        #endif
         container.addSubview(hostView)
         panel.contentView = container
 
@@ -109,6 +116,7 @@ public final class BarSurface {
         panel.collectionBehavior = settings.sticky
             ? [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
             : [.moveToActiveSpace, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
             effectView.isHidden = settings.blurRadius <= 0
             if settings.glass, barGlass == nil, let container = panel.contentView {
@@ -128,6 +136,10 @@ public final class BarSurface {
             // Pre-26 there is no glass material; fall back to the blur.
             effectView.isHidden = settings.blurRadius <= 0 && !settings.glass
         }
+        #else
+        // Old SDK: no glass symbols; the blur is the material.
+        effectView.isHidden = settings.blurRadius <= 0 && !settings.glass
+        #endif
 
         effectView.frame = panel.contentView?.bounds ?? .zero
         hostView.frame = panel.contentView?.bounds ?? .zero
@@ -167,6 +179,8 @@ public final class BarSurface {
                 y: containerHeight - spec.rect.maxY,
                 width: spec.rect.width,
                 height: spec.rect.height)
+            var handled = false
+            #if compiler(>=6.2)
             if #available(macOS 26.0, *), let glassHost {
                 let glass: NSGlassEffectView
                 if let existing = glassViews[spec.itemID] as? NSGlassEffectView {
@@ -183,7 +197,10 @@ public final class BarSurface {
                 }
                 glass.frame = frame
                 glass.cornerRadius = spec.cornerRadius
-            } else {
+                handled = true
+            }
+            #endif
+            if !handled {
                 let view: NSVisualEffectView
                 if let existing = glassViews[spec.itemID] as? NSVisualEffectView {
                     view = existing

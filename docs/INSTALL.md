@@ -35,6 +35,8 @@ granted permissions unless you re-sign with a stable local certificate (see
 
 ## Release zip
 
+(Applies once a tagged release with an attached zip exists on GitHub.)
+
 Each tagged release ships `YBar-<version>.zip` (built by `make release`). The
 signature inside is the maintainer's local certificate — your Mac does not
 trust it, and the download carries quarantine, so Gatekeeper will refuse the
@@ -96,6 +98,9 @@ script it spawns. Only the features you actually configure ask for anything:
   grant it manually under System Settings → Privacy & Security →
   Accessibility → **+** → select YBar.app, then restart YBar (`ybar --exit`
   and relaunch).
+- **Location (Wi-Fi network name)** — macOS gates the SSID behind Location
+  Services. Opt in once with `ybar --bar wifi_ssid_prompt=on` and click
+  Allow; without it, wifi widgets show a generic connected state.
 - **Screen Recording** — needed by the `alias` component, which screenshots
   other apps' menu bar items via ScreenCaptureKit. macOS prompts on first
   capture; if you dismissed it, grant manually under Privacy & Security →

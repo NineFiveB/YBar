@@ -58,11 +58,15 @@ See [docs/INSTALL.md](docs/INSTALL.md) for the release-zip route, first-run priv
 
 ## Planned
 
-Space→item association (SkyLight) · per-display `hidden` · `font.features` · `popup.topmost` · `--reload` · media artwork in the now-playing popup · taskbar (window list) example widget.
+Space→item association (SkyLight) · per-display `hidden` · `font.features` · `popup.topmost` · media artwork in the now-playing popup · taskbar (window list) example widget.
 
 ## Build
 
-Requires macOS 14+ and a Swift 6 toolchain. Shaders compile at runtime, so Command Line Tools are enough — full Xcode is not required.
+Runs on macOS 14+. Building needs a Swift 6 toolchain; the Liquid Glass
+backdrops additionally need the macOS 26 SDK (Xcode 26 / CLT 26) — on older
+toolchains they compile out and the blur fallback carries the look. Shaders
+compile at runtime, so Command Line Tools are enough — full Xcode is not
+required.
 
 ```sh
 make build       # swift build (scratch path outside iCloud-synced dirs)
@@ -89,4 +93,5 @@ YBar stands on the shoulders of [sketchybar](https://github.com/FelixKratz/Sketc
 
 ## License
 
-[GPL-3.0](LICENSE).
+[GPL-3.0](LICENSE). Copyright (C) 2026 YSuite. Vendored third-party code is
+credited in [THIRD_PARTY.md](THIRD_PARTY.md).

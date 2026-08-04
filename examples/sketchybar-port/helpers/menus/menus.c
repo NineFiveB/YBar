@@ -1,3 +1,5 @@
+// Adapted from FelixKratz/dotfiles (.config/sketchybar/helpers/menus),
+// GPL-3.0, Copyright (C) Felix Kratz — with added CFRetain/CFRelease fixes.
 #include <Carbon/Carbon.h>
 
 void ax_init() {

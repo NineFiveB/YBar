@@ -284,8 +284,8 @@ public final class CommandHandler {
             return nil
 
         case "graph":
-            guard args.count >= 4, let width = Int(args[3]), width > 0 else {
-                return "[!] usage: --add graph <name> <position> <width>"
+            guard args.count >= 4, let width = Int(args[3]), width > 0, width <= 8192 else {
+                return "[!] usage: --add graph <name> <position> <width> (1...8192)"
             }
             guard let item = addItem(name: args[1], positionToken: args[2]) else {
                 return "[!] invalid position or duplicate name: \(args[1]) \(args[2])"

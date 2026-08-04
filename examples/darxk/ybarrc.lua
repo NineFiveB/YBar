@@ -4,6 +4,13 @@
 -- active workspace and window title, bold monospace type.
 local config_dir = debug.getinfo(1, "S").source:match("@?(.*/)") or "./"
 PORT_DIR = config_dir .. "../sketchybar-port"
+do
+  -- Installed via ybar-theme (outside the repo): the shim lives in the
+  -- shared themes dir instead of a sibling.
+  local probe = io.open(PORT_DIR .. "/sketchybar.lua", "r")
+  if probe then probe:close()
+  else PORT_DIR = os.getenv("HOME") .. "/.config/ybar/themes/sketchybar-port" end
+end
 package.path = config_dir .. "?.lua;" .. config_dir .. "?/init.lua;"
   .. PORT_DIR .. "/?.lua;" .. PORT_DIR .. "/?/init.lua;" .. package.path
 

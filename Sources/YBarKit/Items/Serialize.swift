@@ -188,7 +188,8 @@ public enum Serialize {
     }
 
     static func json(_ object: Any) -> String {
-        guard let data = try? JSONSerialization.data(
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(
             withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
             let text = String(data: data, encoding: .utf8)
         else { return "[!] serialization failed" }

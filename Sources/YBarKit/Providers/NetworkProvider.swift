@@ -1,23 +1,38 @@
+import CoreLocation
 import CoreWLAN
 import Foundation
 import Network
 
 /// Connectivity via public NWPathMonitor, lazily armed on the first
-/// `wifi_change` subscription. SSID via CoreWLAN is best-effort: on modern
-/// macOS it returns nil without Core Location authorization (which needs a real
-/// app bundle — planned for the .app packaging milestone). Degrades to
-/// "connected"/"" like the architecture doc prescribes; no `ipconfig` hacks.
+/// `wifi_change` subscription. SSID via CoreWLAN needs Core Location
+/// authorization on modern macOS, requested here on first arm (the app
+/// bundle carries the usage description); without the grant it degrades to
+/// "connected"/"" — no `ipconfig` hacks.
 @MainActor
 public final class NetworkProvider {
     public var onEvent: ((_ name: String, _ info: String) -> Void)?
 
     private var monitor: NWPathMonitor?
     private var lastInfo: String?
+    /// Retained: authorization callbacks die with a released manager.
+    private var locationManager: CLLocationManager?
 
     public init() {}
 
+    /// Explicit opt-in (`--bar wifi_ssid_prompt=on`): the authorization
+    /// dialog's nested run loop starves the daemon's socket while pending,
+    /// so it must never fire unattended at boot.
+    public func requestLocationAuthorization() {
+        if locationManager == nil { locationManager = CLLocationManager() }
+        guard let locationManager else { return }
+        if locationManager.authorizationStatus == .notDetermined {
+            locationManager.requestWhenInUseAuthorization()
+        }
+    }
+
     public func start() {
         guard monitor == nil else { return }
+
         let monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { path in
             let satisfied = path.status == .satisfied

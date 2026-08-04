@@ -99,6 +99,10 @@ public enum BarPropertySetter {
             manager.settings.fullscreenShow = flag
             manager.updateFullscreenElevation()
             return nil
+        case "wifi_ssid_prompt":
+            guard let flag = PropertySetter.parseBool(value) else { return "[!] invalid boolean: \(value)" }
+            if flag { DaemonHooks.shared.requestLocation?() }
+            return nil
         case "font_smoothing":
             // Accepted for config compatibility; not applicable to the public-API v1 surface.
             return nil
@@ -114,7 +118,7 @@ public enum BarPropertySetter {
         _ value: String,
         _ ctx: PropertyContext
     ) -> String? {
-        guard let target = Float(value) else { return "[!] invalid number: \(value)" }
+        guard let target = Float(value), target.isFinite else { return "[!] invalid number: \(value)" }
         let animationKey = "bar.\(key)"
         if let animation = ctx.animation, animation.durationFrames > 0 {
             let invalidate = ctx.invalidate

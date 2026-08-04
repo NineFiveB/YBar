@@ -6,7 +6,10 @@ local colors = require("colors")
 sbar.add("event", "aerospace_workspace_change")
 
 local aerospace = "/opt/homebrew/bin/aerospace"
-if not os.execute("test -x " .. aerospace) then aerospace = "aerospace" end
+if not os.execute("test -x " .. aerospace) then
+  aerospace = "/usr/local/bin/aerospace"
+  if not os.execute("test -x " .. aerospace) then aerospace = "aerospace" end
+end
 
 local list = {}
 local handle = io.popen(aerospace .. " list-workspaces --all 2>/dev/null")

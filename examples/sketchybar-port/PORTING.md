@@ -29,9 +29,16 @@ ybar          # or restart the daemon
 4. **Network speeds** — the `network_load` binary is optional as before; the
    port registers the `network_update` event up front so subscriptions succeed
    without it (speeds show `??? Bps` until the binary exists).
-5. **Media widget not ported** — it needs the `media_change` event
-   (MediaRemote, entitlement-locked since macOS 15.3). Planned on top of
-   YBar's platform-binary now-playing adapter.
+5. **Media widget** — ported on YBar's `media_change` event (Music/Spotify
+   distributed notifications; no MediaRemote): `items/widgets/media.lua`,
+   marquee title, click toggles play/pause.
+
+## Helper binaries
+
+Two helpers are compiled, not vendored as binaries: run `make helpers` from
+the repo root once (builds `helpers/bin/statusitems` for the Background
+widget and `helpers/menus/bin/menus` for the app-menus row). The calendar
+events helper self-compiles on first run.
 
 ## AeroSpace hook
 
@@ -40,9 +47,8 @@ The spaces widget listens for `aerospace_workspace_change`. Update
 both):
 
 ```toml
-exec-on-workspace-change = ['/bin/bash', '-c',
-  'ybar --trigger aerospace_workspace_change FOCUSED_WORKSPACE=$AEROSPACE_FOCUSED_WORKSPACE'
-]
+exec-on-workspace-change = ['/opt/homebrew/bin/ybar', '--trigger', 'aerospace_workspace_change']
+# (the ybar CLI folds $AEROSPACE_* from its environment into the trigger)
 ```
 
 ## Known behavioral differences
@@ -50,7 +56,8 @@ exec-on-workspace-change = ['/bin/bash', '-c',
 - Popups auto-close on outside clicks by default (YBar extension); add
   `popup = { auto_close = false }` to a host for sketchybar's script-only
   lifecycle. The config's own `mouse.exited.global` close handlers also work.
-- `background.image` (media artwork, `app.<Name>` icons), `scroll_texts`
-  marquee, and per-item `blur_radius` are accepted-and-ignored.
+- `background.image` (`app.<Name>` icons, files), `scroll_texts` marquee,
+  and per-item `blur_radius` are implemented engine features now, not
+  ignored compat stubs.
 - Fonts: SF Pro / SF Mono / sketchybar-app-font resolve through CoreText by
   family name — install them as before (`brew install --cask font-sketchybar-app-font`).

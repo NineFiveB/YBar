@@ -9,6 +9,8 @@ final class DaemonHooks {
     static let shared = DaemonHooks()
     var closePopups: (() -> Void)?
     var reframeBars: (() -> Void)?
+    /// Wired by the daemon: request Core Location auth for SSID resolution.
+    var requestLocation: (() -> Void)?
 }
 
 /// Owns the bars: one surface per included display, the shared render stack,

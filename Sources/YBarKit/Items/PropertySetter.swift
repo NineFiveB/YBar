@@ -118,7 +118,7 @@ public enum PropertySetter {
             guard let alias = item.alias else { return "[!] \(item.name) is not an alias" }
             switch rest.first {
             case "scale":
-                guard let scale = Float(value), scale > 0 else { return "[!] invalid alias.scale: \(value)" }
+                guard let scale = Float(value), scale.isFinite, scale > 0 else { return "[!] invalid alias.scale: \(value)" }
                 alias.scale = scale
                 ctx.invalidate()
                 return nil
@@ -305,7 +305,7 @@ public enum PropertySetter {
             ctx.invalidate()
             return nil
         case "wrap_width":
-            guard let width = Float(value) else { return "[!] invalid wrap_width: \(value)" }
+            guard let width = Float(value), width.isFinite else { return "[!] invalid wrap_width: \(value)" }
             item.popup.wrapWidth = max(0, width)
             ctx.invalidate()
             return nil
@@ -369,7 +369,7 @@ public enum PropertySetter {
 
     static func setFloatValue(key: String, current: Float, value: String,
                               ctx: PropertyContext, assign: @escaping (Float) -> Void) -> String? {
-        guard let target = Float(value) else { return "[!] invalid number: \(value)" }
+        guard let target = Float(value), target.isFinite else { return "[!] invalid number: \(value)" }
         if let animation = ctx.animation, animation.durationFrames > 0 {
             let invalidate = ctx.invalidate
             ctx.scheduler.animate(
@@ -533,7 +533,7 @@ public enum PropertySetter {
                 item[keyPath: base.appending(path: \BackgroundStyle.imageSource)] = value
                 item[keyPath: base.appending(path: \BackgroundStyle.drawing)] = true
             case "scale":
-                guard let scale = Float(value), scale > 0 else { return "[!] invalid image.scale: \(value)" }
+                guard let scale = Float(value), scale.isFinite, scale > 0 else { return "[!] invalid image.scale: \(value)" }
                 item[keyPath: base.appending(path: \BackgroundStyle.imageScale)] = scale
             case "drawing":
                 guard let flag = parseBool(value) else { return "[!] invalid boolean: \(value)" }
@@ -544,7 +544,7 @@ public enum PropertySetter {
             ctx.invalidate()
             return nil
         case "clip":
-            guard let clip = Float(value), clip >= 0 else { return "[!] invalid clip: \(value)" }
+            guard let clip = Float(value), clip.isFinite, clip >= 0 else { return "[!] invalid clip: \(value)" }
             item[keyPath: base.appending(path: \BackgroundStyle.clip)] = clip
             ctx.invalidate()
             return nil
@@ -664,7 +664,7 @@ public enum PropertySetter {
             ctx.invalidate()
             return nil
         }
-        guard Float(value) != nil else { return "[!] invalid number: \(value)" }
+        guard let parsed = Float(value), parsed.isFinite else { return "[!] invalid number: \(value)" }
         if let animation = ctx.animation, animation.durationFrames > 0,
            item[keyPath: widthPath] < 0, let measure = ctx.measureTextNaturalWidth {
             item[keyPath: widthPath] = measure(item, isIcon)
@@ -708,7 +708,7 @@ public enum PropertySetter {
         }
         // Animating dynamic -> fixed: seed from the real rendered width, not -1
         // (validated first — a bad value must not freeze the dynamic sentinel).
-        guard Float(value) != nil else { return "[!] invalid number: \(value)" }
+        guard let parsed = Float(value), parsed.isFinite else { return "[!] invalid number: \(value)" }
         if let animation = ctx.animation, animation.durationFrames > 0,
            item.customWidth < 0, let measure = ctx.measureNaturalWidth {
             item.customWidth = measure(item)
@@ -726,7 +726,7 @@ public enum PropertySetter {
         _ value: String,
         _ ctx: PropertyContext
     ) -> String? {
-        guard let target = Float(value) else { return "[!] invalid number: \(value)" }
+        guard let target = Float(value), target.isFinite else { return "[!] invalid number: \(value)" }
         let animationKey = "item.\(item.id).\(key)"
         if let animation = ctx.animation, animation.durationFrames > 0 {
             let invalidate = ctx.invalidate

@@ -17,6 +17,9 @@ class Ybar < Formula
   depends_on macos: :sonoma
 
   def install
+    unless quiet_system("swift", "--version")
+      odie "A Swift toolchain is required: xcode-select --install"
+    end
     # SwiftPM's own sandbox cannot nest inside Homebrew's build sandbox.
     system "swift", "build", "-c", "release", "--disable-sandbox",
            "--scratch-path", ".scratch"
@@ -40,6 +43,8 @@ class Ybar < Formula
 
     # Starter configs land in share/ybar/examples (docs/INSTALL.md points here).
     pkgshare.install "examples"
+    pkgshare.install "themes"
+    bin.install "scripts/ybar-theme"
   end
 
   def caveats
