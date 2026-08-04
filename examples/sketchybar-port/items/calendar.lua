@@ -15,11 +15,12 @@ local max_events = 5
 local max_cells = 42
 
 local cal = sbar.add("item", "calendar", {
+  -- Regular weight throughout: the native menu bar clock is not bold.
   icon = {
     color = colors.white,
     padding_left = 8,
     font = {
-      style = settings.font.style_map["Black"],
+      style = settings.font.style_map["Regular"],
       size = 12.0,
     },
   },
@@ -28,7 +29,7 @@ local cal = sbar.add("item", "calendar", {
     padding_right = 8,
     width = 75,
     align = "right",
-    font = { family = settings.font.numbers },
+    font = { family = settings.font.numbers, style = settings.font.style_map["Regular"] },
   },
   position = "right",
   update_freq = 30,
