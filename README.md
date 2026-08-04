@@ -2,6 +2,13 @@
 
 **Top bar for macOS** — a GPU-rendered, scriptable status bar. Metal renders everything (SDF shapes, glyph-atlas text, display-link-paced animation at near-zero CPU); the architecture is [sketchybar](https://github.com/FelixKratz/SketchyBar)'s proven live-object model: a single `ybar` binary that is both daemon and CLI client, driven entirely over IPC — plus an embedded Lua runtime so whole configs run in-process.
 
+![YBar in use: AeroSpace workspace pills with live app icons, then the app-menus swap](docs/media/ybar-demo.gif)
+
+*The `sketchybar-glass` theme: workspace pills tracking AeroSpace with live app
+icons, a running Claude Code session indicator, CPU graph, and the app-menus
+swap replacing the pills in place. The native macOS menu bar is hidden
+underneath.*
+
 ```sh
 ybar                                  # start the daemon
 ybar --bar height=32 color=0xdd1e1e2e topmost=on
