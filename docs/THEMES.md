@@ -30,6 +30,13 @@ state, and their modules are interactive — scroll the volume module to
 adjust it, click volume/battery/wifi for the matching Settings pane, click
 the clock for Calendar (`helpers/mac.lua` has the shared pieces).
 
+To hide the native macOS menu bar entirely, set `topmost = "on"` on the bar
+(the glass theme does). With menu-bar auto-hide enabled, macOS still reveals
+its bar when the pointer hits the top edge; at status-bar level YBar covers
+it, so it is never visible - no private APIs or SIP changes required. The
+native status items become unclickable while covered, which is why the
+themes ship replacements for them.
+
 ## Writing a theme
 
 Start from `examples/darxk` — it is the smallest complete Lua theme
