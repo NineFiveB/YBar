@@ -9,6 +9,13 @@ icons, a running Claude Code session indicator, CPU graph, and the app-menus
 swap replacing the pills in place. The native macOS menu bar is hidden
 underneath.*
 
+![Calendar, system monitor and Wi-Fi popups rendered as Liquid Glass panels](docs/media/ybar-popups.gif)
+
+*Popups are first-class items laid out by the same engine: a calendar month
+grid (`popup.wrap_width` flow layout), arc gauges for CPU and memory, and a
+Settings-style Wi-Fi picker — all on real `NSGlassEffectView` backdrops.
+Network names in this recording are placeholders.*
+
 ```sh
 ybar                                  # start the daemon
 ybar --bar height=32 color=0xdd1e1e2e topmost=on
