@@ -79,7 +79,9 @@ Three surfaces, mixable at will:
 - **CLI**: any shell script or REPL can drive the same live-object model over the socket at runtime — the bar is not a parsed file.
 - **JSONC**: point `-c` at a `.jsonc` file for a declarative bar — comments and trailing commas allowed, translated through the same command layer ([example](examples/jsonc-demo/ybar.jsonc)).
 
-The example config's workspace pills speak **AeroSpace** natively and fall back to a **yabai** adapter (native macOS Spaces) when yabai is installed instead. [examples/yabai-skhd](examples/yabai-skhd) has the yabai signal recipes (instant window-level updates; the CLI folds `$YABAI_*` signal vars into `--trigger` env) and an skhd setup driving the bar's hotkey-mode indicator pill.
+The example config's workspace pills speak **AeroSpace** natively and fall back to a **yabai** adapter (native macOS Spaces) when yabai is installed instead.
+
+**Themes**: ship-selectable presets — `scripts/ybar-theme list|use <name>|install <git-url>`. See [docs/THEMES.md](docs/THEMES.md) for the gallery (Liquid Glass flagship, the darxk Waybar replication, and more) and how to publish your own. [examples/yabai-skhd](examples/yabai-skhd) has the yabai signal recipes (instant window-level updates; the CLI folds `$YABAI_*` signal vars into `--trigger` env) and an skhd setup driving the bar's hotkey-mode indicator pill.
 
 ## Acknowledgments
 

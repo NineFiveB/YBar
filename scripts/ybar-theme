@@ -1,0 +1,71 @@
+#!/bin/sh
+# ybar-theme — switch between YBar theme configs.
+#
+#   ybar-theme list                 themes shipped in the repo + installed ones
+#   ybar-theme use <name>           switch the running bar to a theme
+#   ybar-theme current              show the active theme
+#   ybar-theme install <git-url>    clone a community theme into ~/.config/ybar/themes
+#
+# A theme is any directory containing a ybarrc.lua (or ybar.jsonc). Shipped
+# themes live in the repo's examples/; installed ones in ~/.config/ybar/themes.
+# `use` records the choice in ~/.config/ybar/current-theme and relaunches the
+# app bundle so the daemon keeps its TCC identity.
+set -e
+
+repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
+themes_dir="$HOME/.config/ybar/themes"
+state_file="$HOME/.config/ybar/current-theme"
+app="$HOME/Applications/YBar.app"
+
+theme_entry() {
+    # echo the config path for a theme directory, if any
+    for f in ybarrc.lua ybar.jsonc ybarrc.jsonc; do
+        [ -f "$1/$f" ] && { echo "$1/$f"; return 0; }
+    done
+    return 1
+}
+
+collect() {
+    for dir in "$repo_dir/examples"/*/ "$themes_dir"/*/; do
+        [ -d "$dir" ] || continue
+        entry=$(theme_entry "${dir%/}") || continue
+        printf '%s\t%s\n' "$(basename "$dir")" "$entry"
+    done
+}
+
+case "$1" in
+list|"")
+    current=$(cat "$state_file" 2>/dev/null || true)
+    collect | while IFS="$(printf '\t')" read -r name entry; do
+        if [ "$name" = "$current" ]; then printf '* %s\n' "$name"; else printf '  %s\n' "$name"; fi
+    done
+    ;;
+current)
+    cat "$state_file" 2>/dev/null || echo "(none recorded)"
+    ;;
+use)
+    [ -n "$2" ] || { echo "usage: ybar-theme use <name>" >&2; exit 2; }
+    entry=$(collect | awk -F '\t' -v n="$2" '$1 == n { print $2; exit }')
+    [ -n "$entry" ] || { echo "unknown theme: $2 (try: ybar-theme list)" >&2; exit 1; }
+    mkdir -p "$(dirname "$state_file")"
+    echo "$2" > "$state_file"
+    pkill -f "YBar.app/Contents" 2>/dev/null || true
+    sleep 1
+    rm -f "/tmp/ybar_$(whoami).socket"
+    open -g "$app" --args -c "$entry"
+    echo "switched to $2 ($entry)"
+    ;;
+install)
+    [ -n "$2" ] || { echo "usage: ybar-theme install <git-url>" >&2; exit 2; }
+    mkdir -p "$themes_dir"
+    name=$(basename "$2" .git)
+    git clone --depth 1 "$2" "$themes_dir/$name"
+    theme_entry "$themes_dir/$name" >/dev/null \
+        || { echo "warning: no ybarrc.lua found in $name" >&2; }
+    echo "installed $name — activate with: ybar-theme use $name"
+    ;;
+*)
+    echo "usage: ybar-theme [list|current|use <name>|install <git-url>]" >&2
+    exit 2
+    ;;
+esac
