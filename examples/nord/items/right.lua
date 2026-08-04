@@ -1,4 +1,5 @@
 local colors = require("colors")
+local mac = require("helpers.mac")
 
 -- Right side: flat "icon value" modules straight on the strip, divided by
 -- thin polar-night vertical bars. Right-position items are added
@@ -20,6 +21,7 @@ end
 -- Clock (rightmost): frost icon, "%a %H:%M".
 local clock = sbar.add("item", "nord.clock", {
   position = "right",
+  click_script = mac.CALENDAR,
   update_freq = 20,
   icon = { string = "\u{F0954}", color = colors.frost },
   label = { color = colors.text },
@@ -33,6 +35,7 @@ separator("nord.sep1")
 -- Battery: aurora green / yellow / red by level.
 local battery = sbar.add("item", "nord.battery", {
   position = "right",
+  click_script = mac.BATTERY_SETTINGS,
   icon = { string = "\u{F0079}", color = colors.green },
   label = { color = colors.text },
 })
@@ -41,14 +44,10 @@ local function battery_paint(level)
     or (level > 15 and colors.yellow or colors.red)
   battery:set({ icon = { color = color }, label = { string = level .. "%" } })
 end
-battery:subscribe({ "forced", "battery_change", "power_source_change" }, function(env)
-  local pct = tonumber(env.INFO) or tonumber((env.INFO or ""):match("%d+"))
-  if pct then
-    battery_paint(pct)
-    return
-  end
-  sbar.exec("pmset -g batt | grep -Eo '[0-9]+%' | head -1 | tr -d '%'", function(out)
-    battery_paint(tonumber(out:match("%d+")) or 0)
+battery:subscribe({ "forced", "routine", "battery_change", "power_source_change" }, function()
+  mac.battery(function(level, charging)
+    battery_paint(level)
+    if charging then battery:set({ icon = { string = "\u{F0084}" } }) end
   end)
 end)
 
@@ -66,6 +65,8 @@ volume:subscribe("volume_change", function(env)
     or (level < 40 and "\u{F057F}" or (level < 75 and "\u{F0580}" or "\u{F057E}"))
   volume:set({ icon = { string = glyph }, label = { string = level .. "%" } })
 end)
+volume:set({ click_script = mac.SOUND_SETTINGS })
+mac.volume_scroll(volume)
 sbar.trigger("volume_change")
 
 separator("nord.sep3")

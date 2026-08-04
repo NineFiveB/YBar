@@ -14,6 +14,7 @@ FONT = "JetBrainsMono Nerd Font"   -- engine falls back if not installed
 sbar.begin_config()
 
 sbar.bar({
+  notch_width = 0,   -- auto-detect the housing on notched Macs
   height = 30,
   color = colors.bar_bg,
   margin = 0,

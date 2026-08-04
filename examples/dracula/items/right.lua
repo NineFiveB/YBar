@@ -1,4 +1,5 @@
 local colors = require("colors")
+local mac = require("helpers.mac")
 
 -- Right side, added rightmost-first: clock (purple), battery (orange, red
 -- when low), volume (green), wifi (cyan). Every module is its own bright
@@ -7,6 +8,7 @@ local colors = require("colors")
 -- Clock (rightmost): purple block.
 local clock = sbar.add("item", "dracula.clock", {
   position = "right",
+  click_script = mac.CALENDAR,
   update_freq = 20,
   icon = { string = "\u{F0954}", color = colors.bg },
   label = { color = colors.bg },
@@ -21,6 +23,7 @@ sbar.add("item", "dracula.right.pad1", { position = "right", width = 6 })
 -- Battery: orange block, red block at 15% or below.
 local battery = sbar.add("item", "dracula.battery", {
   position = "right",
+  click_script = mac.BATTERY_SETTINGS,
   update_freq = 180,
   icon = { string = "\u{F0079}", color = colors.bg },
   label = { color = colors.bg },
@@ -44,15 +47,10 @@ local function render_battery(level)
   })
 end
 
-battery:subscribe({ "forced", "routine", "battery_change", "power_source_change", "system_woke" }, function(env)
-  local pct = tonumber(env.INFO) or tonumber((env.INFO or ""):match("%d+"))
-  if pct then
-    render_battery(pct)
-    return
-  end
-  -- Fallback: no INFO on this event, ask pmset.
-  sbar.exec("pmset -g batt | grep -Eo '[0-9]+%' | head -1 | tr -d '%'", function(out)
-    render_battery(tonumber(out:match("%d+")) or 0)
+battery:subscribe({ "forced", "routine", "battery_change", "power_source_change", "system_woke" }, function()
+  mac.battery(function(level, charging)
+    render_battery(level)
+    if charging then battery:set({ icon = { string = "\u{F0084}" } }) end
   end)
 end)
 
@@ -72,6 +70,8 @@ volume:subscribe("volume_change", function(env)
   volume:set({ icon = { string = glyph }, label = { string = level .. "%" } })
 end)
 
+volume:set({ click_script = mac.SOUND_SETTINGS })
+mac.volume_scroll(volume)
 sbar.trigger("volume_change")
 
 sbar.add("item", "dracula.right.pad3", { position = "right", width = 6 })

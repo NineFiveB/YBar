@@ -1,4 +1,5 @@
 local colors = require("colors")
+local mac = require("helpers.mac")
 
 -- Right powerline chain. Visual order left-to-right:
 --   > wifi (gray) > volume (orange) > battery (aqua) > clock (yellow)
@@ -33,6 +34,7 @@ end
 -- ── Clock: yellow, rightmost ──────────────────────────────────────────────
 local clock = sbar.add("item", "gruvbox.clock", {
   position = "right",
+  click_script = mac.CALENDAR,
   update_freq = 20,
   icon = { string = "\u{F0954}", color = colors.dark },
   label = { color = colors.dark },
@@ -47,6 +49,7 @@ separator("gruvbox.sep.clock", colors.yellow, colors.aqua)
 -- ── Battery: aqua, pmset fallback for the level ───────────────────────────
 local battery = sbar.add("item", "gruvbox.battery", {
   position = "right",
+  click_script = mac.BATTERY_SETTINGS,
   icon = { string = "\u{F0079}", color = colors.dark },
   label = { color = colors.dark },
   background = { color = colors.aqua, corner_radius = 0, height = 30 },
@@ -93,6 +96,8 @@ volume:subscribe("volume_change", function(env)
   volume:set({ icon = { string = glyph }, label = { string = level .. "%" } })
 end)
 
+volume:set({ click_script = mac.SOUND_SETTINGS })
+mac.volume_scroll(volume)
 sbar.trigger("volume_change")
 
 separator("gruvbox.sep.volume", colors.orange, colors.gray)

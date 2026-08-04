@@ -14,6 +14,7 @@ FONT = "SF Pro"   -- engine falls back if not resolvable
 sbar.begin_config()
 
 sbar.bar({
+  notch_width = 0,   -- auto-detect the housing on notched Macs
   height = 34,
   margin = 12,
   y_offset = 8,

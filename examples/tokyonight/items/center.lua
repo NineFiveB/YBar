@@ -4,7 +4,7 @@ local colors = require("colors")
 -- marquee beside it (green music note, hidden when nothing plays).
 
 local front = sbar.add("item", "tokyonight.front_app", {
-  position = "center",
+  position = "q",
   icon = { drawing = false },
   label = { color = colors.fg, padding_left = 4, padding_right = 4 },
 })
@@ -17,7 +17,7 @@ end)
 sbar.trigger("front_app_switched")
 
 local media = sbar.add("item", "tokyonight.media", {
-  position = "center",
+  position = "e",
   drawing = false,
   updates = true,   -- starts hidden, must keep receiving media_change
   scroll_texts = true,

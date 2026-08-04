@@ -1,4 +1,5 @@
 local colors = require("colors")
+local mac = require("helpers.mac")
 
 -- Right side, rightmost first: clock, battery, volume, wifi. Plain
 -- accent-colored text straight on the island — no capsules, no
@@ -6,6 +7,7 @@ local colors = require("colors")
 
 local clock = sbar.add("item", "tokyonight.clock", {
   position = "right",
+  click_script = mac.CALENDAR,
   update_freq = 20,
   icon = { string = "\u{F0954}", color = colors.blue },
   label = { color = colors.blue },
@@ -18,6 +20,7 @@ sbar.add("item", "tokyonight.pad1", { position = "right", width = 10 })
 
 local battery = sbar.add("item", "tokyonight.battery", {
   position = "right",
+  click_script = mac.BATTERY_SETTINGS,
   icon = { string = "\u{F0079}", color = colors.green },
   label = { color = colors.green },
 })
@@ -28,15 +31,11 @@ local function set_battery(level)
     label = { string = level .. "%", color = color },
   })
 end
-battery:subscribe({ "forced", "battery_change", "power_source_change" }, function(env)
-  local pct = tonumber(env.INFO) or tonumber((env.INFO or ""):match("%d+")) or nil
-  if not pct then
-    sbar.exec("pmset -g batt | grep -Eo '[0-9]+%' | head -1 | tr -d '%'", function(out)
-      set_battery(tonumber(out:match("%d+")) or 0)
-    end)
-    return
-  end
-  set_battery(pct)
+battery:subscribe({ "forced", "routine", "battery_change", "power_source_change" }, function()
+  mac.battery(function(level, charging)
+    set_battery(level)
+    if charging then battery:set({ icon = { string = "\u{F0084}" } }) end
+  end)
 end)
 
 sbar.add("item", "tokyonight.pad2", { position = "right", width = 10 })
@@ -53,6 +52,8 @@ volume:subscribe("volume_change", function(env)
   volume:set({ icon = { string = glyph }, label = { string = level .. "%" } })
 end)
 
+volume:set({ click_script = mac.SOUND_SETTINGS })
+mac.volume_scroll(volume)
 sbar.trigger("volume_change")
 
 sbar.add("item", "tokyonight.pad3", { position = "right", width = 10 })

@@ -23,6 +23,13 @@ scripts/ybar-theme install <git-url>   # add a community theme
 | **dracula** | `examples/dracula` | [Dracula](https://draculatheme.com) colorful blocks — every module its own bright rounded background. |
 | **rose-pine** | `examples/rose-pine` | [Rosé Pine](https://rosepinetheme.com) whisper-minimal: workspace dots, lowercase text, zero backgrounds. |
 
+All shipped themes are macOS-tuned: they survive native-fullscreen Spaces
+(`fullscreen_show`), auto-detect the notch (`notch_width = 0`, centered
+content uses the `q`/`e` cursors so it flanks the housing), show charging
+state, and their modules are interactive — scroll the volume module to
+adjust it, click volume/battery/wifi for the matching Settings pane, click
+the clock for Calendar (`helpers/mac.lua` has the shared pieces).
+
 ## Writing a theme
 
 Start from `examples/darxk` — it is the smallest complete Lua theme

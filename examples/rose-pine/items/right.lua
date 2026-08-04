@@ -1,4 +1,5 @@
 local colors = require("colors")
+local mac = require("helpers.mac")
 
 -- Right side, rightmost first: clock, battery, volume, wifi. Bare glyphs
 -- and quiet text only — no capsules, wide breathing room.
@@ -6,6 +7,7 @@ local colors = require("colors")
 -- Clock (rightmost): gold time, nothing else.
 local clock = sbar.add("item", "rosepine.clock", {
   position = "right",
+  click_script = mac.CALENDAR,
   update_freq = 20,
   icon = { drawing = false },
   label = { color = colors.gold },
@@ -27,6 +29,7 @@ end
 
 local battery = sbar.add("item", "rosepine.battery", {
   position = "right",
+  click_script = mac.BATTERY_SETTINGS,
   icon = { string = "\u{F0079}", color = colors.foam },
   label = { color = colors.muted },
 })
@@ -36,15 +39,11 @@ local function battery_render(level)
     label = { string = level .. "%" },
   })
 end
-battery:subscribe({ "forced", "battery_change", "power_source_change" }, function(env)
-  local pct = tonumber(env.INFO) or tonumber((env.INFO or ""):match("%d+")) or nil
-  if not pct then
-    sbar.exec("pmset -g batt | grep -Eo '[0-9]+%' | head -1 | tr -d '%'", function(out)
-      battery_render(tonumber(out:match("%d+")) or 0)
-    end)
-    return
-  end
-  battery_render(pct)
+battery:subscribe({ "forced", "routine", "battery_change", "power_source_change" }, function()
+  mac.battery(function(level, charging)
+    battery_render(level)
+    if charging then battery:set({ icon = { string = "\u{F0084}" } }) end
+  end)
 end)
 
 -- Volume: rose glyph, muted percent.
@@ -60,6 +59,8 @@ volume:subscribe("volume_change", function(env)
   volume:set({ icon = { string = glyph }, label = { string = level .. "%" } })
 end)
 
+volume:set({ click_script = mac.SOUND_SETTINGS })
+mac.volume_scroll(volume)
 sbar.trigger("volume_change")
 
 -- Wifi: a single iris glyph, no label ever.
