@@ -1,6 +1,6 @@
 -- Circular spinner: the engine's built-in solid-arc image ("spinner", a
 -- continuous round-capped ring) spun via image.rotation (rasterized per
--- 30° step, atlas-cached — 12 frames total).
+-- 12° step, atlas-cached — 30 frames total, ~25fps).
 -- attach(item, opts{size=13, align="r"}) -> { start = fn, stop = fn }.
 local M = {}
 
@@ -13,9 +13,9 @@ function M.attach(item, opts)
 
   local function tick()
     if not running then return end
-    angle = (angle + 30) % 360
+    angle = (angle + 12) % 360
     item:set({ image = { rotation = angle } })
-    sbar.delay(0.08, tick)
+    sbar.delay(0.04, tick)
   end
 
   return {

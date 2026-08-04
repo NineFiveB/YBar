@@ -40,7 +40,7 @@ local claude_padding = sbar.add("item", "widgets.claude.padding", {
 })
 
 -- Circular spinner beside the count while any session is streaming.
-local spinner = require("helpers.spinner").attach(claude, { size = 12 })
+local spinner = require("helpers.spinner").attach(claude, { size = 12, padding_right = 7 })
 
 local function refresh()
   sbar.exec("'" .. probe:gsub("'", "'\\''") .. "'", function(out)

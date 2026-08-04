@@ -27,8 +27,6 @@ local cal = sbar.add("item", "calendar", {
   label = {
     color = colors.white,
     padding_right = 8,
-    width = 75,
-    align = "right",
     font = { family = settings.font.numbers, style = settings.font.style_map["Regular"] },
   },
   position = "right",
@@ -333,6 +331,11 @@ cal:subscribe("mouse.clicked", toggle_calendar_popup)
 cal:subscribe("mouse.exited.global", hide_calendar_popup)
 
 cal:subscribe({ "forced", "routine", "system_woke" }, function()
-  cal:set({ icon = os.date("%a. %d %b."), label = os.date("%I:%M %p") })
+  -- Native menu bar clock format: "Mon Aug 3" + "7:50 PM" (no dots, day
+  -- and hour without leading zeros).
+  cal:set({
+    icon = os.date("%a %b ") .. tostring(os.date("*t").day),
+    label = (os.date("%I:%M %p"):gsub("^0", "", 1)),
+  })
   fetch_calendar_events()
 end)
