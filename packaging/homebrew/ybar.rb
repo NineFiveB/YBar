@@ -10,7 +10,7 @@ class Ybar < Formula
   # Placeholder until v0.1.0 is tagged. This is the SOURCE tarball's hash
   # (curl -L <url above> | shasum -a 256) — NOT the app-zip hash that
   # `make release` prints, which is a different, machine-signed artifact.
-  sha256 "TBD-set-on-release"
+  sha256 "0019dfc4b32d63c1392aa264aed2253c1e0c2fb09216f8e2cc269bbfb8bb49b5"
   license "GPL-3.0-only"
   head "https://github.com/NineFiveB/YBar.git", branch: "main"
 
