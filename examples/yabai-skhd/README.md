@@ -84,6 +84,29 @@ update, check the upstream yabai repository's issue tracker for your build
 number; community forks sometimes carry offsets for beta builds before
 they land upstream.
 
+**A working SA does not imply a working yabai.** The offsets only govern
+the Dock injection. Separately, yabai tracks which windows are on which
+space through private SkyLight APIs, and that tracking can break on a new
+macOS independently. Tested on macOS 27 beta (build 26A5388g): with the SA
+correctly loaded, `space --focus`, `--create` and `--destroy` all worked,
+but *tiling did not* — every window reported `is-visible: false` even on
+the focused space, and yabai only arranges windows it believes are
+visible, so a `bsp` space never laid anything out. Symptom: spaces switch
+fine, windows stay overlapped, and no amount of `--balance` or layout
+cycling helps.
+
+Worth checking before concluding a beta is usable:
+
+```
+yabai -m query --spaces  | python3 -c 'import json,sys; print([(s["index"], s["is-visible"]) for s in json.load(sys.stdin)])'
+yabai -m query --windows | python3 -c 'import json,sys; w=json.load(sys.stdin); print(sum(x["is-visible"] for x in w), "of", len(w), "visible")'
+```
+
+If the focused space says `is-visible: true` while none of its windows do,
+window tracking is broken on that build and tiling will not work. YBar's
+own space pills keep working regardless — they only read
+`yabai -m query --spaces`, which stays accurate.
+
 ## Verify your setup
 
 ```
