@@ -1,5 +1,5 @@
 {
-  "$comment": "Community theme registry — ybar-theme install <url>. PRs welcome; tag your repo with the ybar-theme GitHub topic.",
+  "$comment": "Community theme registry \u2014 ybar-theme install <url>. PRs welcome; tag your repo with the ybar-theme GitHub topic.",
   "themes": [
     {
       "name": "sketchybar-glass",
@@ -9,7 +9,7 @@
     },
     {
       "name": "darxk",
-      "description": "Catppuccin capsules — replication of 00Darxk/dotfiles Waybar",
+      "description": "Catppuccin capsules \u2014 replication of 00Darxk/dotfiles Waybar",
       "author": "YSuite (after 00Darxk)",
       "path": "examples/darxk"
     },
@@ -24,6 +24,36 @@
       "description": "Minimal declarative JSONC bar",
       "author": "YSuite",
       "path": "examples/jsonc-demo"
+    },
+    {
+      "name": "nord",
+      "description": "Flat opaque Nord strip - frost icons, aurora accents, thin separators",
+      "author": "YSuite (palette: Arctic Ice Studio)",
+      "path": "examples/nord"
+    },
+    {
+      "name": "gruvbox",
+      "description": "Retro powerline segments - colored blocks joined by arrows",
+      "author": "YSuite (palette: Pavel Pertsev)",
+      "path": "examples/gruvbox"
+    },
+    {
+      "name": "tokyonight",
+      "description": "Floating rounded island bar - Tokyo Night blues and purples",
+      "author": "YSuite (palette: enkia / folke)",
+      "path": "examples/tokyonight"
+    },
+    {
+      "name": "dracula",
+      "description": "Colorful blocks - every module its own bright rounded background",
+      "author": "YSuite (palette: Dracula Theme)",
+      "path": "examples/dracula"
+    },
+    {
+      "name": "rose-pine",
+      "description": "Airy minimal - workspace dots, quiet lowercase text, no backgrounds",
+      "author": "YSuite (palette: Rose Pine)",
+      "path": "examples/rose-pine"
     }
   ]
 }

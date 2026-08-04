@@ -19,7 +19,7 @@ local function separator(name, fg, bg)
     icon = {
       string = ARROW,
       color = fg,
-      font = { family = FONT, style = "Regular", size = 25.0 },
+      font = { family = "Symbols Nerd Font", style = "Regular", size = 22.0 },
       padding_left = 0,
       padding_right = 0,
     },

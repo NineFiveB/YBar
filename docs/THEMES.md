@@ -17,6 +17,11 @@ scripts/ybar-theme install <git-url>   # add a community theme
 | **darxk** | `examples/darxk` | Replication of [00Darxk/dotfiles](https://github.com/00Darxk/dotfiles) Waybar: translucent dark bar, segmented rounded capsules with Catppuccin accents, inverted light pills for active workspace and window title, brew-updates + GitHub-notifications modules. |
 | **sketchybar-port** | `examples/sketchybar-port` | The full sketchybar-setup port in its original styling. |
 | **jsonc-demo** | `examples/jsonc-demo` | Minimal declarative JSONC config — clock and battery, no Lua. |
+| **nord** | `examples/nord` | Flat opaque [Nord](https://nordtheme.com) strip: frost icons, aurora battery colors, thin separators, no pills. |
+| **gruvbox** | `examples/gruvbox` | Retro powerline: [gruvbox](https://github.com/morhetz/gruvbox) colored segments joined by arrow glyphs. |
+| **tokyonight** | `examples/tokyonight` | Floating rounded island in [Tokyo Night](https://github.com/folke/tokyonight.nvim) blues and purples. |
+| **dracula** | `examples/dracula` | [Dracula](https://draculatheme.com) colorful blocks — every module its own bright rounded background. |
+| **rose-pine** | `examples/rose-pine` | [Rosé Pine](https://rosepinetheme.com) whisper-minimal: workspace dots, lowercase text, zero backgrounds. |
 
 ## Writing a theme
 
