@@ -7,10 +7,10 @@ class Ybar < Formula
   desc "Metal-rendered, sketchybar-compatible macOS status bar"
   homepage "https://github.com/AltimG/YBar"
   url "https://github.com/AltimG/YBar/archive/refs/tags/v0.1.0.tar.gz"
-  # Placeholder until v0.1.0 is tagged. This is the SOURCE tarball's hash
-  # (curl -L <url above> | shasum -a 256) — NOT the app-zip hash that
-  # `make release` prints, which is a different, machine-signed artifact.
-  sha256 "0019dfc4b32d63c1392aa264aed2253c1e0c2fb09216f8e2cc269bbfb8bb49b5"
+  # SOURCE tarball hash (curl -L <url above> | shasum -a 256) - NOT the
+  # app-zip hash that `make release` prints, which is a different,
+  # machine-signed artifact. Regenerate on every new tag.
+  sha256 "88bf58485b702f9d4f1db7d618728bd04457693594696ae0bc1e79fe9db9693c"
   license "GPL-3.0-only"
   head "https://github.com/AltimG/YBar.git", branch: "main"
 
