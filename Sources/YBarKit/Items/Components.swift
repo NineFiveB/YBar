@@ -109,6 +109,28 @@ public final class ImageState {
         return cachedImage
     }
 
+    /// Solid arc on a 32pt canvas, white, round caps — line width scales
+    /// with the display size at raster time via aspect-fit.
+    static func arcImage(sweepDegrees: Float) -> NSImage {
+        let canvas = CGSize(width: 32, height: 32)
+        return NSImage(size: canvas, flipped: false) { rect in
+            guard let context = NSGraphicsContext.current?.cgContext else { return false }
+            let lineWidth: CGFloat = 4
+            let radius = (min(rect.width, rect.height) - lineWidth) / 2
+            let start = CGFloat.pi / 2
+            let end = start - CGFloat(sweepDegrees) * .pi / 180
+            let path = CGMutablePath()
+            path.addArc(center: CGPoint(x: rect.midX, y: rect.midY), radius: radius,
+                        startAngle: start, endAngle: end, clockwise: true)
+            context.setStrokeColor(NSColor.white.cgColor)
+            context.setLineWidth(lineWidth)
+            context.setLineCap(.round)
+            context.addPath(path)
+            context.strokePath()
+            return true
+        }
+    }
+
     /// Redraw rotated about the center on the same square canvas (corners of
     /// non-square-ish art may clip; symbol glyphs carry enough padding).
     static func rotated(_ image: NSImage, degrees: Float) -> NSImage {
@@ -129,6 +151,13 @@ public final class ImageState {
 
     private static func load(source: String) -> NSImage? {
         guard !source.isEmpty else { return nil }
+        if source == "spinner" || source.hasPrefix("spinner.") {
+            // Built-in solid-arc spinner: a continuous round-capped ring arc
+            // (spin it via image.rotation). Optional sweep in degrees:
+            // "spinner.270".
+            let sweep = Float(source.split(separator: ".").last.map(String.init) ?? "") ?? 300
+            return arcImage(sweepDegrees: min(max(sweep, 30), 350))
+        }
         if source.hasPrefix("sf.") {
             // SF symbol by NAME — immune to the PUA codepoint drift between
             // SF releases. Rendered white for dark-theme rows.

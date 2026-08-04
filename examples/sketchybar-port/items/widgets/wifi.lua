@@ -120,16 +120,13 @@ local function add_section_header(title)
       string = title,
       color = colors.white,
       font = { size = 13, style = settings.font.style_map["Bold"] },
-      width = popup_width / 2,
       padding_left = inset,
     },
-    label = {
-      align = "right",
-      string = "",
-      color = colors.grey,
-      width = popup_width / 2,
-      padding_right = inset,
-    },
+    -- No label slot: the scan spinner (image, align=r) trails the title
+    -- directly; a fixed half-width label would push it past the row edge.
+    label = { drawing = false },
+    -- Content is title+spinner only now; anchor it left like Settings.
+    align = "left",
     padding_top = 6,
   })
 end

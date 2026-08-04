@@ -1,5 +1,6 @@
--- Circular spinner: the SF progress.indicator symbol spun via the engine's
--- image.rotation (rasterized per 30° step, atlas-cached — 12 frames total).
+-- Circular spinner: the engine's built-in solid-arc image ("spinner", a
+-- continuous round-capped ring) spun via image.rotation (rasterized per
+-- 30° step, atlas-cached — 12 frames total).
 -- attach(item, opts{size=13, align="r"}) -> { start = fn, stop = fn }.
 local M = {}
 
@@ -23,11 +24,13 @@ function M.attach(item, opts)
       running = true
       angle = 0
       item:set({ image = {
-        string = "sf.progress.indicator",
+        string = "spinner",
         size = size,
         align = align,
         rotation = 0,
         drawing = true,
+        padding_left = opts.padding_left or 5,
+        padding_right = opts.padding_right or 0,
       } })
       tick()
     end,

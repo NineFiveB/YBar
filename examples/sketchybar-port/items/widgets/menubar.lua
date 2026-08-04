@@ -52,16 +52,11 @@ local header = sbar.add("item", {
     align = "left",
     string = "Background",
     font = { size = 14, style = settings.font.style_map["Bold"] },
-    width = popup_width / 2,
     padding_left = inset,
   },
-  label = {
-    align = "right",
-    string = "",
-    color = colors.grey,
-    width = popup_width / 2,
-    padding_right = inset,
-  },
+  -- No label slot: the refresh spinner (image, align=r) trails the title.
+  label = { drawing = false },
+  align = "left",
   background = { height = 2, color = colors.grey, y_offset = -15 },
 })
 
@@ -140,18 +135,7 @@ local show_hidden = false
 local no_access = false
 local refreshing = false
 
-local spinner_frames = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
-local spinner_index = 0
-
-local function spin()
-  if not refreshing then
-    header:set({ label = { string = "" } })
-    return
-  end
-  spinner_index = spinner_index % #spinner_frames + 1
-  header:set({ label = { string = spinner_frames[spinner_index] } })
-  sbar.delay(0.1, spin)
-end
+local spinner = require("helpers.spinner").attach(header)
 
 local function load_hidden()
   hidden_set = {}
@@ -225,9 +209,10 @@ end
 
 local function refresh()
   refreshing = true
-  spin()
+  spinner.start()
   sbar.exec("'" .. helper:gsub("'", "'\\''") .. "' list 2>/dev/null", function(out)
     refreshing = false
+    spinner.stop()
     no_access = out:match("NOAX") ~= nil
     if not no_access then
       items_cache = {}
