@@ -19,6 +19,9 @@ local cal = sbar.add("item", "calendar", {
   icon = {
     color = colors.white,
     padding_left = 8,
+    -- +1: the icon part is ink-centered and the "g" descender in "Aug"
+    -- drags the date a pixel below the time's cap line.
+    y_offset = 1,
     font = {
       style = settings.font.style_map["Regular"],
       size = 13.0,   -- same size as the time label
