@@ -467,8 +467,6 @@ public enum PropertySetter {
             item[keyPath: base.appending(path: \TextPart.align)] = first
             ctx.invalidate()
             return nil
-        case "scroll_duration":
-            return nil
         case "background":
             return setBackground(item, base.appending(path: \TextPart.background),
                                  "\(prefix).background", rest, value, ctx)
@@ -577,9 +575,6 @@ public enum PropertySetter {
             guard let flag = parseBool(value) else { return "[!] invalid boolean: \(value)" }
             item[keyPath: base.appending(path: \BackgroundStyle.glass)] = flag
             ctx.invalidate()
-            return nil
-        case "image", "clip":
-            // Background images / bar clipping are not in YBar v1; ignore quietly.
             return nil
         case "gradient_color":
             guard let color = YColor.parse(value) else { return "[!] invalid color: \(value)" }
