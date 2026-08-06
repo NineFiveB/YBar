@@ -315,9 +315,50 @@ public final class BarManager {
             return store.items.first { $0.id == itemID }
         }
         switch info.kind {
+        case .down:
+            // Any event from a surface proves the pointer is inside it. The
+            // tracking-area mouseEntered is NOT a reliable precursor — a
+            // warped cursor (synthetic clicks, cliclick-style automation)
+            // delivers the previous surface's exit but can land its press
+            // BEFORE this popup's enter, and the global-exit debounce would
+            // then fire mid-interaction, tearing the popup down between
+            // mouse-down and mouse-up.
+            noteSurfaceEntered(ObjectIdentifier(popup))
+            // Popup members are laid out by the same emit path as bar items,
+            // so the shared slider drag machinery works verbatim — only the
+            // frame source differs. No closeAutoClosePopups here: a press
+            // inside a popup must never dismiss it.
+            if let item = member(at: info.point), item.slider != nil {
+                draggingSliderID = item.id
+                onSliderDragStarted?(item)
+                updateSlider(item: item, localX: info.point.x, frames: popup.itemFrames)
+            }
+        case .dragged:
+            if let id = draggingSliderID,
+               let item = store.items.first(where: { $0.id == id }) {
+                item.slider?.isDragged = true
+                updateSlider(item: item, localX: info.point.x, frames: popup.itemFrames)
+            }
         case .clicked:
+            if let id = draggingSliderID,
+               let item = store.items.first(where: { $0.id == id }),
+               let slider = item.slider {
+                draggingSliderID = nil
+                slider.isDragged = false
+                updateSlider(item: item, localX: info.point.x, frames: popup.itemFrames)
+                onSliderChanged?(item, slider.percentage)
+                // A drag can end with the pointer outside every surface (the
+                // press view keeps receiving events); the exit that fired
+                // mid-drag was deferred, so re-check now.
+                scheduleGlobalExitCheck()
+                return
+            }
             if let item = member(at: info.point) {
                 onItemClicked?(item, info)
+            }
+        case .scrolled:
+            if let item = member(at: info.point) {
+                onItemScrolled?(item, info.scrollDelta, info.modifier)
             }
         case .moved:
             noteSurfaceEntered(ObjectIdentifier(popup))
@@ -342,8 +383,6 @@ public final class BarManager {
             }
             popup.hoveredItemID = nil
             scheduleGlobalExitCheck()
-        default:
-            break
         }
     }
 
@@ -530,6 +569,9 @@ public final class BarManager {
     private func handleMouse(_ info: MouseEventInfo, on surface: BarSurface) {
         switch info.kind {
         case .down:
+            // A press proves the pointer is inside (see the popup handler's
+            // note on warped cursors outrunning tracking-area enters).
+            noteSurfaceEntered(ObjectIdentifier(surface))
             let hit = hitTest(point: info.point, on: surface)
             // A press anywhere that is not an open popup's host dismisses
             // auto-close popups (host presses defer to their toggle scripts).
@@ -537,13 +579,13 @@ public final class BarManager {
             if let item = hit, item.slider != nil {
                 draggingSliderID = item.id
                 onSliderDragStarted?(item)
-                updateSlider(item: item, localX: info.point.x, on: surface)
+                updateSlider(item: item, localX: info.point.x, frames: surface.itemFrames)
             }
         case .dragged:
             if let id = draggingSliderID,
                let item = store.items.first(where: { $0.id == id }) {
                 item.slider?.isDragged = true
-                updateSlider(item: item, localX: info.point.x, on: surface)
+                updateSlider(item: item, localX: info.point.x, frames: surface.itemFrames)
             }
         case .clicked:
             if let id = draggingSliderID,
@@ -551,8 +593,9 @@ public final class BarManager {
                let slider = item.slider {
                 draggingSliderID = nil
                 slider.isDragged = false
-                updateSlider(item: item, localX: info.point.x, on: surface)
+                updateSlider(item: item, localX: info.point.x, frames: surface.itemFrames)
                 onSliderChanged?(item, slider.percentage)
+                scheduleGlobalExitCheck()
                 return
             }
             if let item = hitTest(point: info.point, on: surface) {
@@ -580,21 +623,47 @@ public final class BarManager {
     }
 
     /// Debounced: crossing from the bar into its popup must not fire a global
-    /// exit — only the pointer leaving every YBar window does.
+    /// exit — only the pointer leaving every YBar window does. A slider drag
+    /// also defers it: the press view keeps receiving events while the
+    /// pointer is dragged beyond every surface, and a global exit there would
+    /// let scripts close the popup mid-drag and eat the release (the drag-end
+    /// branches re-schedule the check).
+    ///
+    /// The tracked entered-set alone is not trustworthy: a warped cursor
+    /// (synthetic clicks, automation tools) lands inside a surface without
+    /// its tracking-area enter ever firing, so the set can read empty while
+    /// the pointer factually sits in a popup — and scripts would close that
+    /// popup out from under it. Reality wins: never fire while the pointer
+    /// is physically inside any YBar window frame.
     private func scheduleGlobalExitCheck() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-            guard let self, self.pointerInsideSurfaces.isEmpty else { return }
+            guard let self, self.pointerInsideSurfaces.isEmpty,
+                  self.draggingSliderID == nil,
+                  !self.pointerInsideAnySurfaceFrame() else { return }
             self.onGlobalMouseExit?()
         }
     }
 
-    /// Map a bar-local x to the slider's percentage. Uses the event surface's
-    /// own frame snapshot (the shared Item.frame holds whichever surface
-    /// rendered last — wrong on multi-display) and mirrors the emit-side
-    /// fixed-width alignment slack.
-    private func updateSlider(item: Item, localX: CGFloat, on surface: BarSurface) {
+    /// Physical containment test against live window frames (AppKit global,
+    /// y-up — same space as NSEvent.mouseLocation).
+    private func pointerInsideAnySurfaceFrame() -> Bool {
+        let point = NSEvent.mouseLocation
+        if surfaces.contains(where: { $0.panelFrame.contains(point) }) { return true }
+        return popupSurfaces.values.contains {
+            $0.hostView.window?.frame.contains(point) ?? false
+        }
+    }
+
+    /// Map a surface-local x to the slider's percentage. Takes the event
+    /// surface's own frame snapshot (the shared Item.frame holds whichever
+    /// surface rendered last — wrong on multi-display), bar or popup: both
+    /// record frames as content minus paddingLeft from the same emit path,
+    /// so one trackX computation mirrors the emit-side fixed-width slack for
+    /// either surface kind.
+    private func updateSlider(item: Item, localX: CGFloat,
+                              frames: [(itemID: Int, frame: CGRect)]) {
         guard let slider = item.slider,
-              let frame = surface.itemFrames.first(where: { $0.itemID == item.id })?.frame,
+              let frame = frames.first(where: { $0.itemID == item.id })?.frame,
               frame != .zero
         else { return }
         var trackX = frame.minX + CGFloat(item.paddingLeft)
