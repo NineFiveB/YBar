@@ -44,7 +44,7 @@ ybar --query hello                    # live state as JSON
 - Per-setup notch handling: the `q`/`e` dead zone exists only on physically notched displays (`notch_width=0` auto-detects the housing width), `notch_offset` drops the bar below the camera on notched screens only, `notch_display_height` gives them their own bar height
 
 **Components**
-- Brackets, anchored popups (auto-close, alignment), graphs, draggable sliders
+- Brackets, anchored popups (auto-close, alignment), graphs, draggable sliders — interactive on the bar and inside popups (click + drag deliver `PERCENTAGE`)
 - **Alias items** — live ScreenCaptureKit captures of other apps' menu bar items (`--add alias "App[,Window]"`)
 - **Marquee text** (`scroll_texts`), **hover tooltips**, `background.image` + `background.clip` cutouts, **idle inhibitor**
 - **Arc gauges** — speedometer-style rings with the label centered in the dial (`gauge.*`)
@@ -54,7 +54,7 @@ ybar --query hello                    # live state as JSON
 **Scripting & events**
 - Embedded **Lua 5.4** config runtime (`ybarrc.lua`, in-process, Lua-first event dispatch) alongside the shell/CLI contract (`NAME/SENDER/INFO/BUTTON/MODIFIER` env)
 - Message-scoped `--animate <curve> <frames>` (`linear sin quadratic tanh exp circ bounce overshoot`), per-channel color lerp in linear space, `width=dynamic` sentinel animation
-- Events: mouse enter/exit/click/scroll (+ global exit), `front_app_switched`, `space_change`, wake/sleep, `power_source_change`, `volume_change`, `wifi_change`, `system_stats`, **`modifier_change`** (live ⌥-held UX), **`app_launched` / `app_terminated`**, **`media_change`** (Music/Spotify now-playing via distributed notifications — no private MediaRemote)
+- Events: mouse enter/exit/click/scroll (+ global exit), `front_app_switched`, `space_change`, wake/sleep, `power_source_change`, `volume_change`, `wifi_change`, `system_stats`, **`modifier_change`** (live ⌥-held UX), **`app_launched` / `app_terminated`**, **`media_change`** (Music/Spotify now-playing via distributed notifications — no private MediaRemote; state seeded at startup so a bar launched mid-song shows it immediately)
 - Native providers: NSWorkspace, IOKit battery, CoreAudio volume, NWPathMonitor, in-process CPU/memory stats
 - AeroSpace integration: the workspace-change hook can invoke `ybar --trigger` directly (the CLI folds `$AEROSPACE_FOCUSED_WORKSPACE` from its environment), with debounced, generation-guarded refreshes for rapid switching
 
@@ -72,7 +72,7 @@ See [docs/INSTALL.md](docs/INSTALL.md) for the release-zip route, first-run priv
 
 ## Planned
 
-Space→item association (SkyLight) · per-display `hidden` · `font.features` · `popup.topmost` · media artwork in the now-playing popup · taskbar (window list) example widget.
+Space→item association (SkyLight) · per-display `hidden` · `font.features` · `popup.topmost` · taskbar (window list) example widget.
 
 ## Build
 
