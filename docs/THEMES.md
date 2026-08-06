@@ -13,7 +13,7 @@ scripts/ybar-theme install <git-url>   # add a community theme
 
 | Theme | Directory | Look |
 |---|---|---|
-| **sketchybar-glass** | `examples/sketchybar-glass` | Liquid Glass: monochrome near-black bar, real `NSGlassEffectView` pills and popups, full widget suite (wifi/bluetooth/battery/system monitor/calendar/menus/media/Claude). The flagship. |
+| **sketchybar-glass** | `examples/sketchybar-glass` | Liquid Glass: monochrome near-black bar, real `NSGlassEffectView` pills and popups, full widget suite (wifi/bluetooth/battery/system monitor/calendar/menus/Claude, and a now-playing popup with album artwork, seek + volume sliders, and transport controls). The flagship. |
 | **darxk** | `examples/darxk` | Replication of [00Darxk/dotfiles](https://github.com/00Darxk/dotfiles) Waybar: translucent dark bar, segmented rounded capsules with Catppuccin accents, inverted light pills for active workspace and window title, brew-updates + GitHub-notifications modules. |
 | **sketchybar-port** | `examples/sketchybar-port` | The full sketchybar-setup port in its original styling. |
 | **jsonc-demo** | `examples/jsonc-demo` | Minimal declarative JSONC config — clock and battery, no Lua. |
