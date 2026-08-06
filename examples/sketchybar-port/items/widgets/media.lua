@@ -27,11 +27,13 @@ local glyph_repeat = "sf:repeat"
 local glyph_repeat_one = "sf:repeat.1"
 
 -- ── Bar pill (unchanged visuals) ───────────────────────────────────────────
+-- The pill is ALWAYS present: icon-only while idle (nothing playing, or the
+-- player quit), expanding to icon + marquee title while playing/paused.
+local label_w = 150
 local media = sbar.add("item", "widgets.media", {
   position = "right",
-  drawing = false,
-  -- updates=true: the default when_shown never delivers media_change to the
-  -- initially-hidden pill, so nothing could ever reveal it.
+  -- updates=true: media_change must reach the pill even before any playback
+  -- has ever styled it.
   updates = true,
   scroll_texts = true,
   icon = {
@@ -40,8 +42,11 @@ local media = sbar.add("item", "widgets.media", {
     padding_left = 8,
     padding_right = 2,
   },
+  -- Collapsed idle label: width 0 AND drawing off — the emit side reserves
+  -- fixed part widths even for hidden parts, so both must toggle together.
   label = {
-    width = 150,
+    width = 0,
+    drawing = false,
     color = colors.white,
     padding_left = 2,
     padding_right = 8,
@@ -72,7 +77,6 @@ local popup_pos = "popup." .. media_bracket.name
 local media_padding = sbar.add("item", "widgets.media.padding", {
   position = "right",
   width = settings.group_paddings,
-  drawing = false,
 })
 
 -- ── Popup rows ─────────────────────────────────────────────────────────────
@@ -576,6 +580,8 @@ local function hide_popup()
 end
 
 local function toggle_popup(env)
+  -- Idle pill (icon only, no player context): nothing to show or control.
+  if not current_app then return end
   -- Right-click keeps the pill's old affordance: toggle play/pause.
   if env and env.BUTTON == "right" then
     if current_app then sbar.exec(app_cmd(current_app, "playpause")) end
@@ -601,15 +607,13 @@ media:subscribe("media_change", function(env)
   local album = env.MEDIA_ALBUM or ""
   local title = env.MEDIA_TITLE or ""
 
-  -- Pill: unchanged from the pre-popup widget.
   local text = (artist ~= "" and (artist .. " — ") or "") .. title
   local color = playing and colors.white or colors.grey
   media:set({
-    drawing = show,
     icon = { color = color },
-    label = { string = text, color = color },
+    label = { drawing = show, width = show and label_w or 0,
+              string = text, color = color },
   })
-  media_padding:set({ drawing = show })
 
   if not show then
     current_app, current_key, current_art_path = nil, nil, nil
@@ -667,8 +671,10 @@ end)
 media:subscribe("app_terminated", function(env)
   if current_app and env.INFO == current_app then
     current_app, current_key, current_art_path = nil, nil, nil
-    media:set({ drawing = false })
-    media_padding:set({ drawing = false })
+    media:set({
+      icon = { color = colors.grey },
+      label = { drawing = false, width = 0 },
+    })
     hide_popup()
   end
 end)
