@@ -1,3 +1,7 @@
+# THIS FILE IS THE SOURCE OF TRUTH — github.com/AltimG/homebrew-ybar mirrors
+# it verbatim (Formula/ybar.rb there); copy it over on every release, after
+# updating the url tag + sha256 below.
+#
 # A formula, not a cask: YBar has no Developer ID, so a downloaded binary
 # arrives quarantined with an untrusted signature and Gatekeeper refuses it.
 # Building from source and signing ad-hoc on the installing machine sidesteps

@@ -64,9 +64,12 @@ ybar --query hello                    # live state as JSON
 ## Install
 
 ```sh
-brew tap AltimG/ybar https://github.com/AltimG/YBar.git
-brew install --HEAD ybar
+brew tap AltimG/ybar        # github.com/AltimG/homebrew-ybar
+brew install ybar           # latest tagged release; --HEAD builds current main
 ```
+
+(Recent Homebrew asks you to confirm trusting a third-party tap on first
+install — that prompt is expected; `brew trust AltimG/ybar` pre-approves it.)
 
 See [docs/INSTALL.md](docs/INSTALL.md) for the release-zip route, first-run privacy-permission walkthrough, stable local signing (keeps TCC grants across rebuilds), and login autostart.
 
