@@ -14,8 +14,10 @@
     {
       "name": "release",
       "inherits": "default",
+      "binaryDir": "${sourceDir}/build-release",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release"
+        "CMAKE_BUILD_TYPE": "Release",
+        "YBAR_BUILD_TESTS": "OFF"
       }
     }
   ],

@@ -10,9 +10,10 @@ add_executable(ybar_tests
   item_store_tests.cpp
   layout_tests.cpp
   property_setter_tests.cpp
+  socket_tests.cpp
   wire_format_tests.cpp
 )
-target_link_libraries(ybar_tests PRIVATE ybar_core Catch2::Catch2WithMain)
+target_link_libraries(ybar_tests PRIVATE ybar_win Catch2::Catch2WithMain)
 
 include(Catch)
 catch_discover_tests(ybar_tests)
