@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <sstream>
@@ -248,6 +249,24 @@ bool Renderer::render(const DisplayList& list, Surface& surfaceBase, GlyphAtlas*
     auto* context = impl_->context.Get();
     auto* device = impl_->device.Get();
     if (!surface.rtv) return false;
+
+    if (std::getenv("YBAR_DEBUG")) {
+        DXGI_SWAP_CHAIN_DESC1 desc{};
+        surface.swapChain->GetDesc1(&desc);
+        std::fprintf(stderr,
+                     "[ybar:render] surface=%dx%d buffer=%ux%u viewport=%.0fx%.0f quads=%zu "
+                     "glyphs=%zu",
+                     surface.width, surface.height, desc.Width, desc.Height,
+                     list.viewportSize.x, list.viewportSize.y, list.quads.size(),
+                     list.glyphs.size());
+        if (!list.glyphs.empty()) {
+            std::fprintf(stderr, " firstGlyph=(%.0f,%.0f) lastGlyph=(%.0f,%.0f)",
+                         list.glyphs.front().origin.x, list.glyphs.front().origin.y,
+                         list.glyphs.back().origin.x, list.glyphs.back().origin.y);
+        }
+        std::fprintf(stderr, "\n");
+        std::fflush(stderr);
+    }
 
     // Uniforms (b1, both stages).
     Uniforms uniforms;
