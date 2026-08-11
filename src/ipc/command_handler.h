@@ -17,6 +17,10 @@
 #include "model/item.h"
 #include "model/serialize.h"
 
+namespace ybar::anim {
+class AnimationScheduler;
+}
+
 namespace ybar::ipc {
 
 struct DaemonHooks {
