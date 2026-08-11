@@ -12,18 +12,26 @@ endif()
 
 option(YBAR_BUILD_TESTS "Build the Catch2 contract tests" ON)
 
+find_package(nlohmann_json CONFIG REQUIRED)
+
 # Platform-neutral engine code. Grows per docs/WINDOWS-PORT.md as milestones land.
 add_library(ybar_core
   src/anim/curves.cpp
+  src/events/event_bus.cpp
+  src/ipc/command_handler.cpp
   src/ipc/command_parser.cpp
   src/ipc/wire_format.cpp
+  src/model/bar_settings.cpp
   src/model/color.cpp
   src/model/font_spec.cpp
   src/model/item.cpp
+  src/model/layout.cpp
   src/model/property_setter.cpp
+  src/model/serialize.cpp
   src/model/style.cpp
 )
 target_include_directories(ybar_core PUBLIC src)
+target_link_libraries(ybar_core PUBLIC nlohmann_json::nlohmann_json)
 
 add_executable(ybar src/main.cpp)
 target_link_libraries(ybar PRIVATE ybar_core)
