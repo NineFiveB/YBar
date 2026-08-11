@@ -18,6 +18,10 @@ add_library(ybar_core
   src/ipc/command_parser.cpp
   src/ipc/wire_format.cpp
   src/model/color.cpp
+  src/model/font_spec.cpp
+  src/model/item.cpp
+  src/model/property_setter.cpp
+  src/model/style.cpp
 )
 target_include_directories(ybar_core PUBLIC src)
 
