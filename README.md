@@ -12,6 +12,14 @@ edits.
 > else is scaffolding. The authoritative design is
 > [docs/WINDOWS-PORT.md](docs/WINDOWS-PORT.md) — read it first.
 
+This lives on the **`windows` branch** of the YBar repository — an orphan
+branch with its own root history that never merges with `main`. Check it out
+next to the macOS tree with:
+
+```powershell
+git worktree add ..\ybar-win windows
+```
+
 ## Layout
 
 | Path | Contents | Spec |

@@ -2,9 +2,11 @@
 
 This document specifies **ybar-win**: a native C++ implementation of YBar for
 Windows 11 with first-class [komorebi](https://github.com/LGUG2Z/komorebi)
-integration. It lives in its **own repository** (working name
-`NineFiveB/ybar-win`); this spec is its founding document and stays in the YBar
-repo as the contract of record between the two implementations.
+integration. It lives on the **`windows` branch of the YBar repository** — an
+orphan branch with its own root history that never merges with `main`
+(different toolchain, CI, and release cadence), conveniently checked out
+side-by-side via `git worktree`. This spec is its founding document and also
+stays on `main` as the contract of record between the two implementations.
 
 It is written from a full dissection of the Swift codebase (every subsystem
 mapped, every Apple API inventoried), research into the Windows platform
@@ -46,7 +48,7 @@ adapter). Concretely:
 | # | Decision | Choice | Rationale |
 |---|---|---|---|
 | D1 | Language | **C++20**, MSVC, CMake + vcpkg | Native fit for COM/D3D; AtlasEngine/Terminal patterns lift near-verbatim; owner preference |
-| D2 | Repo | **Separate repository** `ybar-win`, same GitHub account | Different toolchain/CI/cadence; themes+examples copied in, contract doc shared |
+| D2 | Repo | **Orphan branch `windows`** in the YBar repo, worktree checkout | One repo/issue tracker; own root history so the two lines never merge; per-branch CI; themes+examples copied in, contract doc shared |
 | D3 | Renderer | **D3D11** + DXGI flip-model composition swap chain + **DirectComposition**; HLSL compiled at runtime via `D3DCompile` | Only clean per-pixel premultiplied-alpha path (`WS_EX_NOREDIRECTIONBITMAP`); preserves "no shader toolchain at build time" |
 | D4 | Text | **DirectWrite** full stack; **grayscale AA forced** | ClearType subpixel breaks the R8 coverage atlas and transparent composition |
 | D5 | WinRT/COM | **C++/WinRT** (GSMTC media) + **WIL** (COM lifetime) | Header-only, MS-maintained |
@@ -190,7 +192,9 @@ centered inside contributing zero width.
 
 ---
 
-## 4. Repository layout
+## 4. Branch layout
+
+Root of the `windows` branch (`git worktree add ..\ybar-win windows`):
 
 ```
 ybar-win/
