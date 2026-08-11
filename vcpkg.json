@@ -2,11 +2,8 @@
   "name": "ybar",
   "version": "0.1.0",
   "dependencies": [
+    "catch2",
     "nlohmann-json",
-    "wil",
-    {
-      "name": "catch2",
-      "version>=": "3.0.0"
-    }
+    "wil"
   ]
 }
