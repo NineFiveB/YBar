@@ -21,7 +21,17 @@ jobs:
         run: cmake --preset default
 
       - name: Build
-        run: cmake --build --preset default
+        shell: pwsh
+        run: |
+          cmake --build --preset default 2>&1 | Tee-Object -FilePath build.log
+          exit $LASTEXITCODE
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
 
       - name: Test
         run: ctest --preset default

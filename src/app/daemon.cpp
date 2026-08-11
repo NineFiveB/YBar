@@ -1,6 +1,8 @@
 #include "app/daemon.h"
 
 // clang-format off
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <winsock2.h>
 #include <windows.h>
 // clang-format on

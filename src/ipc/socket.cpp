@@ -1,6 +1,8 @@
 #include "ipc/socket.h"
 
 // clang-format off
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <winsock2.h>
 #include <afunix.h>
 #include <windows.h>
