@@ -387,6 +387,12 @@ keep macOS-identical gradients — a plain UNORM RTV visibly changes them.
 Recreate the RTV after every `ResizeBuffers`. Alpha mode is orthogonal:
 premultiplied alpha goes through the same sRGB encode.
 
+**DComp DPI gotcha (found live, W4)**: a composition target on a DPI-aware
+window composes in DIPs — the swap-chain content displays scaled by
+`windowDpi/96` (2× on a 200% monitor) even though every buffer/viewport value
+is physical. Counter-scale the root visual with a `96/windowDpi` transform so
+the physical-pixel buffer maps 1:1 to device pixels.
+
 ### 7.2 Damage model & pacing (behavior contract)
 
 DWM is a retained compositor: **no render loop at rest** — `setNeedsRender()`
