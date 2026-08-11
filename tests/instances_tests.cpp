@@ -1,6 +1,8 @@
 // GPU ABI stride checks — kept as runtime tests as well as static_asserts so
 // a compiler/packing regression names itself in CI output (spec 7.3).
 
+#include <cstddef>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include "render/instances.h"

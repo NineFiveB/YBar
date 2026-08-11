@@ -33,13 +33,21 @@ add_library(ybar_core
 target_include_directories(ybar_core PUBLIC src)
 target_link_libraries(ybar_core PUBLIC nlohmann_json::nlohmann_json)
 
-# Windows platform layer: transport, client role, daemon shell.
+# Windows platform layer: transport, client role, daemon shell, windowing,
+# and the D3D11/DirectWrite render stack.
 add_library(ybar_win
   src/app/client.cpp
   src/app/daemon.cpp
   src/ipc/socket.cpp
+  src/render/font_cache.cpp
+  src/render/glyph_atlas.cpp
+  src/render/renderer.cpp
+  src/render/scene_builder.cpp
+  src/win/bar_surface.cpp
+  src/win/display_manager.cpp
 )
-target_link_libraries(ybar_win PUBLIC ybar_core ws2_32)
+target_link_libraries(ybar_win PUBLIC ybar_core
+  ws2_32 d3d11 dxgi d3dcompiler dcomp dwrite shcore user32 gdi32)
 
 add_executable(ybar src/main.cpp)
 target_link_libraries(ybar PRIVATE ybar_win)

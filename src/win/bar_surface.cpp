@@ -1,0 +1,168 @@
+#include "win/bar_surface.h"
+
+// clang-format off
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <d3d11.h>
+#include <dxgi1_3.h>
+#include <dcomp.h>
+#include <wrl/client.h>
+// clang-format on
+
+#include <cmath>
+#include <cstdio>
+
+using Microsoft::WRL::ComPtr;
+
+namespace ybar::win {
+
+using ybar::model::BarLevel;
+using ybar::model::BarPosition;
+using ybar::model::BarSettings;
+
+namespace {
+
+constexpr wchar_t kBarClass[] = L"ybar.bar";
+
+LRESULT CALLBACK barWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+        case WM_NCHITTEST:
+            return HTCLIENT; // never draggable; full-frame input (spec 6)
+        case WM_MOUSEACTIVATE:
+            return MA_NOACTIVATE;
+        default:
+            return DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
+}
+
+void registerClassOnce() {
+    static bool registered = [] {
+        WNDCLASSW windowClass{};
+        windowClass.lpfnWndProc = barWindowProc;
+        windowClass.hInstance = GetModuleHandleW(nullptr);
+        windowClass.lpszClassName = kBarClass;
+        windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        return RegisterClassW(&windowClass) != 0;
+    }();
+    (void)registered;
+}
+
+} // namespace
+
+class BarSurfaceImpl {
+public:
+    HWND hwnd = nullptr;
+    MonitorInfo monitorInfo;
+    std::unique_ptr<ybar::render::Surface> surface;
+    ComPtr<IDCompositionDevice> compositionDevice;
+    ComPtr<IDCompositionTarget> target;
+    ComPtr<IDCompositionVisual> visual;
+    double logicalW = 0;
+    double logicalH = 0;
+
+    ~BarSurfaceImpl() {
+        if (hwnd) DestroyWindow(hwnd);
+    }
+
+    RECT frameFor(const BarSettings& settings) const {
+        const double scale = monitorInfo.scale;
+        const auto& mon = monitorInfo.frame;
+        const double margin = settings.margin * scale;
+        const double height = settings.height * scale;
+        const double yOffset = settings.yOffset * scale;
+        RECT rect;
+        rect.left = static_cast<LONG>(std::lround(mon.x + margin));
+        rect.right = static_cast<LONG>(std::lround(mon.maxX() - margin));
+        if (settings.position == BarPosition::Top) {
+            rect.top = static_cast<LONG>(std::lround(mon.y + yOffset));
+        } else {
+            rect.top = static_cast<LONG>(std::lround(mon.maxY() - height - yOffset));
+        }
+        rect.bottom = rect.top + static_cast<LONG>(std::lround(height));
+        return rect;
+    }
+};
+
+std::unique_ptr<BarSurface> BarSurface::create(ybar::render::Renderer& renderer,
+                                               const MonitorInfo& monitor,
+                                               const BarSettings& settings) {
+    registerClassOnce();
+    auto impl = std::make_unique<BarSurfaceImpl>();
+    impl->monitorInfo = monitor;
+
+    const RECT frame = impl->frameFor(settings);
+    const int widthPx = frame.right - frame.left;
+    const int heightPx = frame.bottom - frame.top;
+
+    DWORD exStyle = WS_EX_NOREDIRECTIONBITMAP | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+    if (settings.topmost != BarLevel::Off) exStyle |= WS_EX_TOPMOST;
+    impl->hwnd = CreateWindowExW(exStyle, kBarClass, L"ybar", WS_POPUP, frame.left, frame.top,
+                                 widthPx, heightPx, nullptr, nullptr,
+                                 GetModuleHandleW(nullptr), nullptr);
+    if (!impl->hwnd) {
+        std::fprintf(stderr, "[ybar] bar window creation failed\n");
+        return nullptr;
+    }
+
+    impl->surface = renderer.createSurface(widthPx, heightPx);
+    if (!impl->surface) return nullptr;
+
+    // DirectComposition: device -> target(hwnd) -> visual -> swap chain.
+    auto* d3dDevice = static_cast<ID3D11Device*>(nullptr);
+    {
+        // Recover the ID3D11Device from the renderer's swap chain.
+        auto* swapChain = static_cast<IDXGISwapChain1*>(impl->surface->compositionSurface());
+        ComPtr<ID3D11Device> device;
+        if (FAILED(swapChain->GetDevice(IID_PPV_ARGS(&device)))) return nullptr;
+        ComPtr<IDXGIDevice> dxgiDevice;
+        device.As(&dxgiDevice);
+        if (FAILED(DCompositionCreateDevice(dxgiDevice.Get(),
+                                            IID_PPV_ARGS(&impl->compositionDevice))))
+            return nullptr;
+        d3dDevice = device.Get();
+        (void)d3dDevice;
+    }
+    if (FAILED(impl->compositionDevice->CreateTargetForHwnd(impl->hwnd, TRUE, &impl->target)) ||
+        FAILED(impl->compositionDevice->CreateVisual(&impl->visual)))
+        return nullptr;
+    impl->visual->SetContent(static_cast<IDXGISwapChain1*>(impl->surface->compositionSurface()));
+    impl->target->SetRoot(impl->visual.Get());
+    impl->compositionDevice->Commit();
+
+    impl->logicalW = widthPx / monitor.scale;
+    impl->logicalH = heightPx / monitor.scale;
+
+    ShowWindow(impl->hwnd, settings.hidden ? SW_HIDE : SW_SHOWNOACTIVATE);
+    SetWindowPos(impl->hwnd,
+                 settings.topmost == BarLevel::Off ? HWND_BOTTOM : HWND_TOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+    std::unique_ptr<BarSurface> bar(new BarSurface());
+    bar->impl_ = std::move(impl);
+    return bar;
+}
+
+BarSurface::~BarSurface() = default;
+
+void BarSurface::applySettings(const BarSettings& settings) {
+    const RECT frame = impl_->frameFor(settings);
+    const int widthPx = frame.right - frame.left;
+    const int heightPx = frame.bottom - frame.top;
+    SetWindowPos(impl_->hwnd,
+                 settings.topmost == BarLevel::Off ? HWND_BOTTOM : HWND_TOPMOST, frame.left,
+                 frame.top, widthPx, heightPx, SWP_NOACTIVATE);
+    impl_->surface->resize(widthPx, heightPx);
+    impl_->logicalW = widthPx / impl_->monitorInfo.scale;
+    impl_->logicalH = heightPx / impl_->monitorInfo.scale;
+    ShowWindow(impl_->hwnd, settings.hidden ? SW_HIDE : SW_SHOWNOACTIVATE);
+    impl_->compositionDevice->Commit();
+}
+
+ybar::render::Surface& BarSurface::renderSurface() { return *impl_->surface; }
+const MonitorInfo& BarSurface::monitor() const { return impl_->monitorInfo; }
+double BarSurface::scale() const { return impl_->monitorInfo.scale; }
+double BarSurface::logicalWidth() const { return impl_->logicalW; }
+double BarSurface::logicalHeight() const { return impl_->logicalH; }
+
+} // namespace ybar::win
