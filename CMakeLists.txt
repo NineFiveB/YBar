@@ -39,7 +39,9 @@ target_link_libraries(ybar_core PUBLIC nlohmann_json::nlohmann_json)
 # and the D3D11/DirectWrite render stack.
 add_library(ybar_win
   src/app/client.cpp
+  src/app/config.cpp
   src/app/daemon.cpp
+  src/app/jsonc_config.cpp
   src/app/script_runner.cpp
   src/ipc/socket.cpp
   src/providers/komorebi.cpp

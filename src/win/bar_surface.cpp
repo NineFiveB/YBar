@@ -111,9 +111,17 @@ public:
 
 namespace {
 
+HWND g_broadcastTarget = nullptr;
+
 LRESULT CALLBACK barWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     auto* impl = reinterpret_cast<BarSurfaceImpl*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     switch (msg) {
+        case WM_POWERBROADCAST:
+        case WM_FONTCHANGE:
+            // Forward broadcasts to the daemon's message-only mailbox, which
+            // never receives them directly (spec 5 note).
+            if (g_broadcastTarget) PostMessageW(g_broadcastTarget, msg, wParam, lParam);
+            return msg == WM_POWERBROADCAST ? TRUE : 0;
         case WM_NCHITTEST:
             return HTCLIENT; // never draggable; full-frame input (spec 6)
         case WM_MOUSEACTIVATE:
@@ -267,6 +275,10 @@ void BarSurface::applySettings(const BarSettings& settings) {
 
 void BarSurface::setMouseHandler(std::function<void(const MouseEvent&)> handler) {
     impl_->onMouse = std::move(handler);
+}
+
+void BarSurface::setBroadcastTarget(void* messageWindow) {
+    g_broadcastTarget = static_cast<HWND>(messageWindow);
 }
 
 ybar::render::Surface& BarSurface::renderSurface() { return *impl_->surface; }

@@ -9,6 +9,7 @@ add_executable(ybar_tests
   font_spec_tests.cpp
   instances_tests.cpp
   item_store_tests.cpp
+  jsonc_config_tests.cpp
   layout_tests.cpp
   property_setter_tests.cpp
   scheduler_tests.cpp

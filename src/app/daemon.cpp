@@ -14,6 +14,8 @@
 #include <unordered_map>
 
 #include "anim/scheduler.h"
+#include "app/config.h"
+#include "app/jsonc_config.h"
 #include "app/script_runner.h"
 #include "events/event_bus.h"
 #include "ipc/command_handler.h"
@@ -46,6 +48,15 @@ void trace(const char* stage) {
 constexpr UINT kMsgIpcRequest = WM_APP + 1;
 constexpr UINT kMsgRender = WM_APP + 2;
 constexpr UINT kMsgKomorebi = WM_APP + 3;
+constexpr UINT kMsgReloadConfig = WM_APP + 4;
+constexpr UINT_PTR kStatsTimer = 5;
+
+// Power setting GUIDs (winnt.h declares them; define locally to avoid
+// link-time surprises with initguid ordering).
+constexpr GUID kGuidAcDcPowerSource = {
+    0x5d3e9a59, 0xe9d5, 0x4b00, {0xa6, 0xbd, 0xff, 0x34, 0xff, 0x51, 0x65, 0x48}};
+constexpr GUID kGuidBatteryPercentage = {
+    0xa7ad8041, 0xb45a, 0x4cae, {0x87, 0xa3, 0xee, 0xcb, 0xb4, 0x68, 0xa9, 0xe1}};
 constexpr UINT_PTR kRoutineTimer = 1;
 constexpr UINT_PTR kExitTimer = 2;
 constexpr UINT_PTR kRenderRetryTimer = 3;
@@ -87,6 +98,24 @@ struct DaemonState {
     bool animationTimerLive = false;
     int appliedOffsetPhysical = -1;
     int hoverItemId = -1; // targeted mouse.entered/exited tracking
+
+    // Config (spec 5).
+    std::string instance;
+    std::string explicitConfigPath;
+    std::string resolvedConfigPath;
+    Hotload hotload;
+
+    // Providers (spec 10): dedupe state.
+    std::string lastPowerSource;
+    int lastBatteryPercent = -1;
+    std::string lastFrontApp;
+    ULONGLONG statsPrevIdle = 0, statsPrevKernel = 0, statsPrevUser = 0;
+    bool statsArmed = false;
+
+    void executeConfig();
+    void publishPower(bool forced);
+    void publishFrontApp(bool forced);
+    void sampleStats();
 
     // On-demand animation clock: runs only while animations exist (spec 7.2).
     void syncAnimationTimer() {
@@ -190,8 +219,35 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                 g_state->scheduler.tick(monotonicSeconds());
                 g_state->renderAll();
                 g_state->syncAnimationTimer();
+            } else if (wParam == kStatsTimer && g_state) {
+                g_state->sampleStats();
             }
             return 0;
+        case kMsgReloadConfig:
+            if (g_state) {
+                // Full teardown + re-run, no diffing (spec 5).
+                g_state->scheduler.cancelAll();
+                g_state->store.removeAll();
+                g_state->settings = ybar::model::BarSettings{};
+                g_state->bus.reset();
+                if (g_state->komorebi) g_state->bus.addEvent("komorebi_workspace_change");
+                if (g_state->fonts) g_state->fonts->clear();
+                g_state->hoverItemId = -1;
+                g_state->appliedOffsetPhysical = -1;
+                g_state->executeConfig();
+                g_state->renderAll();
+                g_state->hotload.noteReloadHappened();
+            }
+            return 0;
+        case WM_POWERBROADCAST:
+            if (g_state) {
+                if (wParam == PBT_APMSUSPEND) g_state->bus.trigger("system_will_sleep", "");
+                else if (wParam == PBT_APMRESUMEAUTOMATIC)
+                    g_state->bus.trigger("system_woke", "");
+                else
+                    g_state->publishPower(false);
+            }
+            return TRUE;
         case WM_FONTCHANGE:
             // Broadcasts reach the BAR windows, not this message-only window
             // (spec 7.4) — but handle it here too in case of direct sends.
@@ -205,7 +261,143 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
     }
 }
 
+void CALLBACK foregroundHook(HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD) {
+    if (g_state) g_state->publishFrontApp(false); // delivered on the UI thread
+}
+
 } // namespace
+
+void DaemonState::executeConfig() {
+    resolvedConfigPath = locateConfig(instance, explicitConfigPath);
+    if (resolvedConfigPath.empty()) return;
+    const auto slash = resolvedConfigPath.find_last_of("\\/");
+    const std::string directory =
+        slash == std::string::npos ? "." : resolvedConfigPath.substr(0, slash);
+    scripts.baseEnvironment = {{"CONFIG_DIR", directory}, {"BAR_NAME", instance}};
+    scripts.workingDirectory = directory;
+    trace("config: executing");
+
+    const auto dot = resolvedConfigPath.find_last_of('.');
+    const std::string extension =
+        dot == std::string::npos ? "" : resolvedConfigPath.substr(dot);
+    if (extension == ".json" || extension == ".jsonc") {
+        std::string text;
+        if (FILE* file = std::fopen(resolvedConfigPath.c_str(), "rb")) {
+            char buffer[4096];
+            std::size_t n;
+            while ((n = std::fread(buffer, 1, sizeof(buffer), file)) > 0)
+                text.append(buffer, n);
+            std::fclose(file);
+        }
+        const auto filename =
+            slash == std::string::npos ? resolvedConfigPath : resolvedConfigPath.substr(slash + 1);
+        for (const auto& batch : translateJsonc(text, filename)) {
+            const auto output = handler->handle(batch);
+            if (!output.empty()) std::fprintf(stderr, "%s\n", output.c_str());
+        }
+    } else if (extension == ".lua") {
+        std::fprintf(stderr,
+                     "[!] Lua configs are not supported on ybar-win yet — use .jsonc or a "
+                     "shell config\n");
+    } else {
+        scripts.runFile(resolvedConfigPath, {}); // config drives the bar via the CLI
+    }
+}
+
+void DaemonState::publishPower(bool forced) {
+    SYSTEM_POWER_STATUS status{};
+    if (!GetSystemPowerStatus(&status)) return;
+    // ACLineStatus: 0 battery, 1 AC, 255 unknown; PoHot maps to AC (spec 10).
+    const std::string source = status.ACLineStatus == 0 ? "BATTERY" : "AC";
+    if (forced || source != lastPowerSource) {
+        lastPowerSource = source;
+        bus.trigger("power_source_change", source);
+    }
+    if (status.BatteryLifePercent != 255) {
+        const int percent = status.BatteryLifePercent;
+        if (forced || percent != lastBatteryPercent) {
+            lastBatteryPercent = percent;
+            bus.trigger("battery_change", std::to_string(percent));
+        }
+    }
+}
+
+void DaemonState::publishFrontApp(bool forced) {
+    std::string name;
+    if (const HWND foreground = GetForegroundWindow()) {
+        DWORD processId = 0;
+        GetWindowThreadProcessId(foreground, &processId);
+        if (const HANDLE process =
+                OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId)) {
+            wchar_t path[MAX_PATH];
+            DWORD size = MAX_PATH;
+            if (QueryFullProcessImageNameW(process, 0, path, &size)) {
+                std::wstring wide(path, size);
+                const auto slash = wide.find_last_of(L"\\/");
+                if (slash != std::wstring::npos) wide = wide.substr(slash + 1);
+                if (wide.size() > 4) wide.resize(wide.size() - 4); // strip .exe
+                const int utf8Size = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, nullptr,
+                                                         0, nullptr, nullptr);
+                name.resize(static_cast<std::size_t>(utf8Size - 1));
+                WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, name.data(), utf8Size,
+                                    nullptr, nullptr);
+            }
+            CloseHandle(process);
+        }
+    }
+    if (name.empty()) return;
+    if (!forced && name == lastFrontApp) return;
+    lastFrontApp = name;
+    bus.trigger("front_app_switched", name);
+}
+
+void DaemonState::sampleStats() {
+    FILETIME idleFt, kernelFt, userFt;
+    if (!GetSystemTimes(&idleFt, &kernelFt, &userFt)) return;
+    const auto toU64 = [](const FILETIME& ft) {
+        return (static_cast<ULONGLONG>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+    };
+    const ULONGLONG idle = toU64(idleFt), kernel = toU64(kernelFt), user = toU64(userFt);
+    int cpuPercent = 0;
+    if (statsPrevKernel != 0) {
+        const ULONGLONG idleDelta = idle - statsPrevIdle;
+        // Kernel time INCLUDES idle: busy = (kernel - idle) + user (spec 10).
+        const ULONGLONG busy = (kernel - statsPrevKernel) - idleDelta + (user - statsPrevUser);
+        const ULONGLONG total = (kernel - statsPrevKernel) + (user - statsPrevUser);
+        if (total > 0)
+            cpuPercent = static_cast<int>((busy * 100 + total / 2) / total);
+    }
+    statsPrevIdle = idle;
+    statsPrevKernel = kernel;
+    statsPrevUser = user;
+
+    MEMORYSTATUSEX memory{};
+    memory.dwLength = sizeof(memory);
+    GlobalMemoryStatusEx(&memory);
+    const int memoryPercent = static_cast<int>(
+        (memory.ullTotalPhys - memory.ullAvailPhys) * 100 / memory.ullTotalPhys);
+
+    ULARGE_INTEGER freeBytes{}, totalBytes{};
+    const char* profile = std::getenv("USERPROFILE");
+    GetDiskFreeSpaceExA(profile ? profile : "C:\\", &freeBytes, &totalBytes, nullptr);
+
+    char cpuFraction[16], memoryFraction[16];
+    std::snprintf(cpuFraction, sizeof(cpuFraction), "%.2f", cpuPercent / 100.0);
+    std::snprintf(memoryFraction, sizeof(memoryFraction), "%.2f", memoryPercent / 100.0);
+    // INFO shape is exact contract: space after the colon (spec 3.5).
+    const std::string info = "{\"cpu\": " + std::to_string(cpuPercent) +
+                             ", \"memory\": " + std::to_string(memoryPercent) + "}";
+    bus.trigger("system_stats", info,
+                {{"CPU_USAGE", std::to_string(cpuPercent)},
+                 {"CPU_FRACTION", cpuFraction},
+                 {"MEMORY_USAGE", std::to_string(memoryPercent)},
+                 {"MEMORY_FRACTION", memoryFraction},
+                 {"DISK_FREE_GB",
+                  std::to_string(freeBytes.QuadPart / 1000000000ull)},
+                 {"DISK_TOTAL_GB",
+                  std::to_string(totalBytes.QuadPart / 1000000000ull)},
+                 {"THERMAL_STATE", "nominal"}});
+}
 
 void DaemonState::renderAll() {
     if (!renderer || !fonts) return;
@@ -259,11 +451,11 @@ void DaemonState::renderAll() {
 }
 
 int runDaemon(const std::string& instance, const std::string& configPath) {
-    (void)configPath; // config execution lands with the ScriptRunner slice
-
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
     DaemonState state;
+    state.instance = instance;
+    state.explicitConfigPath = configPath;
     g_state = &state;
 
     WNDCLASSW windowClass{};
@@ -385,11 +577,65 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
         }
     }
 
+    // System providers (spec 10): power push notifications + front-app hook
+    // always on; stats armed lazily on first subscription.
+    RegisterPowerSettingNotification(state.messageWindow, &kGuidAcDcPowerSource,
+                                     DEVICE_NOTIFY_WINDOW_HANDLE);
+    RegisterPowerSettingNotification(state.messageWindow, &kGuidBatteryPercentage,
+                                     DEVICE_NOTIFY_WINDOW_HANDLE);
+    const HWINEVENTHOOK frontAppHook =
+        SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr,
+                        foregroundHook, 0, 0, WINEVENT_OUTOFCONTEXT);
+    state.bus.onFirstSubscription = [&state](const std::string& event) {
+        if (event == "system_stats" && !state.statsArmed) {
+            state.statsArmed = true;
+            state.sampleStats(); // prime the tick deltas
+            SetTimer(state.messageWindow, kStatsTimer, 2000, nullptr);
+        }
+    };
+    ybar::win::BarSurface::setBroadcastTarget(state.messageWindow);
+    state.hotload.onChange = [hwnd = state.messageWindow] {
+        PostMessageW(hwnd, kMsgReloadConfig, 0, 0);
+    };
+
     ybar::ipc::DaemonHooks hooks;
     hooks.exit = [hwnd = state.messageWindow] { SetTimer(hwnd, kExitTimer, 150, nullptr); };
     hooks.komorebiMessage = [](const std::string& jsonText) {
         return ybar::providers::KomorebiProvider::detect() &&
                ybar::providers::KomorebiProvider::sendMessage(jsonText);
+    };
+    hooks.reload = [hwnd = state.messageWindow] {
+        PostMessageW(hwnd, kMsgReloadConfig, 0, 0);
+    };
+    hooks.setHotload = [&state](bool enabled) {
+        state.hotload.setEnabled(enabled, state.resolvedConfigPath);
+    };
+    hooks.forcedUpdate = [&state] {
+        state.publishPower(true);
+        state.publishFrontApp(true);
+        if (state.statsArmed) state.sampleStats();
+    };
+    hooks.forcedQuery = [&state](const std::string& event) {
+        // The --trigger interception set (spec 3.4); unsupported providers
+        // (volume/wifi/media) fall through to plain bus triggers for now.
+        if (event == "power_source_change" || event == "battery_change") {
+            state.publishPower(true);
+            return true;
+        }
+        if (event == "front_app_switched") {
+            state.publishFrontApp(true);
+            return true;
+        }
+        if (event == "system_stats") {
+            state.sampleStats();
+            return true;
+        }
+        if (event == "display_change") {
+            state.bus.trigger("display_change",
+                              std::to_string(ybar::win::enumerateMonitors().size()));
+            return true;
+        }
+        return false;
     };
     hooks.setNeedsRender = [&state] {
         if (state.renderQueued || !state.renderer) return;
@@ -427,6 +673,7 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     }
 
     SetTimer(state.messageWindow, kRoutineTimer, 1000, nullptr);
+    state.executeConfig();
     if (state.renderer) state.renderAll(); // first frame
 
     MSG msg;
@@ -435,6 +682,7 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
         DispatchMessageW(&msg);
     }
 
+    if (frontAppHook) UnhookWinEvent(frontAppHook);
     server.stop();
     DestroyWindow(state.messageWindow);
     g_state = nullptr;

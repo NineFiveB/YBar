@@ -82,16 +82,31 @@ ScriptRunner::ScriptRunner() {
 
 void ScriptRunner::run(const std::string& script, const std::map<std::string, std::string>& env) {
     if (script.empty()) return;
-
     std::wstring commandLine = quoteArg(shell_);
     if (posix_) {
         commandLine += L" -c " + quoteArg(widen(script));
     } else {
         commandLine += L" -NoProfile -Command " + quoteArg(widen(script));
     }
+    spawn(commandLine, env);
+}
 
-    // Environment block: parent env overlaid with the event vars; PATH gets
-    // the ybar.exe directory prepended so scripts can call `ybar` back.
+void ScriptRunner::runFile(const std::string& path,
+                           const std::map<std::string, std::string>& env) {
+    std::wstring commandLine = quoteArg(shell_);
+    if (posix_) {
+        // exec-"$0" trick: the path travels as an argv word, immune to quoting.
+        commandLine += L" -c " + quoteArg(L"exec \"$0\"") + L" " + quoteArg(widen(path));
+    } else {
+        commandLine += L" -NoProfile -Command " + quoteArg(L"& \"" + widen(path) + L"\"");
+    }
+    spawn(commandLine, env);
+}
+
+void ScriptRunner::spawn(const std::wstring& commandLine,
+                         const std::map<std::string, std::string>& env) {
+    // Environment block: parent env overlaid with base + event vars; PATH
+    // gets the ybar.exe directory prepended so scripts can call `ybar` back.
     std::map<std::wstring, std::wstring> merged;
     if (LPWCH parent = GetEnvironmentStringsW()) {
         for (LPWCH cursor = parent; *cursor;) {
@@ -103,6 +118,7 @@ void ScriptRunner::run(const std::string& script, const std::map<std::string, st
         }
         FreeEnvironmentStringsW(parent);
     }
+    for (const auto& [key, value] : baseEnvironment) merged[widen(key)] = widen(value);
     for (const auto& [key, value] : env) merged[widen(key)] = widen(value);
     if (auto it = merged.find(L"PATH"); it != merged.end())
         it->second = exeDirectory() + L";" + it->second;
@@ -122,9 +138,10 @@ void ScriptRunner::run(const std::string& script, const std::map<std::string, st
     PROCESS_INFORMATION process{};
     std::vector<wchar_t> mutableCmd(commandLine.begin(), commandLine.end());
     mutableCmd.push_back(L'\0');
+    const std::wstring cwd = widen(workingDirectory);
     if (CreateProcessW(nullptr, mutableCmd.data(), nullptr, nullptr, FALSE,
-                       CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT, block.data(), nullptr,
-                       &startup, &process)) {
+                       CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT, block.data(),
+                       cwd.empty() ? nullptr : cwd.c_str(), &startup, &process)) {
         CloseHandle(process.hThread);
         CloseHandle(process.hProcess); // fire-and-forget
     }

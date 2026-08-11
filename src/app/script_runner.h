@@ -18,10 +18,20 @@ public:
     // NAME/SENDER/INFO etc. arrive pre-merged from the event bus.
     void run(const std::string& script, const std::map<std::string, std::string>& env);
 
+    // Runs a config FILE (spec 5): posix shells get the exec-"$0" trick;
+    // PowerShell gets `& "<path>"`.
+    void runFile(const std::string& path, const std::map<std::string, std::string>& env);
+
+    // CONFIG_DIR/BAR_NAME base env + script cwd (the config directory).
+    std::map<std::string, std::string> baseEnvironment;
+    std::string workingDirectory;
+
     const std::wstring& shellPath() const { return shell_; }
     bool posix() const { return posix_; }
 
 private:
+    void spawn(const std::wstring& commandLine, const std::map<std::string, std::string>& env);
+
     std::wstring shell_;
     bool posix_ = false;
 };

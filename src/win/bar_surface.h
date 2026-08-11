@@ -40,6 +40,10 @@ public:
     // Mouse events arrive on the UI thread (the window's own WndProc).
     void setMouseHandler(std::function<void(const MouseEvent&)> handler);
 
+    // Broadcast messages (WM_POWERBROADCAST suspend/resume, WM_FONTCHANGE)
+    // never reach message-only windows — the bar windows forward them here.
+    static void setBroadcastTarget(void* messageWindow);
+
     ybar::render::Surface& renderSurface();
     const MonitorInfo& monitor() const;
     double scale() const;
