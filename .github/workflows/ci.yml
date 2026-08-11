@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [windows]
+  pull_request:
+    branches: [windows]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Point VCPKG_ROOT at the runner's vcpkg
+        run: echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+
+      - name: Configure
+        run: cmake --preset default
+
+      - name: Build
+        run: cmake --build --preset default
+
+      - name: Test
+        run: ctest --preset default

@@ -1,6 +1,9 @@
 find_package(Catch2 3 CONFIG REQUIRED)
 
 add_executable(ybar_tests
+  color_tests.cpp
+  command_parser_tests.cpp
+  curves_tests.cpp
   wire_format_tests.cpp
 )
 target_link_libraries(ybar_tests PRIVATE ybar_core Catch2::Catch2WithMain)

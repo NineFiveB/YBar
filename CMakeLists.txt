@@ -12,10 +12,12 @@ endif()
 
 option(YBAR_BUILD_TESTS "Build the Catch2 contract tests" ON)
 
-# Platform-neutral engine code. Grows per docs/WINDOWS-PORT.md as milestones land;
-# W0 ships the wire format only.
+# Platform-neutral engine code. Grows per docs/WINDOWS-PORT.md as milestones land.
 add_library(ybar_core
+  src/anim/curves.cpp
+  src/ipc/command_parser.cpp
   src/ipc/wire_format.cpp
+  src/model/color.cpp
 )
 target_include_directories(ybar_core PUBLIC src)
 
