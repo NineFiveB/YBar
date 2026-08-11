@@ -80,15 +80,19 @@ ScriptRunner::ScriptRunner() {
     posix_ = false;
 }
 
-void ScriptRunner::run(const std::string& script, const std::map<std::string, std::string>& env) {
-    if (script.empty()) return;
+std::wstring ScriptRunner::commandLineFor(const std::string& script) const {
     std::wstring commandLine = quoteArg(shell_);
     if (posix_) {
         commandLine += L" -c " + quoteArg(widen(script));
     } else {
         commandLine += L" -NoProfile -Command " + quoteArg(widen(script));
     }
-    spawn(commandLine, env);
+    return commandLine;
+}
+
+void ScriptRunner::run(const std::string& script, const std::map<std::string, std::string>& env) {
+    if (script.empty()) return;
+    spawn(commandLineFor(script), env);
 }
 
 void ScriptRunner::runFile(const std::string& path,

@@ -21,6 +21,7 @@
 #include "ipc/command_handler.h"
 #include "ipc/socket.h"
 #include "ipc/wire_format.h"
+#include "lua/runtime.h"
 #include "model/bar_settings.h"
 #include "model/item.h"
 #include "model/layout.h"
@@ -104,6 +105,7 @@ struct DaemonState {
     std::string explicitConfigPath;
     std::string resolvedConfigPath;
     Hotload hotload;
+    std::unique_ptr<ybar::lua::LuaRuntime> lua;
 
     // Providers (spec 10): dedupe state.
     std::string lastPowerSource;
@@ -221,12 +223,21 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                 g_state->syncAnimationTimer();
             } else if (wParam == kStatsTimer && g_state) {
                 g_state->sampleStats();
+            } else if (g_state && g_state->lua && g_state->lua->onTimer(wParam)) {
+                // ybar.delay timers.
             }
             return 0;
+        case ybar::lua::LuaRuntime::kMsgExecDone: {
+            auto* result = reinterpret_cast<ybar::lua::LuaRuntime::ExecResult*>(lParam);
+            if (g_state && g_state->lua) g_state->lua->completeExec(*result);
+            delete result;
+            return 0;
+        }
         case kMsgReloadConfig:
             if (g_state) {
                 // Full teardown + re-run, no diffing (spec 5).
                 g_state->scheduler.cancelAll();
+                if (g_state->lua) g_state->lua->teardown();
                 g_state->store.removeAll();
                 g_state->settings = ybar::model::BarSettings{};
                 g_state->bus.reset();
@@ -296,9 +307,7 @@ void DaemonState::executeConfig() {
             if (!output.empty()) std::fprintf(stderr, "%s\n", output.c_str());
         }
     } else if (extension == ".lua") {
-        std::fprintf(stderr,
-                     "[!] Lua configs are not supported on ybar-win yet — use .jsonc or a "
-                     "shell config\n");
+        if (lua) lua->runConfig(resolvedConfigPath);
     } else {
         scripts.runFile(resolvedConfigPath, {}); // config drives the bar via the CLI
     }
@@ -491,7 +500,7 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     }
     trace("gpu stack ready");
 
-    // Scripts: the event bus dispatches through the ScriptRunner (spec 10.1).
+    // Scripts: Lua-first dispatch, shell fallback (spec 3.7, 10.1).
     state.bus.itemsProvider = [&state] {
         std::vector<ybar::model::Item*> items;
         for (const auto& item : state.store.items()) items.push_back(item.get());
@@ -499,6 +508,7 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     };
     state.bus.runItemScript = [&state](ybar::model::Item& item,
                                        const ybar::events::Environment& env) {
+        if (state.lua && state.lua->handleEvent(item, env)) return;
         if (!item.script.empty()) state.scripts.run(item.script, env);
     };
 
@@ -654,6 +664,8 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     state.handler = std::make_unique<ybar::ipc::CommandHandler>(state.store, state.settings,
                                                                 state.bus, hooks,
                                                                 &state.scheduler);
+    state.lua = std::make_unique<ybar::lua::LuaRuntime>(state.store, state.bus, *state.handler,
+                                                        state.scripts, state.messageWindow);
 
     ybar::ipc::SocketServer server;
     const auto socketPath = ybar::ipc::socketPath(instance);

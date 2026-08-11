@@ -15,6 +15,14 @@ option(YBAR_BUILD_TESTS "Build the Catch2 contract tests" ON)
 
 find_package(nlohmann_json CONFIG REQUIRED)
 
+# Vendored Lua 5.4 (ISO C; luaconf.h auto-detects _WIN32 — spec D6).
+file(GLOB LUA_VENDOR_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/lua/vendor/*.c)
+add_library(lua_vendor STATIC ${LUA_VENDOR_SOURCES})
+target_include_directories(lua_vendor PUBLIC src/lua/vendor)
+if(MSVC)
+  target_compile_options(lua_vendor PRIVATE /W1) # vendored code, not ours
+endif()
+
 # Platform-neutral engine code. Grows per docs/WINDOWS-PORT.md as milestones land.
 add_library(ybar_core
   src/anim/curves.cpp
@@ -44,6 +52,7 @@ add_library(ybar_win
   src/app/jsonc_config.cpp
   src/app/script_runner.cpp
   src/ipc/socket.cpp
+  src/lua/runtime.cpp
   src/providers/komorebi.cpp
   src/render/font_cache.cpp
   src/render/glyph_atlas.cpp
@@ -52,7 +61,7 @@ add_library(ybar_win
   src/win/bar_surface.cpp
   src/win/display_manager.cpp
 )
-target_link_libraries(ybar_win PUBLIC ybar_core
+target_link_libraries(ybar_win PUBLIC ybar_core lua_vendor
   ws2_32 d3d11 dxgi d3dcompiler dcomp dwrite shcore user32 gdi32)
 
 add_executable(ybar src/main.cpp)

@@ -22,6 +22,10 @@ public:
     // PowerShell gets `& "<path>"`.
     void runFile(const std::string& path, const std::map<std::string, std::string>& env);
 
+    // The full command line `run(script)` would spawn — used by ybar.exec,
+    // which captures stdout itself.
+    std::wstring commandLineFor(const std::string& script) const;
+
     // CONFIG_DIR/BAR_NAME base env + script cwd (the config directory).
     std::map<std::string, std::string> baseEnvironment;
     std::string workingDirectory;

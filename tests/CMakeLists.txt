@@ -11,6 +11,7 @@ add_executable(ybar_tests
   item_store_tests.cpp
   jsonc_config_tests.cpp
   layout_tests.cpp
+  lua_tests.cpp
   property_setter_tests.cpp
   scheduler_tests.cpp
   socket_tests.cpp
