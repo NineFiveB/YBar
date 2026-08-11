@@ -37,6 +37,11 @@ LRESULT CALLBACK barWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
     }
 }
 
+double windowDpiForTransform(HWND hwnd) {
+    const UINT dpi = GetDpiForWindow(hwnd);
+    return dpi != 0 ? static_cast<double>(dpi) : 96.0;
+}
+
 void registerClassOnce() {
     static bool registered = [] {
         WNDCLASSW windowClass{};
@@ -128,6 +133,17 @@ std::unique_ptr<BarSurface> BarSurface::create(ybar::render::Renderer& renderer,
         FAILED(impl->compositionDevice->CreateVisual(&impl->visual)))
         return nullptr;
     impl->visual->SetContent(static_cast<IDXGISwapChain1*>(impl->surface->compositionSurface()));
+    // The composition target composes in DIPs for a DPI-aware window: content
+    // is displayed scaled by windowDpi/96. Counter-scale so our physical-pixel
+    // buffer maps 1:1 to device pixels (verified live: without this the whole
+    // scene displays at 2x on a 200% monitor).
+    {
+        const auto inv = static_cast<float>(96.0 / (windowDpiForTransform(impl->hwnd)));
+        D2D_MATRIX_3X2_F counterScale{};
+        counterScale._11 = inv;
+        counterScale._22 = inv;
+        impl->visual->SetTransform(counterScale);
+    }
     impl->target->SetRoot(impl->visual.Get());
     impl->compositionDevice->Commit();
 
