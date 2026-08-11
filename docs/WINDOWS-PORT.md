@@ -872,23 +872,29 @@ workspace-name events, `{top:H,bottom:H}` offset zeroed on exit,
 `--komorebi` verb); W5 partially (scheduler with retarget semantics on a
 16 ms on-demand timer, graphs/sliders(render)/gauges).
 
+**Also done since**: the embedded Lua runtime (vendored 5.4.8, byte-identical
+prelude, single-funnel trampolines, generation-guarded exec/delay, Lua-first
+dispatch) — live-verified with in-process closures driving the komorebi
+workspace pill and the CPU gauge. An in-tree **YTile provider** extension
+mirrors the komorebi update flow (fires `komorebi_workspace_change` for
+config compatibility); its spec entry is pending.
+
 **Remaining to macOS parity**, in impact order:
-1. Embedded Lua runtime + prelude + sbar shim (§3.7, §12) — unlocks the
-   shipped themes; the largest remaining item.
-2. Popups + tooltips (§3.9, §6): windows, layouts, auto-close, anchoring.
-3. `sf:` icon resolver + images (§7.5): mapping table, fluentui fallback,
+1. Popups + tooltips (§3.9, §6): windows, layouts, auto-close, anchoring.
+2. `sf:` icon resolver + images (§7.5): mapping table, fluentui fallback,
    WIC file/app.<Name> sources, color atlas page.
-4. Text fidelity (§3.9, §7.4, §14): tight-ink +1.5 metrics with the
+3. Text fidelity (§3.9, §7.4, §14): tight-ink +1.5 metrics with the
    golden-value parity suite, marquee, fixed-width clipping, clip holes,
    highlight colors, text-part shadows, bracket rendering.
-5. Providers (§10): audio (WASAPI), media (GSMTC), network/SSID,
+4. Providers (§10): audio (WASAPI), media (GSMTC), network/SSID,
    app_launched/terminated, modifier_change + global mouse events,
-   display_change on topology changes.
-6. Windowing robustness (§6): WM_DISPLAYCHANGE rebuilds, WM_DPICHANGED,
+   display_change on topology changes; komorebi lazy re-detect (attach when
+   komorebi starts after the daemon — today requires a daemon restart).
+5. Windowing robustness (§6): WM_DISPLAYCHANGE rebuilds, WM_DPICHANGED,
    per-display bounding_rects, fullscreen_show, reserve=appbar, sticky
    pinning, topmost=off re-assertion; slider dragging; --animate on --bar
    keys; width=dynamic seeding; idle_inhibit; Acrylic backdrops (§7.6).
-7. Ship (§13): winget + scoop, d3dcompiler app-local, autostart, `ybar
+6. Ship (§13): winget + scoop, d3dcompiler app-local, autostart, `ybar
    theme`, ported komorebi themes, Windows docs.
 
 Deliberate divergences (never 1:1): alias items (§10.6), per-item glass
