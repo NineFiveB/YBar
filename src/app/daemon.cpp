@@ -13,6 +13,7 @@
 #include <memory>
 #include <unordered_map>
 
+#include "app/script_runner.h"
 #include "events/event_bus.h"
 #include "ipc/command_handler.h"
 #include "ipc/socket.h"
@@ -20,6 +21,7 @@
 #include "model/bar_settings.h"
 #include "model/item.h"
 #include "model/layout.h"
+#include "providers/komorebi.h"
 #include "render/font_cache.h"
 #include "render/glyph_atlas.h"
 #include "render/renderer.h"
@@ -42,6 +44,7 @@ void trace(const char* stage) {
 
 constexpr UINT kMsgIpcRequest = WM_APP + 1;
 constexpr UINT kMsgRender = WM_APP + 2;
+constexpr UINT kMsgKomorebi = WM_APP + 3;
 constexpr UINT_PTR kRoutineTimer = 1;
 constexpr UINT_PTR kExitTimer = 2;
 constexpr UINT_PTR kRenderRetryTimer = 3;
@@ -64,6 +67,11 @@ struct DaemonState {
     std::vector<std::unique_ptr<ybar::win::BarSurface>> surfaces;
     std::unordered_map<int, std::unique_ptr<ybar::render::GlyphAtlas>> atlases; // key: scale*100
     bool renderQueued = false;
+
+    ScriptRunner scripts;
+    std::unique_ptr<ybar::providers::KomorebiProvider> komorebi;
+    int appliedOffsetPhysical = -1;
+    int hoverItemId = -1; // targeted mouse.entered/exited tracking
 
     ybar::render::GlyphAtlas* atlasFor(double scale) {
         const int key = static_cast<int>(scale * 100 + 0.5);
@@ -109,6 +117,22 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                 g_state->renderAll();
             }
             return 0;
+        case kMsgKomorebi: {
+            auto* update = reinterpret_cast<ybar::providers::KomorebiUpdate*>(lParam);
+            if (g_state) {
+                ybar::events::Environment env{
+                    {"FOCUSED_WORKSPACE", update->focusedWorkspace},
+                    {"PREV_WORKSPACE", update->previousWorkspace},
+                    {"FOCUSED_MONITOR_INDEX",
+                     std::to_string(update->focusedMonitorIndex + 1)},
+                };
+                g_state->bus.trigger("komorebi_workspace_change", update->focusedWorkspace,
+                                     env);
+                g_state->bus.trigger("space_change", "", env);
+            }
+            delete update;
+            return 0;
+        }
         case WM_TIMER:
             if (wParam == kRoutineTimer && g_state) {
                 for (const auto& item : g_state->store.items()) {
@@ -127,6 +151,10 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                 }
             } else if (wParam == kExitTimer) {
                 KillTimer(hwnd, kExitTimer);
+                if (g_state && g_state->komorebi) {
+                    g_state->komorebi->clearWorkAreaOffset(); // spec 11.4
+                    g_state->komorebi->stop();
+                }
                 PostQuitMessage(0);
             } else if (wParam == kRenderRetryTimer && g_state) {
                 KillTimer(hwnd, kRenderRetryTimer);
@@ -185,6 +213,18 @@ void DaemonState::renderAll() {
         }
         trace("renderAll: surface done");
     }
+
+    // Work-area handshake follows bar-height changes (spec 11.4).
+    if (komorebi && !surfaces.empty()) {
+        const double scale = surfaces.front()->scale();
+        const int physical = settings.hidden
+                                 ? 0
+                                 : static_cast<int>((settings.height + settings.yOffset) * scale + 0.5);
+        if (physical != appliedOffsetPhysical) {
+            appliedOffsetPhysical = physical;
+            komorebi->applyWorkAreaOffset(physical);
+        }
+    }
 }
 
 int runDaemon(const std::string& instance, const std::string& configPath) {
@@ -228,8 +268,93 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     }
     trace("gpu stack ready");
 
+    // Scripts: the event bus dispatches through the ScriptRunner (spec 10.1).
+    state.bus.runItemScript = [&state](ybar::model::Item& item,
+                                       const ybar::events::Environment& env) {
+        if (!item.script.empty()) state.scripts.run(item.script, env);
+    };
+
+    // Mouse routing: hit-test bar-local item frames, targeted dispatch
+    // bypassing the updates policy (spec 3.4, 6).
+    for (auto& surface : state.surfaces) {
+        surface->setMouseHandler([&state](const ybar::win::MouseEvent& event) {
+            auto hitTest = [&state](double x, double y) -> ybar::model::Item* {
+                const auto& items = state.store.items();
+                for (auto it = items.rbegin(); it != items.rend(); ++it) {
+                    auto* item = it->get();
+                    if (item->kind == ybar::model::ItemKind::Bracket) continue;
+                    if (item->position == ybar::model::ItemPosition::Popup) continue;
+                    if (!item->frame.isZero() && item->frame.contains({x, y})) return item;
+                }
+                return nullptr;
+            };
+            using Kind = ybar::win::MouseEvent::Kind;
+            auto* item = event.kind == Kind::Leave ? nullptr : hitTest(event.x, event.y);
+
+            // Hover transitions (mouse.entered / mouse.exited).
+            const int hoverId = item ? item->id : -1;
+            if (hoverId != state.hoverItemId) {
+                if (state.hoverItemId != -1) {
+                    for (const auto& candidate : state.store.items()) {
+                        if (candidate->id != state.hoverItemId) continue;
+                        candidate->mouseOver = false;
+                        state.bus.triggerTargeted(*candidate, "mouse.exited", "");
+                        break;
+                    }
+                }
+                if (item) {
+                    item->mouseOver = true;
+                    state.bus.triggerTargeted(*item, "mouse.entered", "");
+                }
+                state.hoverItemId = hoverId;
+            }
+            if (!item) return;
+
+            if (event.kind == Kind::Up) { // clicks fire on mouse-UP (spec 3.5)
+                const std::string info = std::string("{\"button\":\"") + event.button +
+                                         "\",\"modifier\":\"" + event.modifier + "\"}";
+                ybar::events::Environment extra{{"BUTTON", event.button},
+                                                {"MODIFIER", event.modifier}};
+                state.bus.triggerTargeted(*item, "mouse.clicked", info, extra);
+                if (!item->clickScript.empty()) {
+                    extra["NAME"] = item->name;
+                    extra["INFO"] = info;
+                    state.scripts.run(item->clickScript, extra);
+                }
+            } else if (event.kind == Kind::Scroll) {
+                state.bus.triggerTargeted(*item, "mouse.scrolled", "",
+                                          {{"SCROLL_DELTA", std::to_string(event.scrollDelta)},
+                                           {"MODIFIER", event.modifier}});
+            }
+        });
+    }
+
+    // komorebi (spec 11): subscription + work-area handshake, gated by reserve.
+    if (state.settings.reserve != ybar::model::ReserveMode::Off &&
+        state.settings.reserve != ybar::model::ReserveMode::AppBar &&
+        ybar::providers::KomorebiProvider::detect()) {
+        state.komorebi = std::make_unique<ybar::providers::KomorebiProvider>();
+        state.komorebi->onUpdate = [hwnd = state.messageWindow](
+                                       const ybar::providers::KomorebiUpdate& update) {
+            auto* copy = new ybar::providers::KomorebiUpdate(update);
+            if (!PostMessageW(hwnd, kMsgKomorebi, 0, reinterpret_cast<LPARAM>(copy)))
+                delete copy;
+        };
+        state.bus.addEvent("komorebi_workspace_change");
+        if (!state.komorebi->start("ybar.sock")) {
+            std::fprintf(stderr, "[ybar] komorebi subscription failed\n");
+            state.komorebi.reset();
+        } else {
+            trace("komorebi: subscribed");
+        }
+    }
+
     ybar::ipc::DaemonHooks hooks;
     hooks.exit = [hwnd = state.messageWindow] { SetTimer(hwnd, kExitTimer, 150, nullptr); };
+    hooks.komorebiMessage = [](const std::string& jsonText) {
+        return ybar::providers::KomorebiProvider::detect() &&
+               ybar::providers::KomorebiProvider::sendMessage(jsonText);
+    };
     hooks.setNeedsRender = [&state] {
         if (state.renderQueued || !state.renderer) return;
         state.renderQueued = true; // coalesce to one frame per turn (spec 7.2)

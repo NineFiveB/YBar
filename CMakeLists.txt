@@ -39,7 +39,9 @@ target_link_libraries(ybar_core PUBLIC nlohmann_json::nlohmann_json)
 add_library(ybar_win
   src/app/client.cpp
   src/app/daemon.cpp
+  src/app/script_runner.cpp
   src/ipc/socket.cpp
+  src/providers/komorebi.cpp
   src/render/font_cache.cpp
   src/render/glyph_atlas.cpp
   src/render/renderer.cpp

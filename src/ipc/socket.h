@@ -20,6 +20,15 @@ std::optional<std::string> clientSend(const std::string& path,
                                       const std::vector<std::string>& argv,
                                       double timeoutSeconds = 5.0);
 
+// Unframed raw send for foreign protocols (komorebi: one JSON per
+// connection, no delimiter). false on transport failure.
+bool rawSend(const std::string& path, const std::string& bytes, double timeoutSeconds = 1.0);
+
+// Unframed raw query: write, shutdown the send side, read the reply to EOF
+// (komorebi State/GlobalState queries).
+std::optional<std::string> rawQuery(const std::string& path, const std::string& bytes,
+                                    double timeoutSeconds = 2.0);
+
 class SocketServer {
 public:
     ~SocketServer();

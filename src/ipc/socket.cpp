@@ -94,6 +94,42 @@ std::optional<std::string> clientSend(const std::string& path,
     return reply;
 }
 
+bool rawSend(const std::string& path, const std::string& bytes, double timeoutSeconds) {
+    if (!ensureWinsock()) return false;
+    const SOCKET sock = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (sock == INVALID_SOCKET) return false;
+    setTimeouts(sock, timeoutSeconds);
+    bool ok = false;
+    if (connectTo(sock, path)) {
+        ok = sendAll(sock, reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());
+    }
+    closesocket(sock);
+    return ok;
+}
+
+std::optional<std::string> rawQuery(const std::string& path, const std::string& bytes,
+                                    double timeoutSeconds) {
+    if (!ensureWinsock()) return std::nullopt;
+    const SOCKET sock = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (sock == INVALID_SOCKET) return std::nullopt;
+    setTimeouts(sock, timeoutSeconds);
+    std::optional<std::string> reply;
+    if (connectTo(sock, path) &&
+        sendAll(sock, reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size())) {
+        shutdown(sock, SD_SEND);
+        std::string received;
+        char buffer[8192];
+        for (;;) {
+            const int n = recv(sock, buffer, sizeof(buffer), 0);
+            if (n <= 0) break;
+            received.append(buffer, static_cast<std::size_t>(n));
+        }
+        if (!received.empty()) reply = std::move(received);
+    }
+    closesocket(sock);
+    return reply;
+}
+
 SocketServer::~SocketServer() { stop(); }
 
 std::optional<std::string> SocketServer::start(const std::string& path, Handler handler) {

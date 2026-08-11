@@ -28,6 +28,9 @@ struct DaemonHooks {
     // Forced-query interception for --trigger (spec 3.4); returns true when
     // the event name was intercepted and re-queried.
     std::function<bool(const std::string&)> forcedQuery;
+    // Windows extension (spec 11.5): raw SocketMessage passthrough to
+    // komorebi. Returns false when komorebi is unavailable.
+    std::function<bool(const std::string&)> komorebiMessage;
     std::function<std::vector<ybar::model::DisplayInfo>()> displays;
     std::function<ybar::model::BoundingRects(const ybar::model::Item&)> boundingRects;
 };

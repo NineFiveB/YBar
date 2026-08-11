@@ -4,6 +4,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <windowsx.h>
 #include <d3d11.h>
 #include <dxgi1_3.h>
 #include <dcomp.h>
@@ -26,16 +27,16 @@ namespace {
 
 constexpr wchar_t kBarClass[] = L"ybar.bar";
 
-LRESULT CALLBACK barWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    switch (msg) {
-        case WM_NCHITTEST:
-            return HTCLIENT; // never draggable; full-frame input (spec 6)
-        case WM_MOUSEACTIVATE:
-            return MA_NOACTIVATE;
-        default:
-            return DefWindowProcW(hwnd, msg, wParam, lParam);
-    }
+const char* currentModifier() {
+    // Priority order shift > ctrl > alt > cmd(Win) — contract (spec 3.5).
+    if (GetKeyState(VK_SHIFT) < 0) return "shift";
+    if (GetKeyState(VK_CONTROL) < 0) return "ctrl";
+    if (GetKeyState(VK_MENU) < 0) return "alt";
+    if (GetKeyState(VK_LWIN) < 0 || GetKeyState(VK_RWIN) < 0) return "cmd";
+    return "none";
 }
+
+LRESULT CALLBACK barWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 double windowDpiForTransform(HWND hwnd) {
     const UINT dpi = GetDpiForWindow(hwnd);
@@ -66,9 +67,27 @@ public:
     ComPtr<IDCompositionVisual> visual;
     double logicalW = 0;
     double logicalH = 0;
+    std::function<void(const MouseEvent&)> onMouse;
+    bool trackingLeave = false;
 
     ~BarSurfaceImpl() {
-        if (hwnd) DestroyWindow(hwnd);
+        if (hwnd) {
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+            DestroyWindow(hwnd);
+        }
+    }
+
+    void dispatchMouse(MouseEvent::Kind kind, LPARAM lParam, const char* button,
+                       int scrollDelta = 0) {
+        if (!onMouse) return;
+        MouseEvent event;
+        event.kind = kind;
+        event.x = static_cast<double>(GET_X_LPARAM(lParam)) / monitorInfo.scale;
+        event.y = static_cast<double>(GET_Y_LPARAM(lParam)) / monitorInfo.scale;
+        event.button = button;
+        event.modifier = currentModifier();
+        event.scrollDelta = scrollDelta;
+        onMouse(event);
     }
 
     RECT frameFor(const BarSettings& settings) const {
@@ -90,6 +109,62 @@ public:
     }
 };
 
+namespace {
+
+LRESULT CALLBACK barWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    auto* impl = reinterpret_cast<BarSurfaceImpl*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    switch (msg) {
+        case WM_NCHITTEST:
+            return HTCLIENT; // never draggable; full-frame input (spec 6)
+        case WM_MOUSEACTIVATE:
+            return MA_NOACTIVATE;
+        case WM_LBUTTONDOWN:
+            if (impl) impl->dispatchMouse(MouseEvent::Kind::Down, lParam, "left");
+            return 0;
+        case WM_LBUTTONUP:
+            if (impl) impl->dispatchMouse(MouseEvent::Kind::Up, lParam, "left");
+            return 0;
+        case WM_RBUTTONUP:
+            if (impl) impl->dispatchMouse(MouseEvent::Kind::Up, lParam, "right");
+            return 0;
+        case WM_MBUTTONUP:
+            if (impl) impl->dispatchMouse(MouseEvent::Kind::Up, lParam, "other");
+            return 0;
+        case WM_MOUSEMOVE:
+            if (impl) {
+                if (!impl->trackingLeave) {
+                    TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, hwnd, 0};
+                    TrackMouseEvent(&track);
+                    impl->trackingLeave = true;
+                }
+                impl->dispatchMouse(MouseEvent::Kind::Move, lParam, "left");
+            }
+            return 0;
+        case WM_MOUSELEAVE:
+            if (impl) {
+                impl->trackingLeave = false;
+                MouseEvent event;
+                event.kind = MouseEvent::Kind::Leave;
+                event.modifier = currentModifier();
+                if (impl->onMouse) impl->onMouse(event);
+            }
+            return 0;
+        case WM_MOUSEWHEEL:
+            if (impl) {
+                POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)}; // screen coords
+                ScreenToClient(hwnd, &point);
+                const int delta = GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
+                impl->dispatchMouse(MouseEvent::Kind::Scroll, MAKELPARAM(point.x, point.y),
+                                    "left", delta);
+            }
+            return 0;
+        default:
+            return DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
+}
+
+} // namespace
+
 std::unique_ptr<BarSurface> BarSurface::create(ybar::render::Renderer& renderer,
                                                const MonitorInfo& monitor,
                                                const BarSettings& settings) {
@@ -110,6 +185,7 @@ std::unique_ptr<BarSurface> BarSurface::create(ybar::render::Renderer& renderer,
         std::fprintf(stderr, "[ybar] bar window creation failed\n");
         return nullptr;
     }
+    SetWindowLongPtrW(impl->hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(impl.get()));
 
     impl->surface = renderer.createSurface(widthPx, heightPx);
     if (!impl->surface) return nullptr;
@@ -187,6 +263,10 @@ void BarSurface::applySettings(const BarSettings& settings) {
     impl_->logicalH = heightPx / impl_->monitorInfo.scale;
     ShowWindow(impl_->hwnd, settings.hidden ? SW_HIDE : SW_SHOWNOACTIVATE);
     impl_->compositionDevice->Commit();
+}
+
+void BarSurface::setMouseHandler(std::function<void(const MouseEvent&)> handler) {
+    impl_->onMouse = std::move(handler);
 }
 
 ybar::render::Surface& BarSurface::renderSurface() { return *impl_->surface; }

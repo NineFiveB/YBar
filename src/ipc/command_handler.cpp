@@ -310,6 +310,13 @@ std::string CommandHandler::handleBatch(const Batch& batch,
         return {};
     }
 
+    if (batch.domain == "komorebi") { // ybar-win extension (spec 11.5)
+        if (args.size() != 1) return "[!] usage: --komorebi <socket-message-json>";
+        if (!hooks_.komorebiMessage || !hooks_.komorebiMessage(args[0]))
+            return "[!] komorebi is not available";
+        return {};
+    }
+
     if (batch.domain == "exit") {
         if (hooks_.exit) hooks_.exit();
         return {};

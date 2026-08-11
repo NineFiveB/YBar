@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <functional>
 #include <memory>
 
 #include "model/bar_settings.h"
@@ -11,6 +12,17 @@
 #include "win/display_manager.h"
 
 namespace ybar::win {
+
+// Bar-local mouse event in LOGICAL points (spec sections 3.5, 6).
+struct MouseEvent {
+    enum class Kind { Down, Up, Move, Leave, Scroll };
+    Kind kind = Kind::Move;
+    double x = 0;
+    double y = 0;
+    const char* button = "left";    // left | right | other
+    const char* modifier = "none";  // shift | ctrl | alt | cmd | none
+    int scrollDelta = 0;
+};
 
 class BarSurfaceImpl;
 
@@ -24,6 +36,9 @@ public:
 
     // Re-applies frame/level from settings (height/margin/topmost/hidden...).
     void applySettings(const ybar::model::BarSettings& settings);
+
+    // Mouse events arrive on the UI thread (the window's own WndProc).
+    void setMouseHandler(std::function<void(const MouseEvent&)> handler);
 
     ybar::render::Surface& renderSurface();
     const MonitorInfo& monitor() const;
