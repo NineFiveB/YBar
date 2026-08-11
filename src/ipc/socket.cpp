@@ -73,6 +73,8 @@ bool connectTo(SOCKET socket, const std::string& path) {
 
 } // namespace
 
+bool ensureWinsockInitialized() { return ensureWinsock(); }
+
 std::optional<std::string> clientSend(const std::string& path,
                                       const std::vector<std::string>& argv,
                                       double timeoutSeconds) {

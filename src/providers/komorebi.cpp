@@ -66,6 +66,7 @@ bool KomorebiProvider::sendMessage(const std::string& jsonText) {
 }
 
 bool KomorebiProvider::start(const std::string& subscriberName) {
+    if (!ybar::ipc::ensureWinsockInitialized()) return false;
     subscriberName_ = subscriberName;
     subscriberPath_ = komorebiDir() + "\\" + subscriberName; // name verbatim, no .sock appended
 

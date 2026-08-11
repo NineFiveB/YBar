@@ -14,6 +14,10 @@
 
 namespace ybar::ipc {
 
+// Process-wide WSAStartup (idempotent). Any code creating sockets outside
+// this module must call it first.
+bool ensureWinsockInitialized();
+
 // Blocking client round-trip: connect, send one framed argv message, read one
 // framed reply. nullopt on any transport failure.
 std::optional<std::string> clientSend(const std::string& path,
