@@ -860,6 +860,41 @@ the README's third-party section.)
   now-playing widget, Acrylic backdrops, winget/scoop, `ybar theme`
   subcommand, ported themes.
 
+### Implementation status (as of 2026-08-11, all live-verified on hardware)
+
+**Done** — W0 (wire + komorebi protocol + HLSL, incl. a live State round-trip);
+W1 (bar windows, DComp with the §7.1 DIP counter-scale, SDF background);
+W2 partially (DirectWrite stack, atlas, layout, full CLI — advance-based
+widths, no icon mapping yet); W3 mostly (EventBus, ScriptRunner, mouse +
+click_script, config exec/JSONC/hotload/--reload, power/stats/front-app
+providers, routine timer); W4 fully (subscription with reconnect,
+workspace-name events, `{top:H,bottom:H}` offset zeroed on exit,
+`--komorebi` verb); W5 partially (scheduler with retarget semantics on a
+16 ms on-demand timer, graphs/sliders(render)/gauges).
+
+**Remaining to macOS parity**, in impact order:
+1. Embedded Lua runtime + prelude + sbar shim (§3.7, §12) — unlocks the
+   shipped themes; the largest remaining item.
+2. Popups + tooltips (§3.9, §6): windows, layouts, auto-close, anchoring.
+3. `sf:` icon resolver + images (§7.5): mapping table, fluentui fallback,
+   WIC file/app.<Name> sources, color atlas page.
+4. Text fidelity (§3.9, §7.4, §14): tight-ink +1.5 metrics with the
+   golden-value parity suite, marquee, fixed-width clipping, clip holes,
+   highlight colors, text-part shadows, bracket rendering.
+5. Providers (§10): audio (WASAPI), media (GSMTC), network/SSID,
+   app_launched/terminated, modifier_change + global mouse events,
+   display_change on topology changes.
+6. Windowing robustness (§6): WM_DISPLAYCHANGE rebuilds, WM_DPICHANGED,
+   per-display bounding_rects, fullscreen_show, reserve=appbar, sticky
+   pinning, topmost=off re-assertion; slider dragging; --animate on --bar
+   keys; width=dynamic seeding; idle_inhibit; Acrylic backdrops (§7.6).
+7. Ship (§13): winget + scoop, d3dcompiler app-local, autostart, `ybar
+   theme`, ported komorebi themes, Windows docs.
+
+Deliberate divergences (never 1:1): alias items (§10.6), per-item glass
+pills (§7.6), distributed-notification bindings (§9), THERMAL_STATE
+(§10), single topmost z-band (§16).
+
 ---
 
 ## 16. Risk register
