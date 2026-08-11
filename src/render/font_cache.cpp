@@ -133,9 +133,9 @@ public:
     std::vector<ComPtr<IDWriteFontFace>> facesKeepAlive;
 
     bool init() {
-        return SUCCEEDED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
-                                             __uuidof(IDWriteFactory),
-                                             reinterpret_cast<IUnknown**>(&factory)));
+        return SUCCEEDED(DWriteCreateFactory(
+            DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+            reinterpret_cast<IUnknown**>(factory.GetAddressOf())));
     }
 };
 

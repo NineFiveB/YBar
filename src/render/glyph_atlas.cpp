@@ -84,8 +84,9 @@ public:
     std::unordered_map<GlyphKey, std::optional<AtlasEntry>, GlyphKeyHash> entries;
 
     bool init() {
-        if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory2),
-                                       reinterpret_cast<IUnknown**>(&dwriteFactory))))
+        if (FAILED(DWriteCreateFactory(
+                DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory2),
+                reinterpret_cast<IUnknown**>(dwriteFactory.GetAddressOf()))))
             return false;
         auto makePage = [&](int size, DXGI_FORMAT format, ComPtr<ID3D11Texture2D>& tex,
                             ComPtr<ID3D11ShaderResourceView>& view) {
