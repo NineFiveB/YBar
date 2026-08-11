@@ -285,7 +285,7 @@ HWND  WS_POPUP | (borderless)
       WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP
       [+ WS_EX_TOPMOST per topmost setting]
  └─ IDCompositionTarget → visual → DXGI composition swap chain
-    (BGRA8_UNORM_SRGB, DXGI_ALPHA_MODE_PREMULTIPLIED, FLIP_SEQUENTIAL, 3 buffers)
+    (BGRA8_UNORM + sRGB RTV, DXGI_ALPHA_MODE_PREMULTIPLIED, FLIP_SEQUENTIAL, 3 buffers)
 ```
 
 - `WS_EX_NOACTIVATE` reproduces the non-activating panel: the bar receives
@@ -306,8 +306,12 @@ HWND  WS_POPUP | (borderless)
 - DPI: manifest `PerMonitorV2`; scale = `GetDpiForWindow()/96`; handle
   `WM_DPICHANGED` like `viewDidChangeBackingProperties` (resize buffers,
   switch glyph-atlas scale). One `GlyphAtlas` per distinct scale, as on macOS.
-  Popup scenes build at the **host surface's** scale (fresh windows report the
-  wrong DPI until shown — same pitfall, same rule).
+  Popup scenes build at the **host surface's** scale: a fresh window's DPI
+  comes from the monitor at its **creation position** — a popup created at
+  default coordinates reports the primary monitor's DPI and only corrects via
+  `WM_DPICHANGED` after being moved (same operational rule as macOS,
+  different mechanism; creating popups directly at their target coordinates
+  also works).
 - Displays: enumerate `EnumDisplayMonitors`; the public contract stays the
   **1-based arrangement index** (primary = 1, then enumeration order);
   internally re-match monitors across `WM_DISPLAYCHANGE` by
@@ -329,7 +333,10 @@ HWND  WS_POPUP | (borderless)
   Modifiers via `GetKeyState` mapped `shift>ctrl>alt>cmd(Win)`. Global
   popup-auto-close + `mouse.exited.global`/`modifier_change` need
   `SetWindowsHookEx(WH_MOUSE_LL / WH_KEYBOARD_LL)` — no permission prompts on
-  Windows. Keep both warped-cursor defenses: any surface event marks the
+  Windows. UIPI caveat: a non-elevated process's low-level hooks do not
+  observe input delivered to elevated windows, so popup auto-close and
+  modifier tracking degrade while an elevated app has focus — acceptable; do
+  not pursue uiAccess. Keep both warped-cursor defenses: any surface event marks the
   pointer inside; the 250 ms global-exit debounce re-verifies containment via
   `GetCursorPos` and is vetoed during slider drags.
 - Popups: same lifecycle invariants — a popup panel counts as live only after
@@ -359,13 +366,22 @@ New bar property (Windows extension, accepted-and-ignored by the macOS build):
 One `ID3D11Device` (+ immediate context) shared across surfaces; one
 composition swap chain per surface via
 `IDXGIFactory2::CreateSwapChainForComposition`
-(`DXGI_FORMAT_B8G8R8A8_UNORM_SRGB`, `DXGI_ALPHA_MODE_PREMULTIPLIED`,
+(`DXGI_FORMAT_B8G8R8A8_UNORM`, `DXGI_ALPHA_MODE_PREMULTIPLIED`,
 `FLIP_SEQUENTIAL`, BufferCount 3, `DXGI_SCALING_STRETCH`), bound with
 DirectComposition (`DCompositionCreateDevice → CreateTargetForHwnd →
 CreateVisual → SetContent → Commit`). This is the canonical transparent
-GPU-window recipe (Kenny Kerr, MSDN 2014; Qt uses the same). sRGB formats are
-**mandatory** — instance colors are straight-alpha sRGB premultiplied in the
-shader with blending in linear; non-sRGB targets visibly change gradients.
+GPU-window recipe (Kenny Kerr, MSDN 2014; Qt uses the same).
+
+Flip-model swap chains **reject `*_SRGB` backbuffer formats** (flip model is
+restricted to R16G16B16A16_FLOAT / B8G8R8A8_UNORM / R8G8B8A8_UNORM /
+R10G10B10A2_UNORM). sRGB encode is obtained by creating the render-target
+view as `DXGI_FORMAT_B8G8R8A8_UNORM_SRGB` **over the UNORM backbuffer** — a
+documented special exception to RTV format rules; no extra swap-chain flag is
+needed in D3D11. The sRGB RTV is **mandatory**: shader output is
+gamma-encoded on write and blending happens in linear, so instance colors
+keep macOS-identical gradients — a plain UNORM RTV visibly changes them.
+Recreate the RTV after every `ResizeBuffers`. Alpha mode is orthogonal:
+premultiplied alpha goes through the same sRGB encode.
 
 ### 7.2 Damage model & pacing (behavior contract)
 
@@ -386,7 +402,12 @@ Acceptance: PresentMon / Task Manager GPU shows ~0% while the bar is static.
 Three PSOs (quad, shape, glyph) sharing one blend state (`SrcBlend=ONE`,
 `DestBlend=INV_SRC_ALPHA`, both channels), cull mode **NONE** (the unit-quad
 strip winding is not guaranteed CCW), no MSAA. `shaders/ybar.hlsl` ships as a
-resource and compiles at startup with `D3DCompile` (vs_5_0/ps_5_0).
+resource and compiles at startup with `D3DCompile` (vs_5_0/ps_5_0). Ship
+`d3dcompiler_47.dll` **app-local** next to `ybar.exe` (redistributable under
+the Windows SDK license, ~4 MB): the System32 copy exists on all Win 10/11
+machines but is only documented as supported for UWP apps — app-local is the
+supported path for desktop apps and preserves the no-build-time-toolchain
+property.
 
 The MSL→HLSL translation is mechanical — validated against the shader source:
 `[[vertex_id]]/[[instance_id]]` → `SV_VertexID/SV_InstanceID`; device pointer
@@ -415,7 +436,14 @@ Model on Windows Terminal AtlasEngine + `lhecker/dwrite-hlsl`:
 - **Raster into the same atlas**: mask page 2048² R8 via
   `IDWriteGlyphRunAnalysis::CreateAlphaTexture` with
   **`DWRITE_TEXT_ANTIALIAS_MODE_GRAYSCALE`** (forced — ClearType 3×1 would
-  break the R8 coverage model and transparent composition); color page 1024²
+  break the R8 coverage model and transparent composition). Concretely:
+  `IDWriteFactory2::CreateGlyphRunAnalysis` with
+  `DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC` + grayscale antialias mode, then
+  `CreateAlphaTexture(DWRITE_TEXTURE_ALIASED_1x1)` — despite the enum name
+  this yields 8-bit antialiased coverage under grayscale mode (Skia:
+  "DWRITE_TEXTURE_ALIASED_1x1 is now misnamed, it must also be used with
+  grayscale"); never pass `DWRITE_RENDERING_MODE_ALIASED`, which produces
+  bi-level output. Color page 1024²
   premultiplied BGRA8-sRGB via `IDWriteFactory4::TranslateColorGlyphRun`
   (COLR layers; `DWRITE_E_NOCOLOR` → monochrome path) rendered through
   D2D into a `GUID_WICPixelFormat32bppPBGRA` target. Shelf packer, 1 px
@@ -435,7 +463,11 @@ Model on Windows Terminal AtlasEngine + `lhecker/dwrite-hlsl`:
   `IDWriteFontCollection::FindFamilyName` + face-name string match (DirectWrite
   exposes face names, so `"Hack Nerd Font:Bold Italic:14.0"` resolves the same
   way). `WM_FONTCHANGE` clears the font/glyph caches (late-installed Nerd
-  Fonts — same behavior as the CoreText registration notification).
+  Fonts — same behavior as the CoreText registration notification). It must
+  be handled in the **bar windows'** WndProc — message-only windows do not
+  receive broadcast messages, so the hidden message window never sees it.
+  It is also a convention honored by well-behaved font installers, not a
+  system guarantee.
 
 ### 7.5 Icons & images
 
@@ -458,7 +490,9 @@ Model on Windows Terminal AtlasEngine + `lhecker/dwrite-hlsl`:
 
 `blur_radius>0` or `glass=on` → `DwmSetWindowAttribute(DWMWA_SYSTEMBACKDROP_TYPE,
 DWMSBT_TRANSIENTWINDOW)` (Acrylic; Win11 22621+) + dark mode via
-`DWMWA_USE_IMMERSIVE_DARK_MODE`; popups likewise when `popup.blur_radius>0`.
+`DWMWA_USE_IMMERSIVE_DARK_MODE` (documented only to darken the frame; that it
+also selects the dark backdrop variant is undocumented-but-stable behavior,
+the same reliance wezterm ships); popups likewise when `popup.blur_radius>0`.
 The undocumented `SetWindowCompositionAttribute` accent path is dead on Win11
 — never used. **Per-item glass pills have no Windows analog**: item-level
 `glass`/`blur_radius` render as the shader's painted glass rim + translucent
@@ -509,7 +543,7 @@ measurement anyway (Windows scales are commonly 1.0/1.25/1.5).
 | space_change | komorebi provider (§11); without komorebi: no-op | INFO stays `""` |
 | system_woke / system_will_sleep | `WM_POWERBROADCAST`: `PBT_APMRESUMEAUTOMATIC` / `PBT_APMSUSPEND` (+`RegisterSuspendResumeNotification` for modern standby) | |
 | app_launched / app_terminated | From komorebi `Show`/`Destroy` window events when available; else 2 s process-snapshot diff (`EnumProcesses`) | **Semantics change**: window-scoped with komorebi (background processes invisible); WMI tracing needs admin — rejected. Document. |
-| Power | `GetSystemPowerStatus` + `RegisterPowerSettingNotification(GUID_ACDC_POWER_SOURCE, GUID_BATTERY_PERCENTAGE_REMAINING)` → `PBT_POWERSETTINGCHANGE` | Push, no polling. `"AC"`/`"BATTERY"` strings + dedupe/forced split preserved |
+| Power | `GetSystemPowerStatus` + `RegisterPowerSettingNotification(GUID_ACDC_POWER_SOURCE, GUID_BATTERY_PERCENTAGE_REMAINING)` → `PBT_POWERSETTINGCHANGE` | Push, no polling. `"AC"`/`"BATTERY"` strings + dedupe/forced split preserved; the third source condition `PoHot` (UPS) maps to `"AC"` |
 | Audio | `IMMDeviceEnumerator` → `IAudioEndpointVolume` (+`IAudioEndpointVolumeCallback`), `IMMNotificationClient::OnDefaultDeviceChanged` re-arm | Callbacks marshal to UI thread. Muted → 0, integer percent |
 | Network | `NotifyNetworkConnectivityHintChange` (or `INetworkListManager` events); SSID via `WlanQueryInterface(wlan_intf_opcode_current_connection)` | **Win11 24H2 gates SSID behind Location privacy** — degrade to `"connected"` exactly like macOS-without-authorization; `wifi_ssid_prompt=on` opens `ms-settings:privacy-location` |
 | SystemStats | `GetSystemTimes` deltas (busy = (kernel−idle)+user), `GlobalMemoryStatusEx` (Total−Avail)/Total; `GetDiskFreeSpaceExW` for `DISK_*_GB` | Microsoft explicitly recommends this over PDH for ≥1 Hz sampling. Same 2 s interval, 0–100 contract |
@@ -554,23 +588,33 @@ Feb'26, 0.1.41 May'26).
 
 - komorebi's data dir: `%LOCALAPPDATA%\komorebi\`.
 - **Command channel**: AF_UNIX socket `%LOCALAPPDATA%\komorebi\komorebi.sock`.
-  One connection per message: connect, write one JSON-serialized
-  `SocketMessage`, no framing/newline, close. Queries (`State`, `GlobalState`,
-  `Query(…)`): write, `shutdown(SD_SEND)`, read reply to EOF.
-- **`SocketMessage` encoding**: serde internally-tagged —
-  `{"type": "<Variant>", "content": <payload>}`; unit variants are
-  `{"type": "State"}`-style (komorebic generates exactly these).
+  Client convention (komorebi-client): one connection per message — connect,
+  write one JSON-serialized `SocketMessage`, no delimiter, close (1 s write
+  timeout). The daemon actually reads the stream **line-wise**, so batching
+  newline-separated messages on one connection is also legal (`send_batch`
+  does). Queries (`State`, `GlobalState`, `Query(…)`): write,
+  `shutdown(SD_SEND)`, read reply to EOF.
+- **`SocketMessage` encoding**: serde *adjacently* tagged
+  (`#[serde(tag="type", content="content")]`) —
+  `{"type": "<Variant>", "content": <payload>}`; tuple-variant content is a
+  JSON array; unit variants are `{"type": "State"}` with no content key
+  (komorebic generates exactly these).
 - **Subscription**: the *subscriber* creates a listener AF_UNIX socket at
-  `%LOCALAPPDATA%\komorebi\<name>.sock` (delete stale file first), then sends
+  `%LOCALAPPDATA%\komorebi\<name>` — the name is the file name **verbatim, no
+  `.sock` appended** (komorebi-bar uses extension-less `komorebi-bar-<word>`;
+  we use `ybar.sock` with the extension as part of the chosen name) — deletes
+  any stale file first, then sends
   `{"type":"AddSubscriberSocket","content":"<name>"}` to `komorebi.sock`.
   For each event, komorebi **connects to the subscriber socket, writes one
   JSON `Notification` (no newline), and closes** — so framing = accept one
-  connection, read to EOF, parse one JSON document. komorebi prunes
-  subscribers whose sockets fail on write. (`subscribe-pipe` also exists —
-  named pipe `\\.\pipe\<name>`, newline-delimited JSON, the yasb/Python
-  route — but the socket route keeps one IPC mechanism across the codebase.)
-  A `SubscribeOptions { filter_state_changes: true }` variant delivers only
-  state-changing notifications — komorebi-bar uses it; use it.
+  connection, read to EOF, parse one JSON document. komorebi prunes a
+  subscriber (and deletes its socket file) when **connecting to it fails** —
+  keep the listener accepting or you are silently unsubscribed on the next
+  event. (`subscribe-pipe` also exists — named pipe `\\.\pipe\<name>`,
+  newline-delimited JSON, the yasb/Python route — but the socket route keeps
+  one IPC mechanism across the codebase.) Subscribe with
+  `AddSubscriberSocketWithOptions(name, {filter_state_changes: true})` to
+  receive only state-changing notifications — komorebi-bar does.
 
 ### 11.2 Notification & State schema
 
@@ -582,7 +626,13 @@ Every notification is the **full state snapshot**:
 ```
 
 - `NotificationEvent` = `WindowManager(WindowManagerEvent) | Socket(SocketMessage)
-  | Monitor(…) | VirtualDesktop(…)`, each internally tagged.
+  | Monitor(…) | VirtualDesktop(…)` — but the outer enum is
+  **`#[serde(untagged)]`**: those four names never appear on the wire; `event`
+  is directly the inner enum's JSON. `WindowManagerEvent`, `SocketMessage`,
+  and `MonitorNotification` are each adjacently tagged (`type`/`content`);
+  `VirtualDesktopNotification` has **no tag** — its unit variants serialize as
+  bare strings (`"event": "EnteredAssociatedVirtualDesktop"`), so the parser
+  must accept `event` being a plain string, not only an object.
 - `WindowManagerEvent` variants (tag/content): `FocusChange, Show, Hide,
   Destroy, Cloak, Uncloak, Minimize, MoveResizeStart, MoveResizeEnd,
   MouseCapture, TitleUpdate` (payload `(WinEvent, Window)`) and
@@ -592,10 +642,17 @@ Every notification is the **full state snapshot**:
 - `Monitor`: `id, name, device, device_id, serial_number_id, size,
   work_area_size, work_area_offset, workspaces (Ring), workspace_names`.
 - `Workspace`: `name` (nullable), `containers (Ring)`, `monocle_container`,
-  `maximized_window`, `floating_windows`, `layout`, `tile`, ….
+  `maximized_window`, `floating_windows` (**a `Ring<Window>`** —
+  `{"elements":…,"focused":n}`, not a plain array), `layout`, `tile`, ….
 - `Window` serializes as `{"hwnd", "title", "exe", "class", "rect"}` — `exe`
   gives the process image name directly, which is everything the workspaces
-  widget needs for app icons/glyphs. `Rect` = `{left, top, right, bottom}`.
+  widget needs for app icons/glyphs. On lookup failure `title`/`exe`/`class`
+  contain literal `"could not get window …"` fallback strings, not null —
+  treat those as unknown.
+- `Rect` = `{left, top, right, bottom}` where **`right` and `bottom` are
+  width and height**, not edge coordinates (komorebi subtracts when
+  converting from Win32 `RECT`; komorebi-bar itself misuses `size.right` as
+  an x-coordinate — do not copy that). Values are physical pixels.
 
 Focused workspace = `monitors.elements[monitors.focused]
 .workspaces.focused`; workspace *name* when non-null, else 1-based index as
@@ -614,9 +671,12 @@ re-validate per release).
 - Subscribe as `<instance>` (i.e. socket `%LOCALAPPDATA%\komorebi\ybar.sock`;
   a renamed ybar instance gets its own). Reader thread: accept → read-to-EOF
   → parse → `PostMessage` to UI thread.
-- **Reconnect** (komorebi-bar's pattern): a zero-byte read / accept failure ⇒
-  komorebi died; loop `AddSubscriberSocket` re-registration every 1 s until it
-  succeeds, then re-apply the work-area offset (§11.4) and re-publish state.
+- **Reconnect** (komorebi-bar's pattern, one fix): a zero-byte read / accept
+  failure ⇒ komorebi died; loop re-registration every 1 s until it succeeds,
+  then re-apply the work-area offset (§11.4) and re-publish state.
+  Re-register with `AddSubscriberSocketWithOptions` — komorebi-bar re-sends
+  the plain variant here and silently loses its state filter after a
+  reconnect; don't copy that.
 - Events published on the YBar bus:
   - `space_change` (built-in) + **`komorebi_workspace_change`** (registered by
     the provider as a custom event) with env
@@ -643,10 +703,14 @@ On start / bar-height change / monitor change / komorebi reconnect, when
 `reserve=komorebi`:
 
 ```json
-{"type":"MonitorWorkAreaOffset","content":[<monitor_idx>, {"left":0,"top":H,"right":0,"bottom":0}]}
+{"type":"MonitorWorkAreaOffset","content":[<monitor_idx>, {"left":0,"top":H,"right":0,"bottom":H}]}
 ```
 
-per included monitor, where `H` = **physical pixels** of
+per included monitor. **Both `top` and `bottom` are `H`**: komorebi applies
+`top += offset.top; bottom -= offset.bottom` where `bottom` is the work-area
+*height* — `top` alone would shift the area down without shrinking it,
+pushing tiles `H` px past the bottom of the screen (komorebi-bar sets both,
+`bar.rs:503`). `H` = **physical pixels** of
 `(height + y_offset) × monitor scale` (komorebi rects are physical;
 komorebi-bar's un-scaled constant is a known limitation, we do better) and
 `monitor_idx` is komorebi's index for the monitor **matched via State
@@ -676,8 +740,9 @@ structure of the AeroSpace one (pills, focused highlight, reveal/collapse
 animation, app glyphs) but **event-driven with zero polling**: the provider's
 cached state replaces all three `aerospace list-*` CLI calls (enumeration =
 `workspaces.elements` per monitor; visible = non-empty ∪ focused, where
-non-empty = `containers.elements` non-empty or monocle/maximized/floating
-present; app names from `Window.exe` mapped through `helpers/app_icons.lua`).
+non-empty = `containers.elements` non-empty, or `monocle_container`/
+`maximized_window` set, or `floating_windows.elements` non-empty; app names
+from `Window.exe` mapped through `helpers/app_icons.lua`).
 Click = `komorebic focus-workspace <idx>` (compat form). Note komorebi
 workspaces are **per-monitor and dynamic** — re-enumerate pills on state
 notifications, not only at config load.
@@ -692,8 +757,9 @@ tampering.
 ### 11.7 Licensing
 
 komorebi is under the **Komorebi License 2.0.0** (PolyForm-Strict derivative:
-personal use permitted; source-only redistribution; commercial use requires a
-sponsorship license). ybar-win **does not link, bundle, or redistribute any
+personal use is a permitted purpose; source-only redistribution; the license
+grants no commercial purpose — commercial users need the separately offered
+Individual Commercial Use License, per the komorebi README). ybar-win **does not link, bundle, or redistribute any
 komorebi code** — it talks to a socket owned by a program the user installed
 under their own license. Public precedent: yasb and zebar integrate the same
 way. GPL-3.0 for ybar-win is therefore unaffected. (Not legal advice; note in
@@ -792,8 +858,8 @@ the README's third-party section.)
   bounds has no single-call DWrite equivalent; per-glyph accumulation may
   differ by a pixel on some fonts. Mitigation: golden-value suite (§14) is a
   W2 gate, not an afterthought.
-- **komorebi schema drift** — no formal stability guarantee; internally-tagged
-  serde output could change variant names. Mitigation: tolerant parsing,
+- **komorebi schema drift** — no formal stability guarantee; the tagged serde
+  output could change variant names. Mitigation: tolerant parsing,
   pinned fixtures + latest-release canary CI, all komorebi coupling isolated
   in one provider.
 - **Stale work-area offset on crash** — offset persists in komorebi until
@@ -819,7 +885,7 @@ the README's third-party section.)
 ## 17. Key references
 
 - Swift reference implementation: this repo (`docs/ARCHITECTURE.md`, `Sources/`, `Tests/`).
-- komorebi wire protocol: [komorebi-client/src/lib.rs](https://github.com/LGUG2Z/komorebi/blob/master/komorebi-client/src/lib.rs), [komorebi/src/lib.rs](https://github.com/LGUG2Z/komorebi/blob/master/komorebi/src/lib.rs) (`Notification`, `notify_subscribers`, `DATA_DIR`), [core/mod.rs](https://github.com/LGUG2Z/komorebi/blob/master/komorebi/src/core/mod.rs) (`SocketMessage`, serde tagging), [window.rs](https://github.com/LGUG2Z/komorebi/blob/master/komorebi/src/window.rs) (serialized fields), [ring.rs](https://github.com/LGUG2Z/komorebi/blob/master/komorebi/src/ring.rs), [komorebi-bar/src/main.rs](https://github.com/LGUG2Z/komorebi/blob/master/komorebi-bar/src/main.rs) (offset handshake, reconnect), [subscribe-socket docs](https://lgug2z.github.io/komorebi/cli/subscribe-socket.html), [LICENSE](https://github.com/LGUG2Z/komorebi/blob/master/LICENSE.md).
+- komorebi wire protocol: [komorebi-client/src/lib.rs](https://github.com/LGUG2Z/komorebi/blob/master/komorebi-client/src/lib.rs), [komorebi/src/lib.rs](https://github.com/LGUG2Z/komorebi/blob/master/komorebi/src/lib.rs) (`Notification`, `notify_subscribers`, `DATA_DIR`), [core/mod.rs](https://github.com/LGUG2Z/komorebi/blob/master/komorebi/src/core/mod.rs) (`SocketMessage`, serde tagging), [komorebi-layouts/src/rect.rs](https://github.com/LGUG2Z/komorebi/blob/master/komorebi-layouts/src/rect.rs) (`Rect` width/height semantics), [window.rs](https://github.com/LGUG2Z/komorebi/blob/master/komorebi/src/window.rs) (serialized fields), [ring.rs](https://github.com/LGUG2Z/komorebi/blob/master/komorebi/src/ring.rs), [komorebi-bar/src/main.rs](https://github.com/LGUG2Z/komorebi/blob/master/komorebi-bar/src/main.rs) (offset handshake, reconnect), [subscribe-socket docs](https://lgug2z.github.io/komorebi/cli/subscribe-socket.html), [LICENSE](https://github.com/LGUG2Z/komorebi/blob/master/LICENSE.md).
 - Rendering/text: [CreateSwapChainForComposition](https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_2/nf-dxgi1_2-idxgifactory2-createswapchainforcomposition), [Kenny Kerr — window layering with the composition engine](https://learn.microsoft.com/en-us/archive/msdn-magazine/2014/june/windows-with-c-high-performance-window-layering-using-the-windows-composition-engine), [waitable swap chains](https://learn.microsoft.com/en-us/windows/uwp/gaming/reduce-latency-with-dxgi-1-3-swap-chains), [Windows Terminal AtlasEngine](https://github.com/microsoft/terminal/pull/11623), [lhecker/dwrite-hlsl](https://github.com/lhecker/dwrite-hlsl), [IDWriteGlyphRunAnalysis::CreateAlphaTexture](https://learn.microsoft.com/en-us/windows/win32/api/dwrite/nf-dwrite-idwriteglyphrunanalysis-createalphatexture), [TranslateColorGlyphRun](https://learn.microsoft.com/en-us/windows/win32/api/dwrite_3/nf-dwrite_3-idwritefactory4-translatecolorglyphrun), [Segoe Fluent Icons table](https://learn.microsoft.com/en-us/windows/apps/design/iconography/segoe-fluent-icons-font), [fluentui-system-icons](https://github.com/microsoft/fluentui-system-icons).
 - Windowing/providers: [extended window styles](https://learn.microsoft.com/en-us/windows/win32/winmsg/extended-window-styles), [SHAppBarMessage](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shappbarmessage), [DWM_SYSTEMBACKDROP_TYPE](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwm_systembackdrop_type) (+ [wezterm precedent](https://github.com/wezterm/wezterm/pull/3528)), [GSMTC](https://learn.microsoft.com/en-us/uwp/api/windows.media.control.globalsystemmediatransportcontrolssessionmanager) (+ [Raymond Chen worked example](https://devblogs.microsoft.com/oldnewthing/20231108-00/?p=108980)), [power events](https://learn.microsoft.com/en-us/windows/win32/power/registering-for-power-events), [AF_UNIX on Windows](https://devblogs.microsoft.com/commandline/af_unix-comes-to-windows/), [per-monitor DPI](https://learn.microsoft.com/en-us/windows/win32/hidpi/high-dpi-desktop-application-development-on-windows), [DISPLAYCONFIG_TARGET_DEVICE_NAME](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-displayconfig_target_device_name).
 - Third-party bar precedent: [yasb komorebi integration](https://deepwiki.com/amnweb/yasb/7.3-komorebi-integration), [zebar work-area issue](https://github.com/glzr-io/zebar/issues/50), [komorebi named-pipe subscription example](https://gist.github.com/peddamat/ac8f78a375d003d69669d75a012a6c46).
