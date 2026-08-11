@@ -42,7 +42,7 @@ void registerClassOnce() {
         windowClass.lpfnWndProc = barWindowProc;
         windowClass.hInstance = GetModuleHandleW(nullptr);
         windowClass.lpszClassName = kBarClass;
-        windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        windowClass.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512)); // IDC_ARROW
         return RegisterClassW(&windowClass) != 0;
     }();
     (void)registered;
