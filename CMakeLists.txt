@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if(MSVC)
   add_compile_options(/W4 /utf-8)
+  add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
   # Static CRT for a self-contained ybar.exe (spec section 13).
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()

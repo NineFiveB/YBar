@@ -21,10 +21,12 @@ jobs:
         run: cmake --preset default
 
       - name: Build
-        shell: pwsh
+        shell: cmd
         run: |
-          cmake --build --preset default 2>&1 | Tee-Object -FilePath build.log
-          exit $LASTEXITCODE
+          cmake --build --preset default > build.log 2>&1
+          set BUILD_EXIT=%ERRORLEVEL%
+          type build.log
+          exit /b %BUILD_EXIT%
 
       - name: Upload build log
         if: always()
