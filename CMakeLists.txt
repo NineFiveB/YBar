@@ -18,6 +18,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 # Platform-neutral engine code. Grows per docs/WINDOWS-PORT.md as milestones land.
 add_library(ybar_core
   src/anim/curves.cpp
+  src/anim/scheduler.cpp
   src/events/event_bus.cpp
   src/ipc/command_handler.cpp
   src/ipc/command_parser.cpp

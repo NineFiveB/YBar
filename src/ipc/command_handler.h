@@ -38,7 +38,8 @@ struct DaemonHooks {
 class CommandHandler {
 public:
     CommandHandler(ybar::model::ItemStore& store, ybar::model::BarSettings& settings,
-                   ybar::events::EventBus& bus, DaemonHooks hooks);
+                   ybar::events::EventBus& bus, DaemonHooks hooks,
+                   ybar::anim::AnimationScheduler* scheduler = nullptr);
 
     // Handles one client message; batch outputs joined with "\n".
     std::string handle(const std::vector<std::string>& argv);
@@ -55,6 +56,7 @@ private:
     ybar::model::BarSettings& settings_;
     ybar::events::EventBus& bus_;
     DaemonHooks hooks_;
+    ybar::anim::AnimationScheduler* scheduler_;
 };
 
 } // namespace ybar::ipc

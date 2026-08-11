@@ -48,8 +48,10 @@ std::optional<ParsedPosition> parseAddPosition(const std::string& token) {
 } // namespace
 
 CommandHandler::CommandHandler(ybar::model::ItemStore& store, ybar::model::BarSettings& settings,
-                               ybar::events::EventBus& bus, DaemonHooks hooks)
-    : store_(store), settings_(settings), bus_(bus), hooks_(std::move(hooks)) {}
+                               ybar::events::EventBus& bus, DaemonHooks hooks,
+                               ybar::anim::AnimationScheduler* scheduler)
+    : store_(store), settings_(settings), bus_(bus), hooks_(std::move(hooks)),
+      scheduler_(scheduler) {}
 
 std::string CommandHandler::handle(const std::vector<std::string>& argv) {
     std::optional<AnimationScope> animation; // message-scoped
@@ -189,9 +191,19 @@ std::string CommandHandler::handleBatch(const Batch& batch,
             if (value.empty() && token.find('=') == std::string::npos)
                 return "[!] expected key=value, got: " + token;
             for (auto* item : matches) {
-                // TODO(animation slice): route through the scheduler when
-                // `animation` is set; direct set for now.
-                if (const auto error = PropertySetter::set(*item, key, value)) return *error;
+                if (scheduler_) {
+                    PropertySetter::AnimationContext context;
+                    context.scheduler = scheduler_;
+                    context.itemId = item->id;
+                    if (animation) {
+                        context.curve = ybar::anim::parseCurve(animation->curve);
+                        context.frames = animation->frames;
+                    }
+                    PropertySetter::beginAnimation(context);
+                }
+                const auto error = PropertySetter::set(*item, key, value);
+                if (scheduler_) PropertySetter::endAnimation();
+                if (error) return *error;
             }
         }
         return {};
@@ -264,6 +276,10 @@ std::string CommandHandler::handleBatch(const Batch& batch,
 
     if (batch.domain == "remove") {
         if (args.size() != 1) return "[!] --remove needs an item name";
+        if (scheduler_) { // in-flight animations must not touch freed fields
+            for (const auto* item : store_.matching(args[0]))
+                scheduler_->cancelPrefix("item." + std::to_string(item->id) + ".");
+        }
         if (!store_.remove(args[0])) return "[!] no item matching " + args[0];
         return {};
     }
@@ -298,6 +314,7 @@ std::string CommandHandler::handleBatch(const Batch& batch,
     }
 
     if (batch.domain == "reload") {
+        if (scheduler_) scheduler_->cancelAll();
         if (hooks_.reload) hooks_.reload();
         return {};
     }

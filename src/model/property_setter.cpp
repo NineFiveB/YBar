@@ -60,9 +60,27 @@ std::string errChannel(std::string_view channel) {
 using Result = std::optional<std::string>;
 constexpr std::nullopt_t ok = std::nullopt;
 
+// Message-scoped animation state (UI-thread only, spec 3.8).
+const ybar::model::PropertySetter::AnimationContext* g_animation = nullptr;
+std::string g_currentPath; // full dotted path of the set in progress
+
+std::string animationKey() {
+    return "item." + std::to_string(g_animation ? g_animation->itemId : 0) + "." +
+           g_currentPath;
+}
+
 Result setFloat(double& field, const std::string& value) {
     const auto parsed = parseFloat(value);
     if (!parsed) return errNumber(value);
+    if (g_animation && g_animation->scheduler) {
+        if (g_animation->frames > 0) {
+            g_animation->scheduler->add(
+                animationKey(), g_animation->curve, g_animation->frames, field, *parsed,
+                [&field](const ybar::anim::AnimValue& v) { field = std::get<double>(v); });
+            return ok;
+        }
+        g_animation->scheduler->cancel(animationKey()); // direct set cancels
+    }
     field = *parsed;
     return ok;
 }
@@ -84,6 +102,17 @@ Result setColor(Color& field, const Segments& segs, std::size_t at, const std::s
     if (at >= segs.size()) {
         const auto parsed = Color::parse(value);
         if (!parsed) return errColor(value);
+        if (g_animation && g_animation->scheduler) {
+            if (g_animation->frames > 0) { // linear-light color animation
+                g_animation->scheduler->add(
+                    animationKey(), g_animation->curve, g_animation->frames, field, *parsed,
+                    [&field](const ybar::anim::AnimValue& v) {
+                        field = std::get<Color>(v);
+                    });
+                return ok;
+            }
+            g_animation->scheduler->cancel(animationKey());
+        }
         field = *parsed;
         return ok;
     }
@@ -401,6 +430,14 @@ Result setDisplay(Item& item, const std::string& value) {
 
 } // namespace
 
+void PropertySetter::beginAnimation(const AnimationContext& context) {
+    static AnimationContext storage;
+    storage = context;
+    g_animation = &storage;
+}
+
+void PropertySetter::endAnimation() { g_animation = nullptr; }
+
 std::optional<bool> PropertySetter::parseBool(std::string_view value) {
     const auto v = lower(value);
     if (v == "on" || v == "true" || v == "yes" || v == "1") return true;
@@ -411,6 +448,7 @@ std::optional<bool> PropertySetter::parseBool(std::string_view value) {
 std::optional<std::string> PropertySetter::set(Item& item, std::string_view path,
                                                const std::string& value) {
     if (path.empty()) return "[!] empty property";
+    g_currentPath = std::string(path);
     const auto segs = split(path);
     const auto key = segs[0];
 

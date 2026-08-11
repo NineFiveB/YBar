@@ -7,6 +7,7 @@ namespace ybar::render {
 using ybar::model::BackgroundStyle;
 using ybar::model::Color;
 using ybar::model::Item;
+using ybar::model::Point;
 using ybar::model::Rect;
 using ybar::model::TextPart;
 
@@ -71,6 +72,116 @@ void emitText(DisplayList& list, const ShapedLine& line, double penX, double bas
             if (entry->color) glyph.flags |= kGlyphFlagColor;
             list.glyphs.push_back(glyph);
         }
+    }
+}
+
+// Graph: per-segment fill quads down to the box baseline + constant-thickness
+// polyline quads (spec 3.9). Sample x step = 1 point; y = maxY - sample*h.
+void emitGraph(DisplayList& list, const ybar::model::GraphState& graph, const Rect& box,
+               bool rightToLeft, double scale) {
+    const auto samples = graph.ordered();
+    if (samples.size() < 2) return;
+    const auto lineColor = colorOf(graph.lineColor);
+    const auto fillColor = colorOf(graph.effectiveFillColor());
+    const double half = graph.lineWidth / 2.0;
+
+    auto pointAt = [&](std::size_t i) {
+        const double x = rightToLeft ? box.maxX() - static_cast<double>(i)
+                                     : box.minX() + static_cast<double>(i);
+        const double y = box.maxY() - samples[i] * box.height;
+        return Point{x * scale, y * scale};
+    };
+    const float baseline = static_cast<float>(box.maxY() * scale);
+
+    for (std::size_t i = 0; i + 1 < samples.size(); ++i) {
+        const auto a = pointAt(i);
+        const auto b = pointAt(i + 1);
+        // Fill: two triangles down to the baseline.
+        const ShapeVertex fillQuad[6] = {
+            {{static_cast<float>(a.x), static_cast<float>(a.y)}, {}, fillColor},
+            {{static_cast<float>(b.x), static_cast<float>(b.y)}, {}, fillColor},
+            {{static_cast<float>(a.x), baseline}, {}, fillColor},
+            {{static_cast<float>(b.x), static_cast<float>(b.y)}, {}, fillColor},
+            {{static_cast<float>(b.x), baseline}, {}, fillColor},
+            {{static_cast<float>(a.x), baseline}, {}, fillColor},
+        };
+        list.shapeVertices.insert(list.shapeVertices.end(), fillQuad, fillQuad + 6);
+        // Line: a quad along the segment normal.
+        const double dx = b.x - a.x;
+        const double dy = b.y - a.y;
+        const double length = std::sqrt(dx * dx + dy * dy);
+        if (length <= 0) continue;
+        const float nx = static_cast<float>(-dy / length * half * scale);
+        const float ny = static_cast<float>(dx / length * half * scale);
+        const auto ax = static_cast<float>(a.x);
+        const auto ay = static_cast<float>(a.y);
+        const auto bx = static_cast<float>(b.x);
+        const auto by = static_cast<float>(b.y);
+        const ShapeVertex lineQuad[6] = {
+            {{ax - nx, ay - ny}, {}, lineColor}, {{ax + nx, ay + ny}, {}, lineColor},
+            {{bx - nx, by - ny}, {}, lineColor}, {{ax + nx, ay + ny}, {}, lineColor},
+            {{bx + nx, by + ny}, {}, lineColor}, {{bx - nx, by - ny}, {}, lineColor},
+        };
+        list.shapeVertices.insert(list.shapeVertices.end(), lineQuad, lineQuad + 6);
+    }
+}
+
+void emitText(DisplayList& list, const ShapedLine& line, double penX, double baselineY,
+              ybar::model::Color color, double scale, GlyphAtlas& atlas);
+
+// Slider: rounded track, highlight over the left fraction, centered knob text.
+void emitSlider(DisplayList& list, const ybar::model::SliderState& slider, const Rect& box,
+                double scale, FontCache& fonts, GlyphAtlas& atlas) {
+    const double trackHeight =
+        slider.background.height > 0 ? slider.background.height : 6;
+    const Rect track{box.x, box.midY() - trackHeight / 2, slider.width, trackHeight};
+    if (slider.background.drawing) list.quads.push_back(backgroundQuad(slider.background, track, scale));
+
+    const double fraction = std::clamp(slider.percentage / 100.0, 0.0, 1.0);
+    if (fraction > 0) {
+        ybar::model::BackgroundStyle highlight = slider.background;
+        highlight.color = slider.highlightColor;
+        highlight.gradientColor.reset();
+        highlight.borderWidth = 0;
+        list.quads.push_back(backgroundQuad(
+            highlight, Rect{track.x, track.y, track.width * fraction, track.height}, scale));
+    }
+    if (slider.knob.drawing && !slider.knob.string.empty()) {
+        const auto& line = fonts.shape(slider.knob.displayString(), slider.knob.font);
+        const double knobX =
+            std::clamp(track.x + track.width * fraction - line.width / 2, track.x,
+                       track.maxX() - line.width);
+        const double baselineY =
+            box.midY() - slider.knob.yOffset + (line.ascent - line.descent) / 2;
+        emitText(list, line, knobX - line.inkMinX, baselineY, slider.knob.color, scale, atlas);
+    }
+}
+
+// Gauge: 270-degree dial via the arc quad flag; the item LABEL renders
+// centered inside the dial (spec 3.9).
+void emitGauge(DisplayList& list, const ybar::model::Item& item, const Rect& box, double scale,
+               FontCache& fonts, GlyphAtlas& atlas) {
+    const auto& gauge = *item.gauge;
+    const double diameter = std::min(gauge.size, box.height);
+    const Rect dial{box.x + (box.width - diameter) / 2, box.midY() - diameter / 2, diameter,
+                    diameter};
+    QuadInstance quad;
+    snappedRect(dial, scale, quad.origin, quad.size);
+    const auto radius = static_cast<float>(diameter * scale / 2);
+    quad.radii = {radius, radius, radius, radius}; // circle
+    quad.fill = colorOf(gauge.trackColor);         // track
+    quad.borderColor = colorOf(gauge.color);       // progress arc
+    quad.borderWidth = static_cast<float>(gauge.thickness * scale);
+    quad.gradientDir = {static_cast<float>(std::clamp(gauge.percentage / 100.0, 0.0, 1.0)), 0};
+    quad.flags = kQuadFlagArc;
+    list.quads.push_back(quad);
+
+    if (item.label.drawing && !item.label.string.empty()) {
+        const auto& line = fonts.shape(item.label.displayString(), item.label.font);
+        const double baselineY =
+            dial.midY() - item.label.yOffset + (line.ascent - line.descent) / 2;
+        emitText(list, line, dial.midX() - line.width / 2 - line.inkMinX, baselineY,
+                 item.label.color, scale, atlas);
     }
 }
 
@@ -185,12 +296,27 @@ DisplayList buildScene(const std::vector<std::unique_ptr<Item>>& items,
         adjusted.y -= item->yOffset; // y_offset positive-up
         double penX = adjusted.x;
         emitPart(list, item->icon, penX, adjusted, scale, fonts, atlas);
-        // Components (graph/slider/gauge/image) land in the next slice; skip
-        // their width so the label stays in place.
-        if (item->graph) penX += item->graph->capacity;
-        if (item->slider) penX += item->slider->width;
-        if (item->gauge) penX += item->gauge->size;
-        if (item->image && item->image->drawing) penX += item->image->advance();
+
+        if (item->graph) {
+            const bool rightToLeft = item->position == ybar::model::ItemPosition::Right ||
+                                     item->position == ybar::model::ItemPosition::CenterLeft;
+            const Rect box{penX, adjusted.y + 1, static_cast<double>(item->graph->capacity),
+                           adjusted.height - 2};
+            emitGraph(list, *item->graph, box, rightToLeft, scale);
+            penX += item->graph->capacity;
+        }
+        if (item->slider) {
+            emitSlider(list, *item->slider, Rect{penX, adjusted.y, item->slider->width,
+                                                 adjusted.height},
+                       scale, fonts, atlas);
+            penX += item->slider->width;
+        }
+        if (item->gauge) {
+            emitGauge(list, *item, Rect{penX, adjusted.y, item->gauge->size, adjusted.height},
+                      scale, fonts, atlas);
+            penX += item->gauge->size;
+        }
+        if (item->image && item->image->drawing) penX += item->image->advance(); // WIC later
         if (!item->gauge) emitPart(list, item->label, penX, adjusted, scale, fonts, atlas);
     }
 

@@ -13,6 +13,7 @@
 #include <memory>
 #include <unordered_map>
 
+#include "anim/scheduler.h"
 #include "app/script_runner.h"
 #include "events/event_bus.h"
 #include "ipc/command_handler.h"
@@ -48,6 +49,18 @@ constexpr UINT kMsgKomorebi = WM_APP + 3;
 constexpr UINT_PTR kRoutineTimer = 1;
 constexpr UINT_PTR kExitTimer = 2;
 constexpr UINT_PTR kRenderRetryTimer = 3;
+constexpr UINT_PTR kAnimationTimer = 4;
+
+double monotonicSeconds() {
+    static const double frequency = [] {
+        LARGE_INTEGER f;
+        QueryPerformanceFrequency(&f);
+        return static_cast<double>(f.QuadPart);
+    }();
+    LARGE_INTEGER counter;
+    QueryPerformanceCounter(&counter);
+    return static_cast<double>(counter.QuadPart) / frequency;
+}
 
 struct IpcRequest {
     std::vector<std::string> argv;
@@ -70,8 +83,21 @@ struct DaemonState {
 
     ScriptRunner scripts;
     std::unique_ptr<ybar::providers::KomorebiProvider> komorebi;
+    ybar::anim::AnimationScheduler scheduler;
+    bool animationTimerLive = false;
     int appliedOffsetPhysical = -1;
     int hoverItemId = -1; // targeted mouse.entered/exited tracking
+
+    // On-demand animation clock: runs only while animations exist (spec 7.2).
+    void syncAnimationTimer() {
+        if (scheduler.active() && !animationTimerLive) {
+            SetTimer(messageWindow, kAnimationTimer, 16, nullptr);
+            animationTimerLive = true;
+        } else if (!scheduler.active() && animationTimerLive) {
+            KillTimer(messageWindow, kAnimationTimer);
+            animationTimerLive = false;
+        }
+    }
 
     ybar::render::GlyphAtlas* atlasFor(double scale) {
         const int key = static_cast<int>(scale * 100 + 0.5);
@@ -115,6 +141,7 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             if (g_state) {
                 g_state->renderQueued = false;
                 g_state->renderAll();
+                g_state->syncAnimationTimer();
             }
             return 0;
         case kMsgKomorebi: {
@@ -159,6 +186,10 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             } else if (wParam == kRenderRetryTimer && g_state) {
                 KillTimer(hwnd, kRenderRetryTimer);
                 g_state->renderAll();
+            } else if (wParam == kAnimationTimer && g_state) {
+                g_state->scheduler.tick(monotonicSeconds());
+                g_state->renderAll();
+                g_state->syncAnimationTimer();
             }
             return 0;
         case WM_FONTCHANGE:
@@ -375,7 +406,8 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
         return rects;
     };
     state.handler = std::make_unique<ybar::ipc::CommandHandler>(state.store, state.settings,
-                                                                state.bus, hooks);
+                                                                state.bus, hooks,
+                                                                &state.scheduler);
 
     ybar::ipc::SocketServer server;
     const auto socketPath = ybar::ipc::socketPath(instance);
