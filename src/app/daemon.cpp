@@ -269,6 +269,11 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     trace("gpu stack ready");
 
     // Scripts: the event bus dispatches through the ScriptRunner (spec 10.1).
+    state.bus.itemsProvider = [&state] {
+        std::vector<ybar::model::Item*> items;
+        for (const auto& item : state.store.items()) items.push_back(item.get());
+        return items;
+    };
     state.bus.runItemScript = [&state](ybar::model::Item& item,
                                        const ybar::events::Environment& env) {
         if (!item.script.empty()) state.scripts.run(item.script, env);
