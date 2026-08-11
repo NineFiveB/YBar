@@ -8,6 +8,7 @@
 // clang-format on
 
 #include <cstdio>
+#include <cstdlib>
 #include <future>
 #include <memory>
 #include <unordered_map>
@@ -29,6 +30,15 @@
 namespace ybar::app {
 
 namespace {
+
+// YBAR_DEBUG=1 traces daemon bring-up to stderr (crash-site bisection).
+void trace(const char* stage) {
+    static const bool enabled = std::getenv("YBAR_DEBUG") != nullptr;
+    if (enabled) {
+        std::fprintf(stderr, "[ybar:init] %s\n", stage);
+        std::fflush(stderr);
+    }
+}
 
 constexpr UINT kMsgIpcRequest = WM_APP + 1;
 constexpr UINT kMsgRender = WM_APP + 2;
@@ -140,10 +150,13 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
 
 void DaemonState::renderAll() {
     if (!renderer || !fonts) return;
+    trace("renderAll: begin");
     for (auto& surface : surfaces) {
+        trace("renderAll: applySettings");
         surface->applySettings(settings);
         if (settings.hidden) continue;
         const double scale = surface->scale();
+        trace("renderAll: atlas");
         auto* atlas = atlasFor(scale);
         if (!atlas) continue;
 
@@ -158,15 +171,19 @@ void DaemonState::renderAll() {
             m.label = {label.width, label.measuredHeight()};
             return m;
         };
+        trace("renderAll: layout");
         const auto boxes = ybar::model::layout(store.items(), layoutSettings, measure);
 
         ybar::render::SceneParams params{surface->logicalWidth(), surface->logicalHeight(),
                                          scale};
+        trace("renderAll: buildScene");
         const auto list =
             ybar::render::buildScene(store.items(), boxes, settings, params, *fonts, *atlas);
+        trace("renderAll: render");
         if (!renderer->render(list, surface->renderSurface(), atlas)) {
             SetTimer(messageWindow, kRenderRetryTimer, 1000, nullptr); // spec 7.2
         }
+        trace("renderAll: surface done");
     }
 }
 
@@ -191,19 +208,25 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     }
 
     // GPU stack — graceful degradation to headless when unavailable.
+    trace("renderer: create");
     state.renderer = ybar::render::Renderer::create(exeDirectory() + "\\shaders\\ybar.hlsl");
+    trace("renderer: created");
     if (state.renderer) {
         state.fonts = ybar::render::FontCache::create();
+        trace("fonts: created");
         for (const auto& monitor : ybar::win::enumerateMonitors()) {
             if (!state.settings.includesDisplay(monitor.arrangementIndex, monitor.primary))
                 continue;
+            trace("surface: create");
             auto surface = ybar::win::BarSurface::create(*state.renderer, monitor,
                                                          state.settings);
+            trace("surface: created");
             if (surface) state.surfaces.push_back(std::move(surface));
         }
     } else {
         std::fprintf(stderr, "[ybar] rendering unavailable — running headless\n");
     }
+    trace("gpu stack ready");
 
     ybar::ipc::DaemonHooks hooks;
     hooks.exit = [hwnd = state.messageWindow] { SetTimer(hwnd, kExitTimer, 150, nullptr); };

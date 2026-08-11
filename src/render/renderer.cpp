@@ -49,6 +49,7 @@ struct StructuredBuffer {
         if (bytes == 0) return true;
         if (bytes > capacityBytes) {
             capacityBytes = std::max<std::size_t>(bytes, std::max<std::size_t>(capacityBytes * 2, 16384));
+            capacityBytes = ((capacityBytes + stride - 1) / stride) * stride; // stride multiple
             buffer.Reset();
             srv.Reset();
             D3D11_BUFFER_DESC desc{};
