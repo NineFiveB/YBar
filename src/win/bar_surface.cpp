@@ -12,6 +12,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 using Microsoft::WRL::ComPtr;
 
@@ -130,8 +131,21 @@ std::unique_ptr<BarSurface> BarSurface::create(ybar::render::Renderer& renderer,
     impl->target->SetRoot(impl->visual.Get());
     impl->compositionDevice->Commit();
 
-    impl->logicalW = widthPx / monitor.scale;
-    impl->logicalH = heightPx / monitor.scale;
+    // The window's own DPI is authoritative under PerMonitorV2 — prefer it
+    // over the enumeration-time monitor scale.
+    const UINT windowDpi = GetDpiForWindow(impl->hwnd);
+    if (windowDpi != 0) impl->monitorInfo.scale = static_cast<double>(windowDpi) / 96.0;
+    impl->logicalW = widthPx / impl->monitorInfo.scale;
+    impl->logicalH = heightPx / impl->monitorInfo.scale;
+
+    if (std::getenv("YBAR_DEBUG")) {
+        std::fprintf(stderr,
+                     "[ybar:surface] monitorFrame=%.0fx%.0f enumScale=%.2f windowDpi=%u "
+                     "scale=%.2f widthPx=%d logicalW=%.0f\n",
+                     monitor.frame.width, monitor.frame.height, monitor.scale, windowDpi,
+                     impl->monitorInfo.scale, widthPx, impl->logicalW);
+        std::fflush(stderr);
+    }
 
     ShowWindow(impl->hwnd, settings.hidden ? SW_HIDE : SW_SHOWNOACTIVATE);
     SetWindowPos(impl->hwnd,
