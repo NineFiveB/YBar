@@ -3,6 +3,8 @@
 // behaviors are cross-implementation invariants — see docs/WINDOWS-PORT.md
 // section 3.1.
 
+#include <algorithm>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include "ipc/wire_format.h"
