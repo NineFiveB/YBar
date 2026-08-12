@@ -103,7 +103,18 @@ std::string CommandHandler::handleBatch(const Batch& batch,
                 errors.push_back("[!] expected key=value, got: " + token);
                 continue;
             }
-            if (const auto error = BarPropertySetter::set(settings_, key, value)) {
+            if (scheduler_) {
+                BarPropertySetter::AnimationContext context;
+                context.scheduler = scheduler_;
+                if (animation) {
+                    context.curve = ybar::anim::parseCurve(animation->curve);
+                    context.frames = animation->frames;
+                }
+                BarPropertySetter::beginAnimation(context);
+            }
+            const auto error = BarPropertySetter::set(settings_, key, value);
+            if (scheduler_) BarPropertySetter::endAnimation();
+            if (error) {
                 errors.push_back(*error);
                 continue;
             }
@@ -238,6 +249,8 @@ std::string CommandHandler::handleBatch(const Batch& batch,
                     PropertySetter::AnimationContext context;
                     context.scheduler = scheduler_;
                     context.itemId = item->id;
+                    context.measureNaturalWidth = hooks_.measureNaturalWidth;
+                    context.measureNaturalPartWidth = hooks_.measureNaturalPartWidth;
                     if (animation) {
                         context.curve = ybar::anim::parseCurve(animation->curve);
                         context.frames = animation->frames;

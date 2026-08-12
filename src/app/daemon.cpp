@@ -7,6 +7,8 @@
 #include <windows.h>
 // clang-format on
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <future>
@@ -201,6 +203,11 @@ struct DaemonState {
     void updatePopups();
     void closeAutoClosePopups(int exceptHostId);
     void dispatchClick(ybar::model::Item& item, const char* button, const char* modifier);
+
+    // Slider dragging (spec 3.9): the item captured on press keeps receiving
+    // motion until release, even past its own frame.
+    int draggingSliderId = -1;
+    void updateSlider(ybar::model::Item& item, std::size_t surfaceIndex, double localX);
     void showTooltip(ybar::model::Item& item);
     void hideTooltip();
     ybar::model::MeasuredContent measureItem(const ybar::model::Item& item) {
@@ -804,6 +811,35 @@ void DaemonState::dispatchClick(ybar::model::Item& item, const char* button,
     bus.triggerTargeted(item, "mouse.clicked", info, extra);
 }
 
+// Maps a bar-local x to a slider percentage. The track starts after the
+// item's left padding, the alignment slack of a fixed-width item, and the
+// icon — the same offsets the renderer uses.
+void DaemonState::updateSlider(ybar::model::Item& item, std::size_t surfaceIndex,
+                               double localX) {
+    if (!item.slider || !fonts) return;
+    const auto* frame = frameFor(surfaceIndex, item.id);
+    if (!frame) return;
+
+    double trackX = frame->x + item.paddingLeft;
+    if (item.customWidth >= 0) {
+        const double slack =
+            std::max(0.0, item.customWidth - ybar::model::naturalLength(item, measureItem(item)));
+        if (item.align == 'c') trackX += slack / 2;
+        else if (item.align == 'r') trackX += slack;
+    }
+    if (item.icon.drawing && !item.icon.displayString().empty()) {
+        const auto& icon = fonts->shape(item.icon.displayString(), item.icon.font);
+        trackX += item.icon.paddingLeft + icon.width + item.icon.paddingRight;
+    }
+    const double width = item.slider->width > 0 ? item.slider->width : 1;
+    item.slider->percentage =
+        std::min(100.0, std::max(0.0, (localX - trackX) / width * 100.0));
+    if (renderer && !renderQueued) {
+        renderQueued = true; // coalesce to one frame per turn (spec 7.2)
+        PostMessageW(messageWindow, kMsgRender, 0, 0);
+    }
+}
+
 void DaemonState::closeAutoClosePopups(int exceptHostId) {
     bool changed = false;
     for (const auto& item : store.items()) {
@@ -1125,6 +1161,36 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
                 return bracket;
             };
             using Kind = ybar::win::MouseEvent::Kind;
+
+            // A slider drag captures the pointer: motion past the item's own
+            // frame keeps updating it, and the release commits the value.
+            if (state.draggingSliderId != -1 &&
+                (event.kind == Kind::Move || event.kind == Kind::Up)) {
+                for (const auto& candidate : state.store.items()) {
+                    if (candidate->id != state.draggingSliderId || !candidate->slider) continue;
+                    const bool released = event.kind == Kind::Up;
+                    candidate->slider->isDragged = !released;
+                    state.updateSlider(*candidate, surfaceIndex, event.x);
+                    if (released) {
+                        state.draggingSliderId = -1;
+                        const int percentage =
+                            static_cast<int>(std::lround(candidate->slider->percentage));
+                        ybar::events::Environment extra{{"PERCENTAGE",
+                                                         std::to_string(percentage)},
+                                                        {"BUTTON", "left"},
+                                                        {"MODIFIER", "none"}};
+                        if (!candidate->clickScript.empty()) {
+                            auto scriptEnv = extra;
+                            scriptEnv["NAME"] = candidate->name;
+                            state.scripts.run(candidate->clickScript, scriptEnv);
+                        }
+                        state.bus.triggerTargeted(*candidate, "mouse.clicked", "", extra);
+                    }
+                    break;
+                }
+                return;
+            }
+
             auto* item = event.kind == Kind::Leave ? nullptr : hitTest(event.x, event.y);
 
             // Hover transitions (mouse.entered / mouse.exited) + tooltip dwell.
@@ -1154,6 +1220,15 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
             // auto-close popups except the pressed host's (spec 3.9).
             if (event.kind == Kind::Down) {
                 state.closeAutoClosePopups(item ? item->id : -1);
+                if (item && item->slider) {
+                    state.draggingSliderId = item->id;
+                    item->slider->isDragged = true;
+                    // An in-flight percentage animation would fight the drag
+                    // every frame (spec 3.9).
+                    state.scheduler.cancel("item." + std::to_string(item->id) +
+                                           ".slider.percentage");
+                    state.updateSlider(*item, surfaceIndex, event.x);
+                }
                 return;
             }
             if (!item) return;
@@ -1312,6 +1387,16 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
         if (state.renderQueued || !state.renderer) return;
         state.renderQueued = true; // coalesce to one frame per turn (spec 7.2)
         PostMessageW(state.messageWindow, kMsgRender, 0, 0);
+    };
+    hooks.measureNaturalWidth = [&state](const ybar::model::Item& item) {
+        if (!state.fonts) return 0.0;
+        return ybar::model::naturalLength(item, state.measureItem(item));
+    };
+    hooks.measureNaturalPartWidth = [&state](const ybar::model::Item& item, bool isIcon) {
+        if (!state.fonts) return 0.0;
+        const auto& part = isIcon ? item.icon : item.label;
+        const auto& shaped = state.fonts->shape(part.displayString(), part.font);
+        return shaped.width; // ink only; paddings are outside the part width
     };
     hooks.displays = [] { return ybar::win::displayInfos(); };
     hooks.boundingRects = [&state](const ybar::model::Item& item) {

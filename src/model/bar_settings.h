@@ -9,6 +9,7 @@
 #include <string_view>
 #include <vector>
 
+#include "anim/scheduler.h"
 #include "model/color.h"
 
 namespace ybar::model {
@@ -53,6 +54,17 @@ struct BarSettings {
 
 class BarPropertySetter {
 public:
+    // Message-scoped --animate context (spec 3.8), the bar-domain twin of
+    // PropertySetter's. Animation keys are "bar.<key>", so an in-flight
+    // height animation is cancelled by the next direct height set.
+    struct AnimationContext {
+        ybar::anim::AnimationScheduler* scheduler = nullptr;
+        ybar::anim::Curve curve = ybar::anim::Curve::Linear;
+        int frames = 0;
+    };
+    static void beginAnimation(const AnimationContext& context);
+    static void endAnimation();
+
     // nullopt = success; error strings are verbatim contract.
     static std::optional<std::string> set(BarSettings& settings, std::string_view key,
                                           const std::string& value);

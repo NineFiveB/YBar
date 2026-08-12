@@ -122,6 +122,35 @@ Result setColorVia(Color current, const std::function<void(Color)>& apply,
     return ok;
 }
 
+// `width=<n>` is a plain animatable float; `width=dynamic` stores the -1
+// sentinel. Under --animate the sentinel is resolved to the measured natural
+// width at BOTH endpoints so the value never lerps toward -1 — sketchybar's
+// flagship width-animation idiom (spec 3.3). `measureNatural` is null in
+// headless contexts, where `dynamic` degrades to a direct set.
+Result setWidthWithDynamic(double& field, const std::string& value,
+                           const std::function<double()>& measureNatural) {
+    const bool animating =
+        g_animation && g_animation->scheduler && g_animation->frames > 0 && measureNatural;
+    if (lower(value) == "dynamic") {
+        if (animating && field >= 0) {
+            const std::string key = animationKey();
+            g_animation->scheduler->add(
+                key, g_animation->curve, g_animation->frames, field, measureNatural(),
+                [&field](const ybar::anim::AnimValue& v) { field = std::get<double>(v); },
+                // Only on natural completion: hand the sentinel back so the
+                // item resumes tracking its content.
+                [&field] { field = -1; });
+            return ok;
+        }
+        if (g_animation && g_animation->scheduler) g_animation->scheduler->cancel(animationKey());
+        field = -1;
+        return ok;
+    }
+    // Animating away from `dynamic` needs a real starting point too.
+    if (animating && field < 0) field = measureNatural();
+    return setFloat(field, value);
+}
+
 Result setBool(bool& field, const std::string& value) {
     if (lower(value) == "toggle") {
         field = !field;
@@ -258,8 +287,11 @@ Result setBackground(BackgroundStyle& bg, const Segments& segs, std::size_t at,
     return errUnknown(fullPath);
 }
 
+// `measureNaturalPart` resolves this part's `width=dynamic` sentinel; empty
+// for parts with no measurer wired (slider knobs, headless contexts).
 Result setText(TextPart& text, const Segments& segs, std::size_t at, const std::string& value,
-               std::string_view fullPath) {
+               std::string_view fullPath,
+               const std::function<double()>& measureNaturalPart = {}) {
     if (at >= segs.size()) { // bare = string
         text.string = value;
         return ok;
@@ -302,10 +334,8 @@ Result setText(TextPart& text, const Segments& segs, std::size_t at, const std::
         text.maxChars = *parsed;
         return ok;
     }
-    if (key == "width") {
-        if (lower(value) == "dynamic") { text.customWidth = -1; return ok; }
-        return setFloat(text.customWidth, value);
-    }
+    if (key == "width")
+        return setWidthWithDynamic(text.customWidth, value, measureNaturalPart);
     if (key == "align") {
         const auto align = parseAlignChar(value);
         if (!align) return "[!] invalid align: " + value;
@@ -520,8 +550,15 @@ std::optional<std::string> PropertySetter::set(Item& item, std::string_view path
         return "[!] " + item.name + " is not an alias"; // alias unsupported on Windows
     }
 
-    if (key == "icon") return setText(item.icon, segs, 1, value, path);
-    if (key == "label") return setText(item.label, segs, 1, value, path);
+    if (key == "icon" || key == "label") {
+        const bool isIcon = key == "icon";
+        std::function<double()> measure;
+        if (g_animation && g_animation->measureNaturalPartWidth)
+            measure = [&item, isIcon] {
+                return g_animation->measureNaturalPartWidth(item, isIcon);
+            };
+        return setText(isIcon ? item.icon : item.label, segs, 1, value, path, measure);
+    }
     if (key == "background") return setBackground(item.background, segs, 1, value, path);
     if (key == "position") {
         const auto parsed = parsePosition(value);
@@ -548,8 +585,10 @@ std::optional<std::string> PropertySetter::set(Item& item, std::string_view path
         return std::nullopt;
     }
     if (key == "width") {
-        if (lower(value) == "dynamic") { item.customWidth = -1; return std::nullopt; }
-        return setFloat(item.customWidth, value);
+        std::function<double()> measure;
+        if (g_animation && g_animation->measureNaturalWidth)
+            measure = [&item] { return g_animation->measureNaturalWidth(item); };
+        return setWidthWithDynamic(item.customWidth, value, measure);
     }
     if (key == "align") {
         const auto align = parseAlignChar(value);

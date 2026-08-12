@@ -5,6 +5,7 @@
 //
 #pragma once
 
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -24,6 +25,12 @@ public:
         ybar::anim::Curve curve = ybar::anim::Curve::Linear;
         int frames = 0;
         int itemId = 0;
+        // Resolves the `dynamic` width sentinel to a real number so an
+        // animation never lerps toward -1 (spec 3.3). Absent in headless
+        // contexts, where `dynamic` stays a direct set.
+        std::function<double(const Item&)> measureNaturalWidth;
+        // Same for a text part: (item, isIcon) -> natural part width.
+        std::function<double(const Item&, bool isIcon)> measureNaturalPartWidth;
     };
     static void beginAnimation(const AnimationContext& context);
     static void endAnimation();

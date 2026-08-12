@@ -38,9 +38,23 @@ std::optional<double> parseFloat(const std::string& value) {
     return parsed;
 }
 
+const BarPropertySetter::AnimationContext* g_barAnimation = nullptr;
+std::string g_barKey; // dotted key of the set in progress
+
+std::string animationKey() { return "bar." + g_barKey; }
+
 Result setFloat(double& field, const std::string& value) {
     const auto parsed = parseFloat(value);
     if (!parsed) return "[!] invalid number: " + value;
+    if (g_barAnimation && g_barAnimation->scheduler) {
+        if (g_barAnimation->frames > 0) {
+            g_barAnimation->scheduler->add(
+                animationKey(), g_barAnimation->curve, g_barAnimation->frames, field, *parsed,
+                [&field](const ybar::anim::AnimValue& v) { field = std::get<double>(v); });
+            return std::nullopt;
+        }
+        g_barAnimation->scheduler->cancel(animationKey()); // direct set cancels
+    }
     field = *parsed;
     return std::nullopt;
 }
@@ -60,6 +74,16 @@ Result setColor(Color& field, std::string_view channel, const std::string& value
     if (channel.empty() || channel == "hex") {
         const auto parsed = Color::parse(value);
         if (!parsed) return "[!] invalid color: " + value;
+        if (g_barAnimation && g_barAnimation->scheduler) {
+            if (g_barAnimation->frames > 0) { // linear-light color animation
+                g_barAnimation->scheduler->add(
+                    animationKey(), g_barAnimation->curve, g_barAnimation->frames, field,
+                    *parsed,
+                    [&field](const ybar::anim::AnimValue& v) { field = std::get<Color>(v); });
+                return std::nullopt;
+            }
+            g_barAnimation->scheduler->cancel(animationKey());
+        }
         field = *parsed;
         return std::nullopt;
     }
@@ -79,12 +103,22 @@ Result setColor(Color& field, std::string_view channel, const std::string& value
 
 } // namespace
 
+void BarPropertySetter::beginAnimation(const AnimationContext& context) {
+    g_barAnimation = &context;
+}
+
+void BarPropertySetter::endAnimation() {
+    g_barAnimation = nullptr;
+    g_barKey.clear();
+}
+
 std::optional<std::string> BarPropertySetter::set(BarSettings& s, std::string_view path,
                                                   const std::string& value) {
     if (path.empty()) return "[!] empty property";
     const auto dot = path.find('.');
     const auto key = path.substr(0, dot);
     const auto channel = dot == std::string_view::npos ? std::string_view{} : path.substr(dot + 1);
+    g_barKey.assign(path); // animation key for whichever leaf this set reaches
 
     if (key == "position") {
         const auto v = lower(value);

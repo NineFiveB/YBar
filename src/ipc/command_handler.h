@@ -38,6 +38,10 @@ struct DaemonHooks {
     // `--bar wifi_ssid_prompt=on`: the Windows stand-in for the reference's
     // Core Location authorization request (spec 10).
     std::function<void()> requestSsidPermission;
+    // Resolves `width=dynamic` under --animate to the measured natural width
+    // (spec 3.3). Unset in headless contexts.
+    std::function<double(const ybar::model::Item&)> measureNaturalWidth;
+    std::function<double(const ybar::model::Item&, bool isIcon)> measureNaturalPartWidth;
     std::function<std::vector<ybar::model::DisplayInfo>()> displays;
     std::function<ybar::model::BoundingRects(const ybar::model::Item&)> boundingRects;
 };

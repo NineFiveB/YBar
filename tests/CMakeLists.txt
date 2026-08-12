@@ -20,6 +20,7 @@ add_executable(ybar_tests
   provider_tests.cpp
   scheduler_tests.cpp
   socket_tests.cpp
+  width_animation_tests.cpp
   wire_format_tests.cpp
 )
 target_link_libraries(ybar_tests PRIVATE ybar_win Catch2::Catch2WithMain)
