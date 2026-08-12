@@ -924,20 +924,29 @@ uploads with source@size caching, and leading/trailing (`align=r`) emission.
 Live-verified: nine symbols, the placeholder path, and Explorer's shell icon
 rendering on the bar.
 
+**Also done**: **text fidelity** (§3.9, §7.4) — tight-ink measurement via
+per-glyph DirectWrite design metrics unioned along the pen (there is no
+`useGlyphPathBounds` equivalent), the `(int)(ink + 1.5)` truncation applied to
+real ink, ink-centered single-glyph icons, marquee scrolling with the frame
+clock gated on `continuousDemand`, fixed-width glyph clipping with UV remap,
+`background.clip` holes, highlight colors, text shadows, and bracket
+backgrounds (bracket frames are now derived post-layout, which also enables
+bracket hit-testing). Live-verified: bracket pill, a marquee scrolling across
+two captured frames, and a clip hole. **Open on the §14 gate**: golden values
+exported from a macOS run — the accumulation math has headless tests, but
+cross-platform pixel equality is still unproven.
+
 **Remaining to macOS parity**, in impact order:
-1. Text fidelity (§3.9, §7.4, §14): tight-ink +1.5 metrics with the
-   golden-value parity suite, marquee, fixed-width clipping, clip holes,
-   highlight colors, text-part shadows, bracket rendering.
-3. Providers (§10): audio (WASAPI), media (GSMTC), network/SSID,
+1. Providers (§10): audio (WASAPI), media (GSMTC), network/SSID,
    app_launched/terminated, modifier_change + global mouse events,
    display_change on topology changes; komorebi lazy re-detect (attach when
    komorebi starts after the daemon — today requires a daemon restart).
-4. Windowing robustness (§6): WM_DISPLAYCHANGE rebuilds, WM_DPICHANGED,
+2. Windowing robustness (§6): WM_DISPLAYCHANGE rebuilds, WM_DPICHANGED,
    per-display bounding_rects, fullscreen_show, reserve=appbar, sticky
    pinning, topmost=off re-assertion; slider dragging; --animate on --bar
    keys; width=dynamic seeding; idle_inhibit; Acrylic backdrops (§7.6);
    popup/tooltip screen-edge clamping.
-5. Ship (§13): winget + scoop, d3dcompiler app-local, autostart, `ybar
+3. Ship (§13): winget + scoop, d3dcompiler app-local, autostart, `ybar
    theme`, ported komorebi themes, Windows docs.
 
 Deliberate divergences (never 1:1): alias items (§10.6), per-item glass
