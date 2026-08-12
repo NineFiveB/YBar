@@ -64,7 +64,7 @@ ybar --query hello                    # live state as JSON
 ## Install
 
 ```sh
-brew tap AltimG/ybar        # github.com/AltimG/homebrew-ybar
+brew tap AegiosOT/ybar      # github.com/AegiosOT/homebrew-ybar
 brew install ybar           # latest tagged release; --HEAD builds current main
 ```
 
