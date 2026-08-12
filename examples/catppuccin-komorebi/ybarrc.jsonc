@@ -1,0 +1,145 @@
+{
+  // catppuccin-komorebi — the shipped flagship theme for ybar-win.
+  //
+  // Palette: Catppuccin Mocha. Everything here is declarative (spec 3.6); the
+  // scripts are POSIX sh, which is what the resolved shell is on Windows
+  // (Git Bash, then the bundled busybox, then powershell as a last resort —
+  // see spec 10.1). Use $INFO, never $env:INFO.
+  //
+  // Clicks open Windows Settings pages directly: there is no
+  // x-apple.systempreferences: equivalent, and ms-settings: URIs are the
+  // documented replacement.
+  "bar": {
+    "height": 34,
+    "color": "0xee1e1e2e",
+    "position": "top",
+    "topmost": "on",
+    "padding_left": 8,
+    "padding_right": 8,
+    "reserve": "komorebi",
+    "shadow": true
+  },
+  "events": ["komorebi_workspace_change"],
+  "defaults": {
+    "label.font.family": "Segoe UI",
+    "label.font.size": 12,
+    "label.color": "0xffcdd6f4",
+    "icon.font.family": "Segoe Fluent Icons",
+    "icon.font.size": 13,
+    "padding_left": 6,
+    "padding_right": 6
+  },
+  "items": [
+    {
+      // komorebi workspace pill. FOCUSED_WORKSPACE is the workspace name when
+      // one is set, else its 1-based index (spec 11.3).
+      "name": "workspace",
+      "position": "left",
+      "props": {
+        "icon": "sf:square.grid.2x2.fill",
+        "icon.color": "0xff89b4fa",
+        "label": "-",
+        "label.color": "0xff89b4fa",
+        "background.drawing": true,
+        "background.color": "0xff313244",
+        "background.corner_radius": 9,
+        "background.height": 24,
+        "background.padding_left": 8,
+        "background.padding_right": 8,
+        "script": "ybar --set workspace \"label=$FOCUSED_WORKSPACE\"",
+        "click_script": "ybar --komorebi '{\"type\":\"CycleFocusWorkspace\",\"content\":\"Next\"}'",
+        "tooltip": "click to cycle workspaces"
+      },
+      "subscribe": ["komorebi_workspace_change"]
+    },
+    {
+      "name": "front_app",
+      "position": "left",
+      "props": {
+        "label.color": "0xffa6e3a1",
+        "label.max_chars": 28,
+        "padding_left": 10,
+        "script": "[ \"$SENDER\" = front_app_switched ] && ybar --set front_app \"label=$INFO\""
+      },
+      "subscribe": ["front_app_switched"]
+    },
+    {
+      // GSMTC now-playing. MEDIA_APP carries the session's app id, not a
+      // friendly name — match on it only if you know the id (spec 10).
+      "name": "media",
+      "position": "center",
+      "props": {
+        "icon": "sf:music.note",
+        "icon.color": "0xffcba6f7",
+        "icon.drawing": false,
+        "label.color": "0xffcba6f7",
+        "label.max_chars": 44,
+        "script": "if [ -n \"$MEDIA_TITLE\" ] && [ \"$MEDIA_STATE\" = playing ]; then ybar --set media icon.drawing=on \"label=$MEDIA_TITLE — $MEDIA_ARTIST\"; else ybar --set media icon.drawing=off label=; fi"
+      },
+      "subscribe": ["media_change"]
+    },
+    {
+      "name": "clock",
+      "position": "right",
+      "props": {
+        "icon": "sf:clock",
+        "icon.color": "0xfff5c2e7",
+        "update_freq": 1,
+        "script": "ybar --set clock \"label=$(date '+%a %d %b  %H:%M')\""
+      }
+    },
+    {
+      // Volume is push-driven (WASAPI); 0 also means muted, per contract.
+      "name": "volume",
+      "position": "right",
+      "props": {
+        "icon": "sf:speaker.wave.2.fill",
+        "icon.color": "0xfff9e2af",
+        "script": "[ -n \"$INFO\" ] && ybar --set volume \"label=$INFO%\" \"icon=$([ \"$INFO\" = 0 ] && echo sf:speaker.slash.fill || echo sf:speaker.wave.2.fill)\"",
+        "click_script": "start ms-settings:sound",
+        "tooltip": "sound settings"
+      },
+      "subscribe": ["volume_change"]
+    },
+    {
+      // INFO is the SSID, or "connected" when Windows' Location gate hides it
+      // (the same degradation macOS has without Core Location), or "" offline.
+      "name": "network",
+      "position": "right",
+      "props": {
+        "icon": "sf:wifi",
+        "icon.color": "0xff94e2d5",
+        "label.max_chars": 20,
+        "script": "if [ -z \"$INFO\" ]; then ybar --set network icon=sf:wifi.slash icon.color=0xfff38ba8 label=offline; else ybar --set network icon=sf:wifi icon.color=0xff94e2d5 \"label=$INFO\"; fi",
+        "click_script": "start ms-settings:network-wifi",
+        "tooltip": "network settings"
+      },
+      "subscribe": ["wifi_change"]
+    },
+    {
+      "name": "battery",
+      "position": "right",
+      "props": {
+        "icon": "sf:battery.100",
+        "icon.color": "0xffa6e3a1",
+        "script": "case \"$SENDER\" in battery_change) ybar --set battery \"label=$INFO%\" ;; power_source_change) [ \"$INFO\" = AC ] && ybar --set battery icon=sf:bolt.fill || ybar --set battery icon=sf:battery.100 ;; esac",
+        "click_script": "start ms-settings:batterysaver",
+        "tooltip": "battery settings"
+      },
+      "subscribe": ["battery_change", "power_source_change"]
+    },
+    {
+      "name": "cpu",
+      "position": "right",
+      "props": {
+        "gauge.size": 24,
+        "gauge.thickness": 4,
+        "gauge.color": "0xfffab387",
+        "gauge.track_color": "0x40fab387",
+        "label.font.size": 9,
+        "script": "ybar --animate linear 12 --set cpu gauge.percentage=$CPU_USAGE label=$CPU_USAGE"
+      },
+      "subscribe": ["system_stats"]
+    }
+  ]
+}

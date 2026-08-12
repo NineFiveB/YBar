@@ -56,6 +56,15 @@ jobs:
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item build-release/ybar.exe dist/
           Copy-Item -Recurse shaders dist/shaders
+          # Shipped themes: `ybar theme list` searches beside the exe.
+          Copy-Item -Recurse examples dist/examples
+          # d3dcompiler app-local (spec 13): the shader is compiled at runtime
+          # via D3DCompile, and the system copy is present on Win10+ but not
+          # guaranteed on stripped images.
+          $sdk = Get-ChildItem "C:/Program Files (x86)/Windows Kits/10/bin" -Directory |
+                 Where-Object { $_.Name -like "10.*" } | Sort-Object Name | Select-Object -Last 1
+          $dll = Join-Path $sdk.FullName "x64/d3dcompiler_47.dll"
+          if (Test-Path $dll) { Copy-Item $dll dist/ } else { Write-Host "d3dcompiler_47.dll not found in $sdk" }
 
       - uses: actions/upload-artifact@v4
         with:

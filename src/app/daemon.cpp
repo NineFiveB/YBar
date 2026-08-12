@@ -1083,6 +1083,10 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     // Taskbar / notification identity (spec 13), successor to com.ybar.YBar.
     SetCurrentProcessExplicitAppUserModelID(L"YBar.YBar");
+    // COM must be live before the first surface is built: sticky pinning
+    // CoCreateInstances the virtual desktop manager during window setup, and
+    // without this it failed at boot with "no virtual desktop manager".
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 
     DaemonState state;
     state.instance = instance;
