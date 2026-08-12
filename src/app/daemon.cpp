@@ -71,6 +71,7 @@ constexpr UINT kMsgKomorebiApp = WM_APP + 13;
 constexpr UINT_PTR kStatsTimer = 5;
 constexpr UINT_PTR kTooltipTimer = 6;
 constexpr UINT_PTR kAppsTimer = 7;
+constexpr UINT_PTR kDisplayChangeTimer = 8;
 
 // Power setting GUIDs (winnt.h declares them; define locally to avoid
 // link-time surprises with initguid ordering).
@@ -160,7 +161,13 @@ struct DaemonState {
     ULONGLONG statsPrevIdle = 0, statsPrevKernel = 0, statsPrevUser = 0;
     bool statsArmed = false;
 
+    // Attached to every surface, including ones built by a display-change
+    // rebuild — so it outlives any single surface set.
+    std::function<void(const ybar::win::MouseEvent&)> mouseHandler;
+
     void executeConfig();
+    void rebuildSurfaces();
+    void updateFullscreenElevation();
     void armAudio();
     void armMedia();
     void armNetwork();
@@ -297,6 +304,19 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                             *item, {{"NAME", item->name}, {"SENDER", "routine"}, {"INFO", ""}});
                     }
                 }
+                // Per-second window upkeep (spec 6): none of these have a
+                // window message to hang off.
+                g_state->updateFullscreenElevation();
+                if (g_state->settings.sticky) {
+                    for (const auto& surface : g_state->surfaces) surface->followCurrentDesktop();
+                }
+                // idle_inhibit: the request must be re-stated, it is not a
+                // latch that survives a reboot of the power policy.
+                if (g_state->settings.idleInhibit)
+                    SetThreadExecutionState(ES_CONTINUOUS | ES_DISPLAY_REQUIRED |
+                                            ES_SYSTEM_REQUIRED);
+                else
+                    SetThreadExecutionState(ES_CONTINUOUS);
             } else if (wParam == kExitTimer) {
                 KillTimer(hwnd, kExitTimer);
                 if (g_state && g_state->komorebi) {
@@ -319,6 +339,11 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                 g_state->sampleStats();
             } else if (wParam == kAppsTimer && g_state) {
                 g_state->appLifecycle.sample();
+            } else if (wParam == kDisplayChangeTimer && g_state) {
+                KillTimer(hwnd, kDisplayChangeTimer);
+                g_state->rebuildSurfaces();
+                g_state->bus.trigger("display_change",
+                                     std::to_string(ybar::win::enumerateMonitors().size()));
             } else if (wParam == kTooltipTimer && g_state) {
                 KillTimer(hwnd, kTooltipTimer);
                 if (g_state->hoverItemId == g_state->tooltipItemId) {
@@ -416,6 +441,20 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                     g_state->publishPower(false);
             }
             return TRUE;
+        case WM_DISPLAYCHANGE:
+            // Debounced: a monitor hot-plug or resolution change emits a
+            // burst, and rebuilding per message would thrash the GPU stack.
+            if (g_state) SetTimer(hwnd, kDisplayChangeTimer, 500, nullptr);
+            return 0;
+        case WM_DPICHANGED:
+            // The surface already resized itself; the daemon only needs to
+            // re-render through the atlas for the new scale.
+            if (g_state) {
+                g_state->bus.trigger("display_change",
+                                     std::to_string(ybar::win::enumerateMonitors().size()));
+                g_state->renderAll();
+            }
+            return 0;
         case WM_FONTCHANGE:
             // Broadcasts reach the BAR windows, not this message-only window
             // (spec 7.4) — but handle it here too in case of direct sends.
@@ -524,6 +563,38 @@ void DaemonState::executeConfig() {
     }
 }
 
+// The WM_DISPLAYCHANGE sledgehammer (spec 6): tear every surface down and
+// build the set again from the current monitor list. Debounced by the caller.
+void DaemonState::rebuildSurfaces() {
+    if (!renderer) return;
+    surfaces.clear();
+    // Atlases are per-scale and a display change can retire a scale entirely.
+    atlases.clear();
+    // A destroyed window never delivers WM_MOUSELEAVE, so the pointer would
+    // stay "inside" forever and mouse.exited.global would die for the session.
+    if (globalMouseInside) {
+        globalMouseInside = false;
+        bus.trigger("mouse.exited.global", "");
+    }
+    hoverItemId = -1;
+    for (const auto& monitor : ybar::win::enumerateMonitors()) {
+        if (!settings.includesDisplay(monitor.arrangementIndex, monitor.primary)) continue;
+        auto surface = ybar::win::BarSurface::create(*renderer, monitor, settings);
+        if (!surface) continue;
+        if (mouseHandler) surface->setMouseHandler(mouseHandler);
+        surfaces.push_back(std::move(surface));
+    }
+    appliedOffsetPhysical = -1; // force the work-area handshake to re-run
+    renderAll();
+}
+
+void DaemonState::updateFullscreenElevation() {
+    for (const auto& surface : surfaces) {
+        surface->setFullscreenElevation(settings.fullscreenShow &&
+                                        surface->monitorHasFullscreenWindow());
+    }
+}
+
 // Provider arming (spec 10). Each callback runs on an OS notification thread,
 // so every one of them does nothing but post to the UI thread's mailbox.
 void DaemonState::armAudio() {
@@ -603,6 +674,9 @@ void DaemonState::publishFrontApp(bool forced) {
             CloseHandle(process);
         }
     }
+    // A foreground change is exactly when a window can become (or stop being)
+    // fullscreen — the reference re-evaluates on the same signal.
+    updateFullscreenElevation();
     if (name.empty()) return;
     if (!forced && name == lastFrontApp) return;
     lastFrontApp = name;
@@ -960,8 +1034,8 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
 
     // Mouse routing: hit-test bar-local item frames, targeted dispatch
     // bypassing the updates policy (spec 3.4, 6).
-    for (auto& surface : state.surfaces) {
-        surface->setMouseHandler([&state](const ybar::win::MouseEvent& event) {
+    {
+        state.mouseHandler = [&state](const ybar::win::MouseEvent& event) {
             // Two-pass hit test (spec 3.9): non-bracket members win; a
             // bracket is hit only where no member covers the point.
             auto hitTest = [&state](double x, double y) -> ybar::model::Item* {
@@ -1020,7 +1094,8 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
                                           {{"SCROLL_DELTA", std::to_string(event.scrollDelta)},
                                            {"MODIFIER", event.modifier}});
             }
-        });
+        };
+        for (auto& surface : state.surfaces) surface->setMouseHandler(state.mouseHandler);
     }
 
     // YTile: the sibling WM adapter — preferred when its pipe is present

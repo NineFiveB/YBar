@@ -37,6 +37,15 @@ public:
     // Re-applies frame/level from settings (height/margin/topmost/hidden...).
     void applySettings(const ybar::model::BarSettings& settings);
 
+    // fullscreen_show: raise this surface over a fullscreen window on ITS
+    // monitor, or drop it back to the configured level (spec 6).
+    void setFullscreenElevation(bool elevated);
+    bool monitorHasFullscreenWindow() const;
+
+    // sticky=on upkeep: follow the active virtual desktop. Driven from the
+    // daemon's 1 s tick because desktop switches raise no window message.
+    void followCurrentDesktop();
+
     // Mouse events arrive on the UI thread (the window's own WndProc).
     void setMouseHandler(std::function<void(const MouseEvent&)> handler);
 

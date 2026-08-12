@@ -10,6 +10,8 @@
 #include <d3d11.h>
 #include <dxgi1_3.h>
 #include <dcomp.h>
+#include <shellapi.h>
+#include <shobjidl_core.h> // IVirtualDesktopManager (sticky pinning)
 #include <wrl/client.h>
 // clang-format on
 
@@ -57,12 +59,107 @@ public:
     double logicalH = 0;
     std::function<void(const MouseEvent&)> onMouse;
     bool trackingLeave = false;
+    // Kept so WM_DPICHANGED and the topmost re-assertion can recompute the
+    // frame without a round trip to the daemon.
+    BarSettings settings;
+    bool elevatedForFullscreen = false;
+    bool appBarRegistered = false;
+    ComPtr<IVirtualDesktopManager> desktopManager;
+    bool warnedSticky = false;
 
     ~BarSurfaceImpl() {
+        removeAppBar();
         if (hwnd) {
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
             DestroyWindow(hwnd);
         }
+    }
+
+    // Effective z-order: fullscreen elevation overrides a configured
+    // topmost=off, which is otherwise pinned to the bottom of the z-order.
+    HWND zOrder() const {
+        if (elevatedForFullscreen) return HWND_TOPMOST;
+        return settings.topmost == BarLevel::Off ? HWND_BOTTOM : HWND_TOPMOST;
+    }
+
+    // Space reservation for users without a tiling WM (spec 6.1). The appbar
+    // owns the strip; komorebi mode reserves through komorebi instead, and
+    // the two are mutually exclusive by construction.
+    void applyAppBar(const RECT& frame) {
+        if (settings.reserve != ybar::model::ReserveMode::AppBar) {
+            removeAppBar();
+            return;
+        }
+        APPBARDATA data{};
+        data.cbSize = sizeof(data);
+        data.hWnd = hwnd;
+        if (!appBarRegistered) {
+            if (!SHAppBarMessage(ABM_NEW, &data)) return;
+            appBarRegistered = true;
+        }
+        data.uEdge = settings.position == BarPosition::Top ? ABE_TOP : ABE_BOTTOM;
+        data.rc = frame;
+        // The shell may push the proposed rect aside for other appbars; adopt
+        // whatever it returns rather than fighting it.
+        SHAppBarMessage(ABM_QUERYPOS, &data);
+        const LONG height = frame.bottom - frame.top;
+        if (data.uEdge == ABE_TOP) data.rc.bottom = data.rc.top + height;
+        else data.rc.top = data.rc.bottom - height;
+        SHAppBarMessage(ABM_SETPOS, &data);
+        SetWindowPos(hwnd, zOrder(), data.rc.left, data.rc.top, data.rc.right - data.rc.left,
+                     data.rc.bottom - data.rc.top, SWP_NOACTIVATE);
+    }
+
+    // sticky=on: keep the bar on whatever virtual desktop the user is on.
+    // True pinning lives behind an undocumented, build-fragile interface
+    // (IVirtualDesktopPinnedApps); the documented IVirtualDesktopManager can
+    // only move a window, so that is what this does — re-driven from the
+    // daemon's 1 s tick. With komorebi the point is mostly moot: its
+    // workspaces all live on one Windows desktop.
+    void applyStickyPinning() {
+        if (!settings.sticky) return;
+        followCurrentDesktop();
+    }
+
+    void followCurrentDesktop() {
+        if (!settings.sticky || !hwnd) return;
+        if (!desktopManager) {
+            if (FAILED(CoCreateInstance(CLSID_VirtualDesktopManager, nullptr,
+                                        CLSCTX_INPROC_SERVER,
+                                        IID_PPV_ARGS(&desktopManager)))) {
+                if (!warnedSticky) {
+                    warnedSticky = true;
+                    std::fprintf(stderr,
+                                 "[ybar] sticky=on unavailable: no virtual desktop manager\n");
+                }
+                return;
+            }
+        }
+        BOOL onCurrent = TRUE;
+        if (FAILED(desktopManager->IsWindowOnCurrentVirtualDesktop(hwnd, &onCurrent)) ||
+            onCurrent)
+            return;
+        GUID current{};
+        // Moving to the desktop of a window that IS current is the only
+        // documented way to name it; the foreground window serves.
+        const HWND reference = GetForegroundWindow();
+        if (!reference ||
+            FAILED(desktopManager->GetWindowDesktopId(reference, &current)) ||
+            FAILED(desktopManager->MoveWindowToDesktop(hwnd, current))) {
+            if (!warnedSticky) {
+                warnedSticky = true;
+                std::fprintf(stderr, "[ybar] sticky=on could not follow the virtual desktop\n");
+            }
+        }
+    }
+
+    void removeAppBar() {
+        if (!appBarRegistered) return;
+        APPBARDATA data{};
+        data.cbSize = sizeof(data);
+        data.hWnd = hwnd;
+        SHAppBarMessage(ABM_REMOVE, &data);
+        appBarRegistered = false;
     }
 
     void dispatchMouse(MouseEvent::Kind kind, LPARAM lParam, const char* button,
@@ -106,10 +203,40 @@ LRESULT CALLBACK barWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
     switch (msg) {
         case WM_POWERBROADCAST:
         case WM_FONTCHANGE:
+        case WM_DISPLAYCHANGE:
             // Forward broadcasts to the daemon's message-only mailbox, which
-            // never receives them directly (spec 5 note).
+            // never receives them directly (spec 5 note). The daemon debounces
+            // WM_DISPLAYCHANGE and rebuilds every surface.
             if (g_broadcastTarget) PostMessageW(g_broadcastTarget, msg, wParam, lParam);
             return msg == WM_POWERBROADCAST ? TRUE : 0;
+        case WM_DPICHANGED:
+            // PerMonitorV2: adopt the new DPI, recompute the frame from
+            // settings (the suggested rect assumes a normal window), and let
+            // the daemon swap in the glyph atlas for the new scale.
+            if (impl) {
+                impl->monitorInfo.scale = static_cast<double>(HIWORD(wParam)) / 96.0;
+                const RECT frame = impl->frameFor(impl->settings);
+                const int widthPx = frame.right - frame.left;
+                const int heightPx = frame.bottom - frame.top;
+                SetWindowPos(hwnd, impl->zOrder(), frame.left, frame.top, widthPx, heightPx,
+                             SWP_NOACTIVATE);
+                impl->surface->resize(widthPx, heightPx);
+                impl->logicalW = widthPx / impl->monitorInfo.scale;
+                impl->logicalH = heightPx / impl->monitorInfo.scale;
+                impl->compositionDevice->Commit();
+                if (g_broadcastTarget) PostMessageW(g_broadcastTarget, msg, wParam, 0);
+            }
+            return 0;
+        case WM_WINDOWPOSCHANGING:
+            // topmost=off means "stay under everything" — but any window
+            // activation reshuffles the z-order, so the position has to be
+            // re-asserted on every change (spec 6).
+            if (impl && impl->zOrder() == HWND_BOTTOM) {
+                auto* position = reinterpret_cast<WINDOWPOS*>(lParam);
+                position->hwndInsertAfter = HWND_BOTTOM;
+                position->flags &= ~SWP_NOZORDER;
+            }
+            return 0;
         case WM_NCHITTEST:
             return HTCLIENT; // never draggable; full-frame input (spec 6)
         case WM_MOUSEACTIVATE:
@@ -238,10 +365,12 @@ std::unique_ptr<BarSurface> BarSurface::create(ybar::render::Renderer& renderer,
         std::fflush(stderr);
     }
 
+    impl->settings = settings;
     ShowWindow(impl->hwnd, settings.hidden ? SW_HIDE : SW_SHOWNOACTIVATE);
-    SetWindowPos(impl->hwnd,
-                 settings.topmost == BarLevel::Off ? HWND_BOTTOM : HWND_TOPMOST, 0, 0, 0, 0,
+    SetWindowPos(impl->hwnd, impl->zOrder(), 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    impl->applyAppBar(frame);
+    impl->applyStickyPinning();
 
     std::unique_ptr<BarSurface> bar(new BarSurface());
     bar->impl_ = std::move(impl);
@@ -251,17 +380,55 @@ std::unique_ptr<BarSurface> BarSurface::create(ybar::render::Renderer& renderer,
 BarSurface::~BarSurface() = default;
 
 void BarSurface::applySettings(const BarSettings& settings) {
+    const bool stickyChanged = impl_->settings.sticky != settings.sticky;
+    impl_->settings = settings;
     const RECT frame = impl_->frameFor(settings);
     const int widthPx = frame.right - frame.left;
     const int heightPx = frame.bottom - frame.top;
-    SetWindowPos(impl_->hwnd,
-                 settings.topmost == BarLevel::Off ? HWND_BOTTOM : HWND_TOPMOST, frame.left,
-                 frame.top, widthPx, heightPx, SWP_NOACTIVATE);
+    SetWindowPos(impl_->hwnd, impl_->zOrder(), frame.left, frame.top, widthPx, heightPx,
+                 SWP_NOACTIVATE);
     impl_->surface->resize(widthPx, heightPx);
     impl_->logicalW = widthPx / impl_->monitorInfo.scale;
     impl_->logicalH = heightPx / impl_->monitorInfo.scale;
     ShowWindow(impl_->hwnd, settings.hidden ? SW_HIDE : SW_SHOWNOACTIVATE);
+    impl_->applyAppBar(frame);
+    if (stickyChanged) impl_->applyStickyPinning();
     impl_->compositionDevice->Commit();
+}
+
+void BarSurface::followCurrentDesktop() { impl_->followCurrentDesktop(); }
+
+void BarSurface::setFullscreenElevation(bool elevated) {
+    if (impl_->elevatedForFullscreen == elevated) return;
+    impl_->elevatedForFullscreen = elevated;
+    SetWindowPos(impl_->hwnd, impl_->zOrder(), 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+bool BarSurface::monitorHasFullscreenWindow() const {
+    // Borderless-fullscreen games never change the shell notification state,
+    // so the reliable test is geometry: the foreground window covering this
+    // monitor exactly (spec 6).
+    const HWND foreground = GetForegroundWindow();
+    if (!foreground || foreground == impl_->hwnd) return false;
+    if (MonitorFromWindow(foreground, MONITOR_DEFAULTTONEAREST) !=
+        MonitorFromWindow(impl_->hwnd, MONITOR_DEFAULTTONEAREST))
+        return false;
+    // The desktop and the shell tray always cover the monitor; neither is a
+    // fullscreen app.
+    wchar_t className[64] = L"";
+    if (GetClassNameW(foreground, className, 64)) {
+        if (wcscmp(className, L"WorkerW") == 0 || wcscmp(className, L"Progman") == 0 ||
+            wcscmp(className, L"Shell_TrayWnd") == 0)
+            return false;
+    }
+    RECT window{};
+    if (!GetWindowRect(foreground, &window)) return false;
+    const auto& monitor = impl_->monitorInfo.frame;
+    // `near` is still a legacy macro in windef.h — do not name it that.
+    const auto matches = [](LONG a, double b) { return std::abs(a - b) < 2.0; };
+    return matches(window.left, monitor.x) && matches(window.top, monitor.y) &&
+           matches(window.right, monitor.maxX()) && matches(window.bottom, monitor.maxY());
 }
 
 void BarSurface::setMouseHandler(std::function<void(const MouseEvent&)> handler) {

@@ -101,8 +101,7 @@ public:
 
 namespace {
 
-void CALLBACK connectivityChanged(void* context, NL_NETWORK_CONNECTIVITY_HINT,
-                                  NL_NETWORK_CONNECTIVITY_COST_HINT) {
+void NETIOAPI_API_ connectivityChanged(void* context, NL_NETWORK_CONNECTIVITY_HINT) {
     if (auto* impl = static_cast<NetworkProviderImpl*>(context)) impl->publish(false);
 }
 
