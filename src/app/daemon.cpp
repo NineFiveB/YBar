@@ -723,28 +723,9 @@ void DaemonState::publishPower(bool forced) {
 }
 
 void DaemonState::publishFrontApp(bool forced) {
-    std::string name;
-    if (const HWND foreground = GetForegroundWindow()) {
-        DWORD processId = 0;
-        GetWindowThreadProcessId(foreground, &processId);
-        if (const HANDLE process =
-                OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId)) {
-            wchar_t path[MAX_PATH];
-            DWORD size = MAX_PATH;
-            if (QueryFullProcessImageNameW(process, 0, path, &size)) {
-                std::wstring wide(path, size);
-                const auto slash = wide.find_last_of(L"\\/");
-                if (slash != std::wstring::npos) wide = wide.substr(slash + 1);
-                if (wide.size() > 4) wide.resize(wide.size() - 4); // strip .exe
-                const int utf8Size = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, nullptr,
-                                                         0, nullptr, nullptr);
-                name.resize(static_cast<std::size_t>(utf8Size - 1));
-                WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, name.data(), utf8Size,
-                                    nullptr, nullptr);
-            }
-            CloseHandle(process);
-        }
-    }
+    // FileDescription, with the UWP frame-host unwrap (spec 10) — the plain
+    // exe basename reports "ApplicationFrameHost" for every packaged app.
+    const std::string name = ybar::providers::appNameForWindow(GetForegroundWindow());
     // A foreground change is exactly when a window can become (or stop being)
     // fullscreen — the reference re-evaluates on the same signal.
     updateFullscreenElevation();
