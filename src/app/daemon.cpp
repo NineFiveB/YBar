@@ -5,6 +5,7 @@
 #define NOMINMAX
 #include <winsock2.h>
 #include <windows.h>
+#include <shobjidl.h> // SetCurrentProcessExplicitAppUserModelID
 // clang-format on
 
 #include <algorithm>
@@ -1080,6 +1081,8 @@ void DaemonState::renderAll() {
 
 int runDaemon(const std::string& instance, const std::string& configPath) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    // Taskbar / notification identity (spec 13), successor to com.ybar.YBar.
+    SetCurrentProcessExplicitAppUserModelID(L"YBar.YBar");
 
     DaemonState state;
     state.instance = instance;

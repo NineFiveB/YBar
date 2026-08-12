@@ -70,6 +70,7 @@ add_library(ybar_win
   src/app/config.cpp
   src/app/daemon.cpp
   src/app/jsonc_config.cpp
+  src/app/local_verbs.cpp
   src/app/script_runner.cpp
   src/ipc/socket.cpp
   src/lua/runtime.cpp

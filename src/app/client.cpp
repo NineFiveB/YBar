@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "app/local_verbs.h"
 #include "ipc/wire_format.h"
 #include "ipc/socket.h"
 
@@ -23,6 +24,9 @@ constexpr char kHelp[] =
     "  ybar --subscribe clock system_woke\n"
     "  ybar --animate tanh 30 --set clock label.color=0xffff0000\n"
     "  ybar --query bar\n"
+    "\n"
+    "  ybar theme list|current|use <name>\n"
+    "  ybar autostart enable|disable|status\n"
     "\n"
     "Design: docs/WINDOWS-PORT.md\n";
 
@@ -90,6 +94,8 @@ std::optional<int> runIfClient(const std::vector<std::string>& args, const std::
         return 0;
     }
     if (args[0] == "--config" || args[0] == "-c") return std::nullopt; // daemon
+    // Local subcommands (autostart, theme) never touch the socket.
+    if (const auto exitCode = runLocalVerb(args, instance)) return exitCode;
 
     std::vector<std::string> message = args;
     if (message[0] == "-m" || message[0] == "--message")
