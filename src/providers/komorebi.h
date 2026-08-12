@@ -8,6 +8,8 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
+#include <mutex>
 #include <functional>
 #include <memory>
 #include <string>
@@ -35,9 +37,12 @@ public:
     // its UI thread inside this callback.
     std::function<void(const KomorebiUpdate&)> onUpdate;
 
-    // Window lifecycle from Show/Destroy notifications: (event name, exe
-    // path). Same threading contract as onUpdate.
-    std::function<void(const std::string& event, const std::string& exe)> onAppEvent;
+    // Window lifecycle from Show/Destroy notifications: (event name, exe,
+    // hwnd — 0 when komorebi did not include one). Same threading contract
+    // as onUpdate. The hwnd lets the daemon resolve the real process name
+    // instead of trusting a bare exe basename.
+    std::function<void(const std::string& event, const std::string& exe, std::uintptr_t hwnd)>
+        onAppEvent;
 
     // Starts the subscription (listener + registration + reconnect loop).
     // subscriberName becomes the socket file name in komorebi's data dir.
@@ -66,10 +71,13 @@ private:
     std::uintptr_t listenSocket_ = ~0ull;
     std::thread thread_;
     std::atomic<bool> running_{false};
+    // publishState runs on the reader thread AND (via refresh) the UI
+    // thread; the dedupe string needs a real lock, the scalars get atomics.
+    std::mutex stateMutex_; // guards lastFocused_
     std::string lastFocused_;
-    int monitorCount_ = 1;
-    bool monitorCountKnown_ = false;
-    int appliedOffset_ = 0;
+    std::atomic<int> monitorCount_{1};
+    std::atomic<bool> monitorCountKnown_{false};
+    std::atomic<int> appliedOffset_{0};
 };
 
 } // namespace ybar::providers

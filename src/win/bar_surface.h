@@ -28,6 +28,11 @@ class BarSurfaceImpl;
 
 class BarSurface {
 public:
+    // Posted to the broadcast target when the shell announces
+    // ABN_FULLSCREENAPP — the daemon re-runs its fullscreen elevation pass.
+    // (0x8000 == WM_APP; windows.h is deliberately not included here.)
+    static constexpr unsigned kFullscreenCheckMessage = 0x8000 + 32;
+
     // Creates the window + composition tree and shows it without activation.
     static std::unique_ptr<BarSurface> create(ybar::render::Renderer& renderer,
                                               const MonitorInfo& monitor,

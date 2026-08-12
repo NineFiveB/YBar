@@ -46,16 +46,23 @@ std::string stateName(GlobalSystemMediaTransportControlsSessionPlaybackStatus st
 
 } // namespace
 
-class MediaProviderImpl {
+// Lifetime: MediaProvider holds the owning shared_ptr; every WinRT event
+// handler captures a weak_ptr and promotes it on entry, so an in-flight
+// handler keeps the impl alive through teardown, and a handler that fires
+// after teardown finds either an expired weak_ptr or `stopping` set — never
+// freed memory or a destroyed mutex.
+class MediaProviderImpl : public std::enable_shared_from_this<MediaProviderImpl> {
 public:
-    MediaProvider* facade = nullptr;
     GlobalSystemMediaTransportControlsSessionManager manager{nullptr};
     GlobalSystemMediaTransportControlsSession session{nullptr};
     winrt::event_token sessionsToken{};
     winrt::event_token propertiesToken{};
     winrt::event_token playbackToken{};
     MediaEnvironment cached;
-    mutable std::mutex mutex;
+    // Copied from the facade at start() and cleared at stop() so a late
+    // handler can never call through a destroyed MediaProvider.
+    std::function<void(const MediaEnvironment&)> onChange;
+    mutable std::mutex mutex; // guards cached + onChange
     bool running = false;
 
     // The daemon's UI thread is an STA (WIC requires it), and every GSMTC
@@ -70,7 +77,8 @@ public:
     HANDLE stopEvent = nullptr;
 
     // Session handlers arrive on WinRT threadpool threads and can overlap a
-    // CurrentSessionChanged re-attach, so every touch of `session` is guarded.
+    // CurrentSessionChanged re-attach, so every touch of `session`/`manager`
+    // is guarded, and every guarded entry re-checks `stopping`.
     std::recursive_mutex sessionMutex;
 
     void detachSession() {
@@ -85,6 +93,7 @@ public:
 
     void attachCurrentSession() {
         std::lock_guard<std::recursive_mutex> lock(sessionMutex);
+        if (stopping) return;
         detachSession();
         if (!manager) return;
         session = manager.GetCurrentSession();
@@ -92,16 +101,19 @@ public:
             publish({}); // nothing playing
             return;
         }
-        propertiesToken = session.MediaPropertiesChanged(
-            [this](auto&&, auto&&) { publishFromSession(); });
-        playbackToken =
-            session.PlaybackInfoChanged([this](auto&&, auto&&) { publishFromSession(); });
+        std::weak_ptr<MediaProviderImpl> weak = weak_from_this();
+        propertiesToken = session.MediaPropertiesChanged([weak](auto&&, auto&&) {
+            if (auto self = weak.lock()) self->publishFromSession();
+        });
+        playbackToken = session.PlaybackInfoChanged([weak](auto&&, auto&&) {
+            if (auto self = weak.lock()) self->publishFromSession();
+        });
         publishFromSession();
     }
 
     void publishFromSession() {
         std::lock_guard<std::recursive_mutex> lock(sessionMutex);
-        if (!session) return;
+        if (stopping || !session) return;
         MediaEnvironment env;
         try {
             const auto info = session.GetPlaybackInfo();
@@ -122,36 +134,49 @@ public:
     }
 
     void publish(MediaEnvironment env) {
+        std::function<void(const MediaEnvironment&)> callback;
         {
             std::lock_guard<std::mutex> lock(mutex);
             if (env == cached) return; // deduped
             cached = env;
+            callback = onChange;
         }
-        if (facade && facade->onChange) facade->onChange(env);
+        if (callback) callback(env);
     }
 };
 
-MediaProvider::MediaProvider() : impl_(std::make_unique<MediaProviderImpl>()) {
-    impl_->facade = this;
-}
+MediaProvider::MediaProvider() : impl_(std::make_shared<MediaProviderImpl>()) {}
 
 MediaProvider::~MediaProvider() { stop(); }
 
 bool MediaProvider::start() {
     if (impl_->running) return true;
-    auto* impl = impl_.get();
-    impl->stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    if (!impl->stopEvent) return false;
+    impl_->stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!impl_->stopEvent) return false;
+    {
+        std::lock_guard<std::mutex> lock(impl_->mutex);
+        impl_->onChange = onChange;
+    }
 
-    impl->worker = std::thread([impl] {
+    // The worker owns only a weak reference too: if the provider is destroyed
+    // while RequestAsync is still in flight, the thread must not resurrect it.
+    std::weak_ptr<MediaProviderImpl> weak = impl_;
+    impl_->worker = std::thread([weak] {
         winrt::init_apartment(winrt::apartment_type::multi_threaded);
+        auto impl = weak.lock();
+        if (!impl) {
+            winrt::uninit_apartment();
+            return;
+        }
         bool ok = false;
         try {
             impl->manager =
                 GlobalSystemMediaTransportControlsSessionManager::RequestAsync().get();
             if (impl->manager) {
-                impl->sessionsToken = impl->manager.CurrentSessionChanged(
-                    [impl](auto&&, auto&&) { impl->attachCurrentSession(); });
+                impl->sessionsToken = impl->manager.CurrentSessionChanged([weak](auto&&,
+                                                                                 auto&&) {
+                    if (auto self = weak.lock()) self->attachCurrentSession();
+                });
                 impl->attachCurrentSession();
                 ok = true;
             }
@@ -165,36 +190,50 @@ bool MediaProvider::start() {
             impl->startResult = ok;
         }
         impl->ready.notify_all();
-        if (!ok) return;
+        if (!ok) {
+            winrt::uninit_apartment();
+            return;
+        }
 
         // Park until stop(): the event handlers fire on WinRT threadpool
         // threads, so this thread exists only to own the MTA and the
         // registrations.
         WaitForSingleObject(impl->stopEvent, INFINITE);
-        impl->detachSession();
+        // stop() set `stopping` before signaling, so any handler entering a
+        // sessionMutex-guarded section from here on is a no-op.
         if (impl->manager && impl->sessionsToken)
             impl->manager.CurrentSessionChanged(impl->sessionsToken);
-        impl->manager = nullptr;
+        impl->detachSession();
+        {
+            std::lock_guard<std::recursive_mutex> lock(impl->sessionMutex);
+            impl->manager = nullptr;
+        }
         winrt::uninit_apartment();
     });
 
-    std::unique_lock<std::mutex> lock(impl->readyMutex);
-    impl->ready.wait(lock, [impl] { return impl->started; });
-    const bool ok = impl->startResult;
+    std::unique_lock<std::mutex> lock(impl_->readyMutex);
+    impl_->ready.wait(lock, [this] { return impl_->started; });
+    const bool ok = impl_->startResult;
     lock.unlock();
     if (!ok) {
-        impl->worker.join();
-        CloseHandle(impl->stopEvent);
-        impl->stopEvent = nullptr;
+        impl_->worker.join();
+        CloseHandle(impl_->stopEvent);
+        impl_->stopEvent = nullptr;
         return false;
     }
-    impl->running = true;
+    impl_->running = true;
     return true;
 }
 
 void MediaProvider::stop() {
     if (!impl_ || !impl_->running) return;
     impl_->stopping = true;
+    {
+        // A late handler must not call back into a MediaProvider that is
+        // being destroyed.
+        std::lock_guard<std::mutex> lock(impl_->mutex);
+        impl_->onChange = nullptr;
+    }
     SetEvent(impl_->stopEvent);
     if (impl_->worker.joinable()) impl_->worker.join();
     CloseHandle(impl_->stopEvent);
@@ -202,21 +241,26 @@ void MediaProvider::stop() {
     impl_->running = false;
 }
 
-const MediaEnvironment& MediaProvider::current() const {
+MediaEnvironment MediaProvider::current() const {
     std::lock_guard<std::mutex> lock(impl_->mutex);
     return impl_->cached;
 }
 
 bool MediaProvider::refresh() {
     if (!impl_->running && !start()) return false;
-    // Replay the cached env unconditionally (spec 10: reload mid-song must
-    // restore the now-playing pill).
     MediaEnvironment env;
+    std::function<void(const MediaEnvironment&)> callback;
     {
         std::lock_guard<std::mutex> lock(impl_->mutex);
         env = impl_->cached;
+        callback = impl_->onChange;
     }
-    if (onChange) onChange(env);
+    // Reference guard (Daemon.swift forcedQueries["media_change"]): a bare
+    // trigger before any session appeared dispatches nothing rather than an
+    // empty media_change that widgets would read as "stopped". The trigger is
+    // still intercepted — returning true keeps the plain bus fallback off.
+    if (env.empty()) return true;
+    if (callback) callback(env);
     return true;
 }
 

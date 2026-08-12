@@ -53,6 +53,7 @@ public:
     bool visible = false;
     int widthPx = 0;
     int heightPx = 0;
+    bool releasingCapture = false; // our own ReleaseCapture, not a steal
 
     ~PopupSurfaceImpl() {
         if (hwnd) {
@@ -84,8 +85,37 @@ LRESULT CALLBACK popupWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             return HTCLIENT;
         case WM_MOUSEACTIVATE:
             return MA_NOACTIVATE;
+        case WM_LBUTTONDOWN:
+            // Down + capture + Move exist so popup sliders can be pressed
+            // and scrubbed exactly like bar sliders (spec 3.9) — the
+            // reference routes popup presses through the shared drag
+            // machinery.
+            if (impl) {
+                SetCapture(hwnd);
+                impl->dispatchMouse(MouseEvent::Kind::Down, lParam, "left");
+            }
+            return 0;
+        case WM_MOUSEMOVE:
+            if (impl) impl->dispatchMouse(MouseEvent::Kind::Move, lParam, "left");
+            return 0;
         case WM_LBUTTONUP:
-            if (impl) impl->dispatchMouse(MouseEvent::Kind::Up, lParam, "left");
+            if (impl) {
+                if (GetCapture() == hwnd) {
+                    impl->releasingCapture = true;
+                    ReleaseCapture();
+                    impl->releasingCapture = false;
+                }
+                impl->dispatchMouse(MouseEvent::Kind::Up, lParam, "left");
+            }
+            return 0;
+        case WM_CAPTURECHANGED:
+            if (impl && !impl->releasingCapture) {
+                POINT point{};
+                GetCursorPos(&point);
+                ScreenToClient(hwnd, &point);
+                impl->dispatchMouse(MouseEvent::Kind::Up, MAKELPARAM(point.x, point.y),
+                                    "left");
+            }
             return 0;
         case WM_RBUTTONUP:
             if (impl) impl->dispatchMouse(MouseEvent::Kind::Up, lParam, "right");

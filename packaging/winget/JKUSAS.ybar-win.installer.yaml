@@ -15,6 +15,10 @@ NestedInstallerType: portable
 NestedInstallerFiles:
   - RelativeFilePath: ybar.exe
     PortableCommandAlias: ybar
+# The exe resolves its own symlink (GetFinalPathNameByHandle) so the Links
+# alias works; this additionally puts the package dir itself on PATH, which
+# keeps exe-relative lookups working even where symlink creation fails.
+ArchiveBinariesDependOnPath: true
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/JKUSAS/YBar/releases/download/win-v0.1.0/ybar-win-0.1.0-x64.zip

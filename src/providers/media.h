@@ -27,20 +27,24 @@ public:
     MediaProvider();
     ~MediaProvider();
 
-    // Called from a WinRT event thread — the daemon marshals to its UI thread.
+    // Called from a WinRT event thread — the daemon marshals to its UI
+    // thread. Set BEFORE start(); the impl snapshots it there so a late
+    // handler can never call through a destroyed facade.
     std::function<void(const MediaEnvironment&)> onChange;
 
     bool start();
     void stop();
 
-    // Cached last state (empty before the first session appears).
-    const MediaEnvironment& current() const;
+    // Cached last state, by value: the caller's read must not race the
+    // WinRT threads that update the cache.
+    MediaEnvironment current() const;
 
-    // Forced re-query: republishes the cached state, or pulls a fresh one.
+    // Forced re-query: republishes the cached state. With an empty cache it
+    // dispatches nothing (reference guard) but still reports handled.
     bool refresh();
 
 private:
-    std::unique_ptr<MediaProviderImpl> impl_;
+    std::shared_ptr<MediaProviderImpl> impl_;
 };
 
 } // namespace ybar::providers

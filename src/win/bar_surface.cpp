@@ -32,6 +32,11 @@ namespace {
 
 constexpr wchar_t kBarClass[] = L"ybar.bar";
 
+// Private message the shell uses to deliver ABN_* appbar notifications
+// (registered via APPBARDATA.uCallbackMessage — without it every ABN_*
+// arrives as WM_NULL and is lost).
+constexpr UINT kAppBarCallback = WM_APP + 1;
+
 // The SDK declares IVirtualDesktopManager but no coclass, so the CLSID has to
 // be spelled out: {AA509086-5CA9-4C25-8F95-589D3C07B48A}.
 constexpr CLSID kClsidVirtualDesktopManager = {
@@ -72,6 +77,15 @@ public:
     bool appBarRegistered = false;
     ComPtr<IVirtualDesktopManager> desktopManager;
     bool warnedSticky = false;
+    // Last-applied state: renderAll re-applies settings every frame (up to
+    // 60 Hz under animation), so repositioning and appbar negotiation must
+    // be no-ops when nothing changed.
+    RECT lastAppliedFrame{};
+    HWND lastZ = reinterpret_cast<HWND>(-2); // neither TOPMOST nor BOTTOM
+    bool lastHidden = false;
+    RECT appBarProposed{};   // last rect offered to ABM_QUERYPOS
+    RECT appBarNegotiated{}; // what the shell granted for it
+    bool releasingCapture = false; // our own ReleaseCapture, not a steal
 
     ~BarSurfaceImpl() {
         removeAppBar();
@@ -90,19 +104,22 @@ public:
 
     // Space reservation for users without a tiling WM (spec 6.1). The appbar
     // owns the strip; komorebi mode reserves through komorebi instead, and
-    // the two are mutually exclusive by construction.
-    void applyAppBar(const RECT& frame) {
-        if (settings.reserve != ybar::model::ReserveMode::AppBar) {
-            removeAppBar();
-            return;
-        }
+    // the two are mutually exclusive by construction. Returns the rect the
+    // shell granted — the caller positions the window to it (never to the
+    // un-negotiated frame, which may sit over the taskbar or another appbar).
+    RECT negotiateAppBar(const RECT& frame) {
         APPBARDATA data{};
         data.cbSize = sizeof(data);
         data.hWnd = hwnd;
+        data.uCallbackMessage = kAppBarCallback;
         if (!appBarRegistered) {
-            if (!SHAppBarMessage(ABM_NEW, &data)) return;
+            if (!SHAppBarMessage(ABM_NEW, &data)) return frame;
             appBarRegistered = true;
         }
+        // QUERYPOS/SETPOS are cross-process sends to the shell — cache the
+        // grant and renegotiate only when the proposal changes (an
+        // ABN_POSCHANGED clears the cache to force it).
+        if (EqualRect(&frame, &appBarProposed)) return appBarNegotiated;
         data.uEdge = settings.position == BarPosition::Top ? ABE_TOP : ABE_BOTTOM;
         data.rc = frame;
         // The shell may push the proposed rect aside for other appbars; adopt
@@ -112,8 +129,9 @@ public:
         if (data.uEdge == ABE_TOP) data.rc.bottom = data.rc.top + height;
         else data.rc.top = data.rc.bottom - height;
         SHAppBarMessage(ABM_SETPOS, &data);
-        SetWindowPos(hwnd, zOrder(), data.rc.left, data.rc.top, data.rc.right - data.rc.left,
-                     data.rc.bottom - data.rc.top, SWP_NOACTIVATE);
+        appBarProposed = frame;
+        appBarNegotiated = data.rc;
+        return data.rc;
     }
 
     // glass / blur_radius (spec 7.6): DWM composes an Acrylic plate behind
@@ -186,6 +204,42 @@ public:
         data.hWnd = hwnd;
         SHAppBarMessage(ABM_REMOVE, &data);
         appBarRegistered = false;
+        appBarProposed = RECT{};
+        appBarNegotiated = RECT{};
+    }
+
+    // Frame + z + visibility application shared by create/applySettings/DPI
+    // change. Everything is guarded on actual change so renderAll's
+    // per-frame calls stop re-driving SetWindowPos and shell traffic.
+    void applyFrame(const BarSettings& newSettings) {
+        settings = newSettings;
+        RECT frame = frameFor(settings);
+        if (settings.reserve == ybar::model::ReserveMode::AppBar) {
+            frame = negotiateAppBar(frame);
+        } else {
+            removeAppBar();
+        }
+        const HWND z = zOrder();
+        const bool frameChanged = !EqualRect(&frame, &lastAppliedFrame);
+        const bool zChanged = z != lastZ;
+        if (frameChanged || zChanged) {
+            SetWindowPos(hwnd, z, frame.left, frame.top, frame.right - frame.left,
+                         frame.bottom - frame.top, SWP_NOACTIVATE);
+            lastAppliedFrame = frame;
+            lastZ = z;
+        }
+        if (frameChanged) {
+            const int widthPx = frame.right - frame.left;
+            const int heightPx = frame.bottom - frame.top;
+            surface->resize(widthPx, heightPx);
+            logicalW = widthPx / monitorInfo.scale;
+            logicalH = heightPx / monitorInfo.scale;
+        }
+        if (settings.hidden != lastHidden) {
+            ShowWindow(hwnd, settings.hidden ? SW_HIDE : SW_SHOWNOACTIVATE);
+            lastHidden = settings.hidden;
+        }
+        if (frameChanged) compositionDevice->Commit();
     }
 
     void dispatchMouse(MouseEvent::Kind kind, LPARAM lParam, const char* button,
@@ -241,16 +295,28 @@ LRESULT CALLBACK barWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
             // the daemon swap in the glyph atlas for the new scale.
             if (impl) {
                 impl->monitorInfo.scale = static_cast<double>(HIWORD(wParam)) / 96.0;
-                const RECT frame = impl->frameFor(impl->settings);
-                const int widthPx = frame.right - frame.left;
-                const int heightPx = frame.bottom - frame.top;
-                SetWindowPos(hwnd, impl->zOrder(), frame.left, frame.top, widthPx, heightPx,
-                             SWP_NOACTIVATE);
-                impl->surface->resize(widthPx, heightPx);
-                impl->logicalW = widthPx / impl->monitorInfo.scale;
-                impl->logicalH = heightPx / impl->monitorInfo.scale;
-                impl->compositionDevice->Commit();
+                // Force a full reapply: even an unchanged physical frame has
+                // new logical dimensions at the new scale.
+                impl->lastAppliedFrame = RECT{};
+                impl->appBarProposed = RECT{};
+                impl->applyFrame(impl->settings);
                 if (g_broadcastTarget) PostMessageW(g_broadcastTarget, msg, wParam, 0);
+            }
+            return 0;
+        case kAppBarCallback:
+            // ABN_* notifications (delivered only because ABM_NEW registered
+            // this message id).
+            if (impl) {
+                if (wParam == ABN_POSCHANGED) {
+                    // Taskbar moved/resized or another appbar changed: the
+                    // old grant is void — renegotiate and reposition.
+                    impl->appBarProposed = RECT{};
+                    impl->applyFrame(impl->settings);
+                } else if (wParam == ABN_FULLSCREENAPP && g_broadcastTarget) {
+                    // Let the daemon re-run its fullscreen elevation pass.
+                    PostMessageW(g_broadcastTarget, BarSurface::kFullscreenCheckMessage,
+                                 wParam, lParam);
+                }
             }
             return 0;
         case WM_WINDOWPOSCHANGING:
@@ -268,10 +334,35 @@ LRESULT CALLBACK barWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         case WM_MOUSEACTIVATE:
             return MA_NOACTIVATE;
         case WM_LBUTTONDOWN:
-            if (impl) impl->dispatchMouse(MouseEvent::Kind::Down, lParam, "left");
+            if (impl) {
+                // Capture so a slider drag keeps receiving Move/Up after the
+                // pointer leaves the (thin) bar — without it, a release
+                // outside the window is never seen and the drag wedges.
+                SetCapture(hwnd);
+                impl->dispatchMouse(MouseEvent::Kind::Down, lParam, "left");
+            }
             return 0;
         case WM_LBUTTONUP:
-            if (impl) impl->dispatchMouse(MouseEvent::Kind::Up, lParam, "left");
+            if (impl) {
+                if (GetCapture() == hwnd) {
+                    impl->releasingCapture = true;
+                    ReleaseCapture();
+                    impl->releasingCapture = false;
+                }
+                impl->dispatchMouse(MouseEvent::Kind::Up, lParam, "left");
+            }
+            return 0;
+        case WM_CAPTURECHANGED:
+            // Capture stolen (menu, system drag) — NOT our own ReleaseCapture:
+            // end any drag with a synthetic release so the state machine can
+            // never wedge on a press whose release goes elsewhere.
+            if (impl && !impl->releasingCapture) {
+                POINT point{};
+                GetCursorPos(&point);
+                ScreenToClient(hwnd, &point);
+                impl->dispatchMouse(MouseEvent::Kind::Up, MAKELPARAM(point.x, point.y),
+                                    "left");
+            }
             return 0;
         case WM_RBUTTONUP:
             if (impl) impl->dispatchMouse(MouseEvent::Kind::Up, lParam, "right");
@@ -393,9 +484,12 @@ std::unique_ptr<BarSurface> BarSurface::create(ybar::render::Renderer& renderer,
 
     impl->settings = settings;
     ShowWindow(impl->hwnd, settings.hidden ? SW_HIDE : SW_SHOWNOACTIVATE);
-    SetWindowPos(impl->hwnd, impl->zOrder(), 0, 0, 0, 0,
-                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-    impl->applyAppBar(frame);
+    impl->lastHidden = settings.hidden;
+    // The surface already matches `frame`; seed the cache so applyFrame only
+    // repositions if appbar negotiation moves us, then let it drive z-order,
+    // reservation, and any negotiated move in one place.
+    impl->lastAppliedFrame = frame;
+    impl->applyFrame(settings);
     impl->applyBackdrop();
     impl->applyStickyPinning();
 
@@ -411,20 +505,9 @@ void BarSurface::applySettings(const BarSettings& settings) {
     const bool backdropChanged = impl_->settings.glass != settings.glass ||
                                  impl_->settings.blurRadius != settings.blurRadius ||
                                  impl_->settings.shadow != settings.shadow;
-    impl_->settings = settings;
-    const RECT frame = impl_->frameFor(settings);
-    const int widthPx = frame.right - frame.left;
-    const int heightPx = frame.bottom - frame.top;
-    SetWindowPos(impl_->hwnd, impl_->zOrder(), frame.left, frame.top, widthPx, heightPx,
-                 SWP_NOACTIVATE);
-    impl_->surface->resize(widthPx, heightPx);
-    impl_->logicalW = widthPx / impl_->monitorInfo.scale;
-    impl_->logicalH = heightPx / impl_->monitorInfo.scale;
-    ShowWindow(impl_->hwnd, settings.hidden ? SW_HIDE : SW_SHOWNOACTIVATE);
-    impl_->applyAppBar(frame);
+    impl_->applyFrame(settings); // change-guarded reposition + reservation
     if (backdropChanged) impl_->applyBackdrop();
     if (stickyChanged) impl_->applyStickyPinning();
-    impl_->compositionDevice->Commit();
 }
 
 void BarSurface::followCurrentDesktop() { impl_->followCurrentDesktop(); }
@@ -432,8 +515,9 @@ void BarSurface::followCurrentDesktop() { impl_->followCurrentDesktop(); }
 void BarSurface::setFullscreenElevation(bool elevated) {
     if (impl_->elevatedForFullscreen == elevated) return;
     impl_->elevatedForFullscreen = elevated;
-    SetWindowPos(impl_->hwnd, impl_->zOrder(), 0, 0, 0, 0,
-                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    const HWND z = impl_->zOrder();
+    SetWindowPos(impl_->hwnd, z, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    impl_->lastZ = z; // keep applyFrame's change guard honest
 }
 
 bool BarSurface::monitorHasFullscreenWindow() const {

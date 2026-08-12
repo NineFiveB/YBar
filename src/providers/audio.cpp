@@ -114,16 +114,33 @@ public:
     }
 
     // (Re)binds the volume interface to the current default output device.
+    // Runs on the MMDevice notification thread (OnDefaultDeviceChanged) as
+    // well as the daemon thread, concurrently with OnNotify-driven publish()
+    // on yet another thread — so every swap of `volume` happens under
+    // publishMutex, while register/unregister/release happen OUTSIDE it
+    // (unregister can block on an in-flight OnNotify that is itself waiting
+    // for publishMutex).
     bool armEndpoint() {
-        if (volume && volumeCallback) volume->UnregisterControlChangeNotify(volumeCallback.Get());
-        volume.Reset();
+        ComPtr<IAudioEndpointVolume> old;
+        {
+            std::lock_guard<std::mutex> lock(publishMutex);
+            old = std::move(volume);
+        }
+        if (old && volumeCallback) old->UnregisterControlChangeNotify(volumeCallback.Get());
+        old.Reset();
+
         ComPtr<IMMDevice> device;
         if (FAILED(enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &device)))
             return false;
+        ComPtr<IAudioEndpointVolume> fresh;
         if (FAILED(device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_INPROC_SERVER,
-                                    nullptr, reinterpret_cast<void**>(volume.GetAddressOf()))))
+                                    nullptr, reinterpret_cast<void**>(fresh.GetAddressOf()))))
             return false;
-        volume->RegisterControlChangeNotify(volumeCallback.Get());
+        fresh->RegisterControlChangeNotify(volumeCallback.Get());
+        {
+            std::lock_guard<std::mutex> lock(publishMutex);
+            volume = fresh;
+        }
         return true;
     }
 };
@@ -157,19 +174,35 @@ bool AudioProvider::start() {
     impl_->volumeCallback.Attach(new VolumeCallback(impl_.get()));
     impl_->deviceCallback.Attach(new DeviceCallback(impl_.get()));
     impl_->enumerator->RegisterEndpointNotificationCallback(impl_->deviceCallback.Get());
-    if (!impl_->armEndpoint()) return false;
+    if (!impl_->armEndpoint()) {
+        // No default render endpoint (headless session, disabled audio).
+        // The device-notification registration is already live and holds a
+        // reference to a callback whose owner is about to be freed — it MUST
+        // be unregistered here, or the next device arrival calls into a
+        // dangling AudioProviderImpl.
+        stop();
+        return false;
+    }
     impl_->running = true;
     impl_->publish(true); // seed the first value
     return true;
 }
 
 void AudioProvider::stop() {
-    if (!impl_ || !impl_->running) return;
-    if (impl_->volume && impl_->volumeCallback)
-        impl_->volume->UnregisterControlChangeNotify(impl_->volumeCallback.Get());
-    if (impl_->enumerator && impl_->deviceCallback)
+    // Guarded on the enumerator, not `running`: a failed start() leaves a
+    // partially armed provider (registration live, running still false) that
+    // must be torn down the same way.
+    if (!impl_ || !impl_->enumerator) return;
+    ComPtr<IAudioEndpointVolume> old;
+    {
+        std::lock_guard<std::mutex> lock(impl_->publishMutex);
+        old = std::move(impl_->volume);
+    }
+    if (old && impl_->volumeCallback)
+        old->UnregisterControlChangeNotify(impl_->volumeCallback.Get());
+    old.Reset();
+    if (impl_->deviceCallback)
         impl_->enumerator->UnregisterEndpointNotificationCallback(impl_->deviceCallback.Get());
-    impl_->volume.Reset();
     impl_->enumerator.Reset();
     impl_->running = false;
 }

@@ -122,7 +122,10 @@ void KomorebiProvider::reregister() {
                 .dump();
         if (sendMessage(registration)) {
             if (appliedOffset_ > 0) applyWorkAreaOffset(appliedOffset_);
-            lastFocused_.clear(); // force the next state through the dedupe
+            {
+                std::lock_guard<std::mutex> lock(stateMutex_);
+                lastFocused_.clear(); // force the next state through the dedupe
+            }
             if (const auto reply = ybar::ipc::rawQuery(komorebiSocket(), json{{"type", "State"}}.dump()))
                 publishState(*reply);
             return;
@@ -167,7 +170,8 @@ void KomorebiProvider::readerLoop() {
 namespace {
 void publishAppEvent(
     const json& parsed,
-    const std::function<void(const std::string&, const std::string&)>& onAppEvent) {
+    const std::function<void(const std::string&, const std::string&, std::uintptr_t)>&
+        onAppEvent) {
     if (!onAppEvent || !parsed.contains("event")) return;
     const auto& event = parsed.at("event");
     if (!event.is_object() || !event.contains("type")) return;
@@ -181,8 +185,18 @@ void publishAppEvent(
     if (!content.is_array()) return;
     for (const auto& element : content) {
         if (!element.is_object() || !element.contains("exe")) continue;
-        const auto exe = element.at("exe").get<std::string>();
-        if (!exe.empty()) onAppEvent(name, exe);
+        std::string exe;
+        if (element.at("exe").is_string()) exe = element.at("exe").get<std::string>();
+        // On lookup failure komorebi fills title/exe/class with literal
+        // "could not get window ..." strings, not null — spec 11.2 says
+        // treat those as unknown, never publish them as an app name.
+        if (exe.rfind("could not get window", 0) == 0) return;
+        std::uintptr_t hwnd = 0;
+        if (element.contains("hwnd") && element.at("hwnd").is_number_integer()) {
+            const auto raw = element.at("hwnd").get<long long>();
+            if (raw > 0) hwnd = static_cast<std::uintptr_t>(raw);
+        }
+        if (!exe.empty() || hwnd != 0) onAppEvent(name, exe, hwnd);
         return;
     }
 }
@@ -199,13 +213,19 @@ void KomorebiProvider::publishState(const std::string& payload) {
         monitorCountKnown_ = true;
         auto update = extractUpdate(state);
         if (!update.workspacesChanged) return;
-        update.previousWorkspace = lastFocused_;
-        // Dedupe on monitor+workspace: two monitors can focus workspaces with
-        // the same display string (spec 11.3 fires on monitor OR workspace).
-        const std::string key =
-            std::to_string(update.focusedMonitorIndex) + "\x1f" + update.focusedWorkspace;
-        if (key == lastFocused_) return;
-        lastFocused_ = key;
+        {
+            // The reader thread and a UI-thread refresh() can publish
+            // concurrently — the dedupe string must not be written by both.
+            std::lock_guard<std::mutex> lock(stateMutex_);
+            update.previousWorkspace = lastFocused_;
+            // Dedupe on monitor+workspace: two monitors can focus workspaces
+            // with the same display string (spec 11.3 fires on monitor OR
+            // workspace).
+            const std::string key =
+                std::to_string(update.focusedMonitorIndex) + "\x1f" + update.focusedWorkspace;
+            if (key == lastFocused_) return;
+            lastFocused_ = key;
+        }
         if (onUpdate) onUpdate(update);
     } catch (const json::exception&) {
         // Tolerant parsing: schema drift must not kill the provider.
@@ -215,7 +235,10 @@ void KomorebiProvider::publishState(const std::string& payload) {
 bool KomorebiProvider::refresh() {
     const auto reply = ybar::ipc::rawQuery(komorebiSocket(), json{{"type", "State"}}.dump());
     if (!reply) return false;
-    lastFocused_.clear(); // forced re-query always republishes
+    {
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        lastFocused_.clear(); // forced re-query always republishes
+    }
     publishState(*reply);
     return true;
 }

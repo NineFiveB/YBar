@@ -442,6 +442,21 @@ void emitItem(DisplayList& list, Item& item, const Rect& contentBox, double scal
     Rect adjusted = contentBox;
     adjusted.y -= item.yOffset; // y_offset positive-up
     double penX = adjusted.x;
+    // Fixed-width slot semantics (spec 3.9): a customWidth item aligns its
+    // natural content inside the slot — UNCLAMPED, so overflow anchors per
+    // align exactly like the reference's emit-side slack. Without this the
+    // content renders flush left and slider hit-mapping (which mirrors the
+    // reference math) disagrees with the pixels by the slack.
+    if (item.customWidth >= 0) {
+        ybar::model::MeasuredContent measured;
+        const auto& iconLine = fonts.shape(item.icon.displayString(), item.icon.font);
+        const auto& labelLine = fonts.shape(item.label.displayString(), item.label.font);
+        measured.icon = {iconLine.width, iconLine.measuredHeight()};
+        measured.label = {labelLine.width, labelLine.measuredHeight()};
+        const double slack = item.customWidth - ybar::model::naturalLength(item, measured);
+        if (item.align == 'c') penX += slack / 2;
+        else if (item.align == 'r') penX += slack;
+    }
     // Paint order: image (unless align=r) -> icon -> components -> label ->
     // image (align=r), per spec 3.9.
     const bool imageTrails = item.image && item.image->align == 'r';

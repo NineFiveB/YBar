@@ -79,6 +79,24 @@ TEST_CASE("animate reaches bar color keys") {
     CHECK(f.settings.color.argb == 0xffffffff);
 }
 
+TEST_CASE("animate reaches bar gradient_color and lands on the settings field") {
+    // Regression pin: this path used to route a stack-local Color through the
+    // scheduler (dangling reference written every tick) — the animation must
+    // target the long-lived settings field and land exactly.
+    Fixture f;
+    REQUIRE(f.handler
+                ->handle({"--animate", "linear", "60", "--bar", "gradient_color=0xff00ff00"})
+                .empty());
+    CHECK(f.scheduler.active());
+    f.runToCompletion();
+    REQUIRE(f.settings.gradientColor.has_value());
+    CHECK(f.settings.gradientColor->argb == 0xff00ff00);
+    // A direct set afterwards cancels cleanly and applies immediately.
+    REQUIRE(f.handler->handle({"--bar", "gradient_color=0xff112233"}).empty());
+    CHECK(f.settings.gradientColor->argb == 0xff112233);
+    CHECK_FALSE(f.scheduler.active());
+}
+
 TEST_CASE("width=dynamic animates to the measured width, then restores the sentinel") {
     Fixture f;
     f.handler->handle({"--add", "item", "w", "left"});

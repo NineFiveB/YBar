@@ -108,7 +108,13 @@ std::string appNameForExecutablePath(const std::string& path) {
     std::wstring wide(static_cast<std::size_t>(size), L'\0');
     MultiByteToWideChar(CP_UTF8, 0, path.c_str(), static_cast<int>(path.size()), wide.data(),
                         size);
-    std::wstring description = fileDescription(wide);
+    // Version-resource lookup only for real paths: with a bare basename,
+    // GetFileVersionInfoSizeW does a LoadLibrary-order search (exe dir,
+    // system dirs, PATH) and can bind a DIFFERENT same-named binary — a
+    // scoop shim's FileDescription instead of the app's. komorebi events
+    // carry bare names; those resolve deterministically to the basename.
+    std::wstring description;
+    if (wide.find_first_of(L"\\/") != std::wstring::npos) description = fileDescription(wide);
     if (description.empty()) description = baseNameWithoutExe(wide);
     return narrow(description);
 }

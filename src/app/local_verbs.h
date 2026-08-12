@@ -20,4 +20,9 @@ namespace ybar::app {
 std::optional<int> runLocalVerb(const std::vector<std::string>& args,
                                 const std::string& instance);
 
+// Resolves ~/.config/ybar/current-theme (written by `ybar theme use`) to the
+// theme's entry config path, or "" when unset/unresolvable. Config discovery
+// consults this so a chosen theme survives daemon restarts.
+std::string themeConfigFromCurrentTheme();
+
 } // namespace ybar::app

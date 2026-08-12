@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <future>
@@ -103,6 +104,14 @@ struct IpcRequest {
     std::promise<std::string> reply;
 };
 
+// kMsgKomorebiApp payload: the hwnd lets the handler resolve the real
+// process's FileDescription instead of trusting a bare exe basename.
+struct KomorebiAppEvent {
+    std::string event;
+    std::string exe;
+    std::uintptr_t hwnd = 0;
+};
+
 struct DaemonState {
     ybar::model::ItemStore store;
     ybar::model::BarSettings settings;
@@ -148,6 +157,7 @@ struct DaemonState {
     std::unordered_map<int, LivePopup> popups;
     std::unique_ptr<ybar::win::PopupSurface> tooltip;
     int tooltipItemId = -1;
+    bool hotloadEnabled = false;  // mirrors the last --hotload state
     void* mouseHook = nullptr;    // HHOOK (WH_MOUSE_LL) for outside-click close
     void* keyboardHook = nullptr; // HHOOK (WH_KEYBOARD_LL), modifier_change only
     // Global pointer tracking (mouse.entered.global / mouse.exited.global) is
@@ -194,21 +204,28 @@ struct DaemonState {
     void executeConfig();
     void rebuildSurfaces();
     bool tryAttachKomorebi();
+    void detachKomorebiIfReserveChanged();
     void updateFullscreenElevation();
     void armAudio();
     void armMedia();
     void armNetwork();
     void publishPower(bool forced);
+    void publishPowerSource(bool forced);
+    void publishBattery(bool forced);
     void publishFrontApp(bool forced);
-    void sampleStats();
+    void sampleStats(bool publish = true);
     void updatePopups();
     void closeAutoClosePopups(int exceptHostId);
     void dispatchClick(ybar::model::Item& item, const char* button, const char* modifier);
 
     // Slider dragging (spec 3.9): the item captured on press keeps receiving
-    // motion until release, even past its own frame.
+    // motion until release, even past its own frame. Shared by the bar and
+    // popup mouse paths — only the frame source differs.
     int draggingSliderId = -1;
+    double sliderContentOffset(const ybar::model::Item& item);
     void updateSlider(ybar::model::Item& item, std::size_t surfaceIndex, double localX);
+    void updateSliderInPopup(ybar::model::Item& item, const LivePopup& live, double localX);
+    void commitSliderRelease(ybar::model::Item& item);
     void showTooltip(ybar::model::Item& item);
     void hideTooltip();
     ybar::model::MeasuredContent measureItem(const ybar::model::Item& item) {
@@ -256,6 +273,21 @@ std::string exeDirectory() {
     wchar_t buffer[MAX_PATH];
     const DWORD n = GetModuleFileNameW(nullptr, buffer, MAX_PATH);
     std::wstring path(buffer, n);
+    // Resolve symlinks: winget's portable install runs the exe through a
+    // Links-directory symlink, and GetModuleFileNameW reports the LINK path —
+    // shaders/ and examples/ only exist next to the real file.
+    const HANDLE file = CreateFileW(path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file != INVALID_HANDLE_VALUE) {
+        wchar_t resolved[1024];
+        const DWORD length = GetFinalPathNameByHandleW(file, resolved, 1024, FILE_NAME_NORMALIZED);
+        CloseHandle(file);
+        if (length > 0 && length < 1024) {
+            std::wstring final(resolved, length);
+            if (final.rfind(LR"(\\?\)", 0) == 0) final = final.substr(4);
+            path = final;
+        }
+    }
     const auto slash = path.find_last_of(L"\\/");
     path = slash == std::wstring::npos ? L"." : path.substr(0, slash);
     const int size = WideCharToMultiByte(CP_UTF8, 0, path.c_str(), -1, nullptr, 0, nullptr,
@@ -338,6 +370,7 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                 }
                 // Per-second upkeep: none of these have a message to hang off.
                 g_state->updateFullscreenElevation();
+                g_state->detachKomorebiIfReserveChanged(); // reserve left komorebi mode
                 g_state->tryAttachKomorebi(); // komorebi may have just started
                 if (g_state->settings.sticky) {
                     for (const auto& surface : g_state->surfaces) surface->followCurrentDesktop();
@@ -420,11 +453,18 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             return 0;
         }
         case kMsgKomorebiApp: {
-            auto* payload = reinterpret_cast<std::pair<std::string, std::string>*>(lParam);
+            auto* payload = reinterpret_cast<KomorebiAppEvent*>(lParam);
             if (g_state) {
-                const std::string name =
-                    ybar::providers::appNameForExecutablePath(payload->second);
-                if (!name.empty()) g_state->bus.trigger(payload->first, name);
+                // Resolve via the window first — same path as
+                // front_app_switched — so the name comes from the process
+                // that actually owns the window, not from a PATH search on
+                // a bare basename. Destroy events have a dead window; the
+                // exe basename is all komorebi still knows.
+                std::string name =
+                    ybar::providers::appNameForWindow(reinterpret_cast<void*>(payload->hwnd));
+                if (name.empty())
+                    name = ybar::providers::appNameForExecutablePath(payload->exe);
+                if (!name.empty()) g_state->bus.trigger(payload->event, name);
             }
             delete payload;
             return 0;
@@ -443,6 +483,11 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                 g_state->bus.trigger(wParam ? "mouse.entered.global" : "mouse.exited.global",
                                      "");
             return 0;
+        case ybar::win::BarSurface::kFullscreenCheckMessage:
+            // ABN_FULLSCREENAPP relayed by an appbar surface (spec 6): the
+            // shell's signal beats the 1 s geometry poll to the punch.
+            if (g_state) g_state->updateFullscreenElevation();
+            return 0;
         case kMsgReloadConfig:
             if (g_state) {
                 // Full teardown + re-run, no diffing (spec 5).
@@ -458,9 +503,22 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                 }
                 if (g_state->fonts) g_state->fonts->clear();
                 g_state->hoverItemId = -1;
+                // The dragged item just ceased to exist — a stale id would
+                // swallow every Move/Up on the bar from here on.
+                g_state->draggingSliderId = -1;
                 g_state->appliedOffsetPhysical = -1;
                 g_state->executeConfig();
+                g_state->detachKomorebiIfReserveChanged();
                 g_state->renderAll();
+                // Reload-mid-song contract (spec 10): replay the cached
+                // media env so the rebuilt now-playing item repopulates —
+                // identical PlaybackInfoChanged callbacks are deduped and
+                // would never arrive again. Empty cache dispatches nothing.
+                if (g_state->media) g_state->media->refresh();
+                // Hotload watches the config's DIRECTORY — after --reload
+                // <path> or `ybar theme use`, re-point it at the new one.
+                if (g_state->hotloadEnabled)
+                    g_state->hotload.setEnabled(true, g_state->resolvedConfigPath);
                 g_state->hotload.noteReloadHappened();
             }
             return 0;
@@ -642,8 +700,8 @@ bool DaemonState::tryAttachKomorebi() {
         if (!PostMessageW(hwnd, kMsgKomorebi, 0, reinterpret_cast<LPARAM>(copy))) delete copy;
     };
     komorebi->onAppEvent = [hwnd = messageWindow](const std::string& event,
-                                                  const std::string& exe) {
-        auto* payload = new std::pair<std::string, std::string>(event, exe);
+                                                  const std::string& exe, std::uintptr_t win) {
+        auto* payload = new KomorebiAppEvent{event, exe, win};
         if (!PostMessageW(hwnd, kMsgKomorebiApp, 0, reinterpret_cast<LPARAM>(payload)))
             delete payload;
     };
@@ -654,9 +712,42 @@ bool DaemonState::tryAttachKomorebi() {
         return false;
     }
     trace("komorebi: subscribed");
+    // komorebi's Show/Destroy now feed app_launched/app_terminated — retire
+    // the snapshot poller or every launch fires twice with different names.
+    if (appLifecycleArmed) {
+        KillTimer(messageWindow, kAppsTimer);
+        appLifecycleArmed = false;
+    }
     appliedOffsetPhysical = -1; // re-run the work-area handshake
     renderAll();
     return true;
+}
+
+// `--bar reserve=` can change at runtime (spec 6.1): leaving komorebi mode
+// must release both the subscription and the reserved strip, or the offset
+// double-stacks with the appbar / persists under reserve=off.
+void DaemonState::detachKomorebiIfReserveChanged() {
+    const bool komorebiMode = settings.reserve != ybar::model::ReserveMode::Off &&
+                              settings.reserve != ybar::model::ReserveMode::AppBar;
+    if (komorebiMode || !komorebi) return;
+    komorebi->clearWorkAreaOffset();
+    komorebi->stop();
+    komorebi.reset();
+    appliedOffsetPhysical = -1;
+    // The WM-less fallback poller resumes if anything still subscribes.
+    const auto anySubscriber = [this](const char* name) {
+        const auto bit = bus.eventBit(name);
+        if (!bit) return false;
+        for (const auto& item : store.items())
+            if (item->updateMask & *bit) return true;
+        return false;
+    };
+    if (!appLifecycleArmed &&
+        (anySubscriber("app_launched") || anySubscriber("app_terminated"))) {
+        appLifecycleArmed = true;
+        appLifecycle.prime(); // never announce the existing world
+        SetTimer(messageWindow, kAppsTimer, 2000, nullptr);
+    }
 }
 
 void DaemonState::updateFullscreenElevation() {
@@ -704,7 +795,9 @@ void DaemonState::armNetwork() {
     }
 }
 
-void DaemonState::publishPower(bool forced) {
+// Split like the reference's publishPowerSource/publishBattery: `--trigger
+// battery_change` must not also force-fire power_source_change subscribers.
+void DaemonState::publishPowerSource(bool forced) {
     SYSTEM_POWER_STATUS status{};
     if (!GetSystemPowerStatus(&status)) return;
     // ACLineStatus: 0 battery, 1 AC, 255 unknown; PoHot maps to AC (spec 10).
@@ -713,13 +806,22 @@ void DaemonState::publishPower(bool forced) {
         lastPowerSource = source;
         bus.trigger("power_source_change", source);
     }
-    if (status.BatteryLifePercent != 255) {
-        const int percent = status.BatteryLifePercent;
-        if (forced || percent != lastBatteryPercent) {
-            lastBatteryPercent = percent;
-            bus.trigger("battery_change", std::to_string(percent));
-        }
+}
+
+void DaemonState::publishBattery(bool forced) {
+    SYSTEM_POWER_STATUS status{};
+    if (!GetSystemPowerStatus(&status)) return;
+    if (status.BatteryLifePercent == 255) return; // no battery / unknown
+    const int percent = status.BatteryLifePercent;
+    if (forced || percent != lastBatteryPercent) {
+        lastBatteryPercent = percent;
+        bus.trigger("battery_change", std::to_string(percent));
     }
+}
+
+void DaemonState::publishPower(bool forced) {
+    publishPowerSource(forced);
+    publishBattery(forced);
 }
 
 void DaemonState::publishFrontApp(bool forced) {
@@ -735,7 +837,7 @@ void DaemonState::publishFrontApp(bool forced) {
     bus.trigger("front_app_switched", name);
 }
 
-void DaemonState::sampleStats() {
+void DaemonState::sampleStats(bool publish) {
     FILETIME idleFt, kernelFt, userFt;
     if (!GetSystemTimes(&idleFt, &kernelFt, &userFt)) return;
     const auto toU64 = [](const FILETIME& ft) {
@@ -754,6 +856,10 @@ void DaemonState::sampleStats() {
     statsPrevIdle = idle;
     statsPrevKernel = kernel;
     statsPrevUser = user;
+    // Silent prime (first-subscription arm): store the baseline, publish
+    // nothing — the reference's first delivered sample is a genuine 2 s
+    // delta, never a bogus CPU=0.
+    if (!publish) return;
 
     MEMORYSTATUSEX memory{};
     memory.dwLength = sizeof(memory);
@@ -806,24 +912,81 @@ void DaemonState::updateSlider(ybar::model::Item& item, std::size_t surfaceIndex
     if (!item.slider || !fonts) return;
     const auto* frame = frameFor(surfaceIndex, item.id);
     if (!frame) return;
-
-    double trackX = frame->x + item.paddingLeft;
-    if (item.customWidth >= 0) {
-        const double slack =
-            std::max(0.0, item.customWidth - ybar::model::naturalLength(item, measureItem(item)));
-        if (item.align == 'c') trackX += slack / 2;
-        else if (item.align == 'r') trackX += slack;
-    }
-    if (item.icon.drawing && !item.icon.displayString().empty()) {
-        const auto& icon = fonts->shape(item.icon.displayString(), item.icon.font);
-        trackX += item.icon.paddingLeft + icon.width + item.icon.paddingRight;
-    }
+    // The bar frame includes the item's own padding; the content offset
+    // covers alignment slack and the icon.
+    const double trackX = frame->x + item.paddingLeft + sliderContentOffset(item);
     const double width = item.slider->width > 0 ? item.slider->width : 1;
     item.slider->percentage =
         std::min(100.0, std::max(0.0, (localX - trackX) / width * 100.0));
     if (renderer && !renderQueued) {
         renderQueued = true; // coalesce to one frame per turn (spec 7.2)
         PostMessageW(messageWindow, kMsgRender, 0, 0);
+    }
+}
+
+// Content-relative offset of the slider track: alignment slack of a
+// fixed-width item plus the icon advance — the same offsets the renderer
+// applies before emitting the track.
+double DaemonState::sliderContentOffset(const ybar::model::Item& item) {
+    double offset = 0;
+    if (item.customWidth >= 0 && fonts) {
+        const double slack =
+            std::max(0.0, item.customWidth - ybar::model::naturalLength(item, measureItem(item)));
+        if (item.align == 'c') offset += slack / 2;
+        else if (item.align == 'r') offset += slack;
+    }
+    if (fonts && item.icon.drawing && !item.icon.displayString().empty()) {
+        const auto& icon = fonts->shape(item.icon.displayString(), item.icon.font);
+        offset += item.icon.paddingLeft + icon.width + item.icon.paddingRight;
+    }
+    return offset;
+}
+
+// Popup variant: content boxes are panel-local and already start after the
+// member's paddingLeft, so only the content offset applies.
+void DaemonState::updateSliderInPopup(ybar::model::Item& item, const LivePopup& live,
+                                      double localX) {
+    if (!item.slider || !fonts) return;
+    const ybar::model::Rect* box = nullptr;
+    for (std::size_t i = 0; i < live.memberIds.size(); ++i) {
+        if (live.memberIds[i] == item.id && i < live.boxes.size()) {
+            box = &live.boxes[i];
+            break;
+        }
+    }
+    if (!box) return;
+    const double trackX = box->x + sliderContentOffset(item);
+    const double width = item.slider->width > 0 ? item.slider->width : 1;
+    item.slider->percentage =
+        std::min(100.0, std::max(0.0, (localX - trackX) / width * 100.0));
+    if (renderer && !renderQueued) {
+        renderQueued = true;
+        PostMessageW(messageWindow, kMsgRender, 0, 0);
+    }
+}
+
+// The release side of a drag, shared by bar and popup paths: commit the
+// percentage through click_script + mouse.clicked, then settle the global
+// mouse containment the drag's veto suppressed.
+void DaemonState::commitSliderRelease(ybar::model::Item& item) {
+    const int percentage = static_cast<int>(std::lround(item.slider->percentage));
+    ybar::events::Environment extra{{"PERCENTAGE", std::to_string(percentage)},
+                                    {"BUTTON", "left"},
+                                    {"MODIFIER", "none"}};
+    if (!item.clickScript.empty()) {
+        auto scriptEnv = extra;
+        scriptEnv["NAME"] = item.name;
+        scripts.run(item.clickScript, scriptEnv);
+    }
+    bus.triggerTargeted(item, "mouse.clicked", "", extra);
+    if (globalMouseArmed) {
+        POINT cursor{};
+        GetCursorPos(&cursor);
+        const bool inside = ybar::win::pointOverYBarWindow(cursor.x, cursor.y);
+        if (inside != globalMouseInside) {
+            globalMouseInside = inside;
+            bus.trigger(inside ? "mouse.entered.global" : "mouse.exited.global", "");
+        }
     }
 }
 
@@ -840,7 +1003,17 @@ void DaemonState::closeAutoClosePopups(int exceptHostId) {
 
 void DaemonState::showTooltip(ybar::model::Item& item) {
     if (!renderer || !fonts || surfaces.empty()) return;
-    auto& surface = *surfaces.front();
+    // Same surface-pairing rule as popups: anchor at the surface that laid
+    // the item out, not the first surface's origin with a foreign frame.
+    std::ptrdiff_t surfaceIndex = -1;
+    for (std::size_t i = 0; i < surfaces.size(); ++i) {
+        if (frameFor(i, item.id)) {
+            surfaceIndex = static_cast<std::ptrdiff_t>(i);
+            break;
+        }
+    }
+    if (surfaceIndex < 0) return;
+    auto& surface = *surfaces[static_cast<std::size_t>(surfaceIndex)];
     const double scale = surface.scale();
     auto* atlas = atlasFor(scale);
     if (!atlas) return;
@@ -867,12 +1040,15 @@ void DaemonState::showTooltip(ybar::model::Item& item) {
     ybar::render::emitItem(list, bubble, ybar::model::Rect{0, 0, panel.width, panel.height},
                            scale, *fonts, *atlas);
 
+    // A frozen creation-scale tooltip mis-sizes after a DPI change — rebuild.
+    if (tooltip && tooltip->scale() != scale) tooltip.reset();
     if (!tooltip) tooltip = ybar::win::PopupSurface::create(*renderer, scale);
     if (!tooltip) return;
+    const auto* frame = frameFor(static_cast<std::size_t>(surfaceIndex), item.id);
+    if (!frame) return;
     const auto origin = surface.screenOrigin();
-    const ybar::model::Rect anchor{origin.x + item.frame.x * scale,
-                                   origin.y + item.frame.y * scale, item.frame.width * scale,
-                                   item.frame.height * scale};
+    const ybar::model::Rect anchor{origin.x + frame->x * scale, origin.y + frame->y * scale,
+                                   frame->width * scale, frame->height * scale};
     tooltip->present(panel, anchor, 'c', settings.position == ybar::model::BarPosition::Top, 4);
     renderer->render(list, tooltip->renderSurface(), atlas);
 }
@@ -884,11 +1060,17 @@ void DaemonState::hideTooltip() {
 
 void DaemonState::updatePopups() {
     if (!renderer || !fonts || surfaces.empty()) return;
-    auto& hostSurface = *surfaces.front(); // popups render at the primary bar's scale
-    const double scale = hostSurface.scale();
-    auto* atlas = atlasFor(scale);
-    if (!atlas) return;
     const auto measure = [this](const ybar::model::Item& item) { return measureItem(item); };
+
+    // A popup belongs to the surface its host item is laid out on — the
+    // reference pairs the same surface's frame, origin, and scale. Using the
+    // first surface's origin with the last-rendered frame put popups off by
+    // the monitors' width difference on mixed-width setups.
+    const auto surfaceIndexForItem = [this](int itemId) -> std::ptrdiff_t {
+        for (std::size_t i = 0; i < surfaces.size(); ++i)
+            if (frameFor(i, itemId)) return static_cast<std::ptrdiff_t>(i);
+        return -1;
+    };
 
     // Orphan cleanup: hosts removed since the last frame (e.g. --reload).
     for (auto it = popups.begin(); it != popups.end();) {
@@ -908,7 +1090,8 @@ void DaemonState::updatePopups() {
     }
 
     for (const auto& host : store.items()) {
-        const bool wantsOpen = host->popup.isOpen && !host->frame.isZero();
+        const std::ptrdiff_t hostSurfaceIndex = surfaceIndexForItem(host->id);
+        const bool wantsOpen = host->popup.isOpen && hostSurfaceIndex >= 0;
         auto liveIt = popups.find(host->id);
         if (!wantsOpen) {
             if (liveIt != popups.end()) {
@@ -916,6 +1099,19 @@ void DaemonState::updatePopups() {
                 popups.erase(liveIt);
             }
             continue;
+        }
+        auto& hostSurface = *surfaces[static_cast<std::size_t>(hostSurfaceIndex)];
+        const double scale = hostSurface.scale();
+        auto* atlas = atlasFor(scale);
+        if (!atlas) continue;
+
+        // A DPI change on the host monitor invalidates the popup surface's
+        // frozen creation scale: rebuild it so present() sizes the window
+        // and the mouse handler divides coordinates at the current scale.
+        if (liveIt != popups.end() && liveIt->second.surface->scale() != scale) {
+            liveIt->second.surface->hide();
+            popups.erase(liveIt);
+            liveIt = popups.end();
         }
 
         std::vector<ybar::model::Item*> members;
@@ -949,18 +1145,56 @@ void DaemonState::updatePopups() {
             liveIt = popups.emplace(host->id, LivePopup{std::move(surface), {}, {}}).first;
             liveIt->second.surface->setMouseHandler(
                 [this, hostId = host->id](const ybar::win::MouseEvent& event) {
-                    if (event.kind != ybar::win::MouseEvent::Kind::Up) return;
+                    using Kind = ybar::win::MouseEvent::Kind;
                     const auto it = popups.find(hostId);
                     if (it == popups.end()) return;
-                    for (std::size_t i = 0; i < it->second.boxes.size(); ++i) {
-                        if (!it->second.boxes[i].contains({event.x, event.y})) continue;
-                        for (const auto& item : store.items()) {
-                            if (item->id == it->second.memberIds[i]) {
-                                dispatchClick(*item, event.button, event.modifier);
-                                break;
-                            }
+                    const auto memberAt = [this, &it](double x,
+                                                      double y) -> ybar::model::Item* {
+                        for (std::size_t i = 0; i < it->second.boxes.size(); ++i) {
+                            if (!it->second.boxes[i].contains({x, y})) continue;
+                            for (const auto& item : store.items())
+                                if (item->id == it->second.memberIds[i]) return item.get();
+                            return nullptr;
                         }
-                        break; // press inside a popup never dismisses it (spec 3.9)
+                        return nullptr;
+                    };
+
+                    // The shared slider drag machinery works here verbatim —
+                    // only the frame source differs (spec 3.9, mirroring the
+                    // reference's popup press/drag routing).
+                    if (draggingSliderId != -1 &&
+                        (event.kind == Kind::Move || event.kind == Kind::Up)) {
+                        bool handled = false;
+                        for (const auto& candidate : store.items()) {
+                            if (candidate->id != draggingSliderId || !candidate->slider)
+                                continue;
+                            handled = true;
+                            const bool released = event.kind == Kind::Up;
+                            candidate->slider->isDragged = !released;
+                            updateSliderInPopup(*candidate, it->second, event.x);
+                            if (released) {
+                                draggingSliderId = -1;
+                                commitSliderRelease(*candidate);
+                            }
+                            break;
+                        }
+                        if (handled) return;
+                        draggingSliderId = -1; // self-heal a stale drag id
+                    }
+                    if (event.kind == Kind::Down) {
+                        auto* member = memberAt(event.x, event.y);
+                        if (member && member->slider) {
+                            draggingSliderId = member->id;
+                            member->slider->isDragged = true;
+                            scheduler.cancel("item." + std::to_string(member->id) +
+                                             ".slider.percentage");
+                            updateSliderInPopup(*member, it->second, event.x);
+                        }
+                        return; // press inside a popup never dismisses it (spec 3.9)
+                    }
+                    if (event.kind == Kind::Up) {
+                        if (auto* member = memberAt(event.x, event.y))
+                            dispatchClick(*member, event.button, event.modifier);
                     }
                 });
         }
@@ -969,10 +1203,15 @@ void DaemonState::updatePopups() {
         for (auto* member : members) live.memberIds.push_back(member->id);
         live.boxes = layout.contentBoxes;
 
+        // Anchor from the SAME surface's frame snapshot — item->frame holds
+        // whichever monitor rendered last, not necessarily this one.
+        const auto* hostFrame =
+            frameFor(static_cast<std::size_t>(hostSurfaceIndex), host->id);
+        if (!hostFrame) continue;
         const auto origin = hostSurface.screenOrigin();
-        const ybar::model::Rect anchor{origin.x + host->frame.x * scale,
-                                       origin.y + host->frame.y * scale,
-                                       host->frame.width * scale, host->frame.height * scale};
+        const ybar::model::Rect anchor{origin.x + hostFrame->x * scale,
+                                       origin.y + hostFrame->y * scale,
+                                       hostFrame->width * scale, hostFrame->height * scale};
         live.surface->setBackdrop(host->popup.blurRadius > 0,
                                   host->popup.background.cornerRadius);
         live.surface->present(layout.panelSize, anchor, host->popup.align,
@@ -1046,10 +1285,14 @@ void DaemonState::renderAll() {
 
     updatePopups();
 
-    // Work-area handshake follows bar-height changes (spec 11.4).
+    // Work-area handshake follows bar-height changes (spec 11.4). Reserve
+    // leaving komorebi mode zeroes the offset — otherwise it double-stacks
+    // with the appbar or persists under reserve=off.
     if ((komorebi || ytile) && !surfaces.empty()) {
+        const bool reserving = settings.reserve != ybar::model::ReserveMode::Off &&
+                               settings.reserve != ybar::model::ReserveMode::AppBar;
         const double scale = surfaces.front()->scale();
-        const int physical = settings.hidden
+        const int physical = (settings.hidden || !reserving)
                                  ? 0
                                  : static_cast<int>((settings.height + settings.yOffset) * scale + 0.5);
         if (physical != appliedOffsetPhysical) {
@@ -1161,42 +1404,24 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
             // frame keeps updating it, and the release commits the value.
             if (state.draggingSliderId != -1 &&
                 (event.kind == Kind::Move || event.kind == Kind::Up)) {
+                bool handled = false;
                 for (const auto& candidate : state.store.items()) {
                     if (candidate->id != state.draggingSliderId || !candidate->slider) continue;
+                    handled = true;
                     const bool released = event.kind == Kind::Up;
                     candidate->slider->isDragged = !released;
                     state.updateSlider(*candidate, surfaceIndex, event.x);
                     if (released) {
                         state.draggingSliderId = -1;
-                        const int percentage =
-                            static_cast<int>(std::lround(candidate->slider->percentage));
-                        ybar::events::Environment extra{{"PERCENTAGE",
-                                                         std::to_string(percentage)},
-                                                        {"BUTTON", "left"},
-                                                        {"MODIFIER", "none"}};
-                        if (!candidate->clickScript.empty()) {
-                            auto scriptEnv = extra;
-                            scriptEnv["NAME"] = candidate->name;
-                            state.scripts.run(candidate->clickScript, scriptEnv);
-                        }
-                        state.bus.triggerTargeted(*candidate, "mouse.clicked", "", extra);
-                        // The drag vetoed any global exit; settle it now.
-                        if (state.globalMouseArmed) {
-                            POINT cursor{};
-                            GetCursorPos(&cursor);
-                            const bool inside =
-                                ybar::win::pointOverYBarWindow(cursor.x, cursor.y);
-                            if (inside != state.globalMouseInside) {
-                                state.globalMouseInside = inside;
-                                state.bus.trigger(inside ? "mouse.entered.global"
-                                                         : "mouse.exited.global",
-                                                  "");
-                            }
-                        }
+                        state.commitSliderRelease(*candidate);
                     }
                     break;
                 }
-                return;
+                if (handled) return;
+                // Self-heal: the dragged item was removed mid-drag (reload,
+                // --remove). Drop the stale id and fall through to normal
+                // dispatch instead of swallowing bar input forever.
+                state.draggingSliderId = -1;
             }
 
             auto* item = event.kind == Kind::Leave ? nullptr : hitTest(event.x, event.y);
@@ -1291,7 +1516,7 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     state.bus.onFirstSubscription = [&state](const std::string& event) {
         if (event == "system_stats" && !state.statsArmed) {
             state.statsArmed = true;
-            state.sampleStats(); // prime the tick deltas
+            state.sampleStats(/*publish=*/false); // silent prime of the deltas
             SetTimer(state.messageWindow, kStatsTimer, 2000, nullptr);
         } else if (event == "volume_change") {
             state.armAudio();
@@ -1334,11 +1559,21 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
                ybar::providers::KomorebiProvider::sendMessage(jsonText);
     };
     hooks.reload = [&state](const std::string& explicitPath) {
-        // --reload [path] re-points the config before the teardown re-run.
-        if (!explicitPath.empty()) state.explicitConfigPath = explicitPath;
+        // --reload [path] re-points the config before the teardown re-run —
+        // but only to a file that exists. A typo'd path must not become the
+        // sticky config source and blank the bar forever (the reference just
+        // re-runs the old config on a bad path).
+        if (!explicitPath.empty()) {
+            if (ybar::app::configFileExists(explicitPath)) {
+                state.explicitConfigPath = explicitPath;
+            } else {
+                std::fprintf(stderr, "[!] config not found: %s\n", explicitPath.c_str());
+            }
+        }
         PostMessageW(state.messageWindow, kMsgReloadConfig, 0, 0);
     };
     hooks.setHotload = [&state](bool enabled) {
+        state.hotloadEnabled = enabled;
         state.hotload.setEnabled(enabled, state.resolvedConfigPath);
     };
     hooks.forcedUpdate = [&state] {
@@ -1365,8 +1600,12 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
             state.armMedia();
             return state.media && state.media->refresh();
         }
-        if (event == "power_source_change" || event == "battery_change") {
-            state.publishPower(true);
+        if (event == "power_source_change") {
+            state.publishPowerSource(true); // only the requested event fires
+            return true;
+        }
+        if (event == "battery_change") {
+            state.publishBattery(true);
             return true;
         }
         if (event == "front_app_switched") {

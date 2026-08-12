@@ -1,5 +1,7 @@
 #include "app/config.h"
 
+#include "app/local_verbs.h"
+
 // clang-format off
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -35,6 +37,8 @@ long long nowMs() { return static_cast<long long>(GetTickCount64()); }
 
 } // namespace
 
+bool configFileExists(const std::string& path) { return fileExists(expandTilde(path)); }
+
 std::string locateConfig(const std::string& instance, const std::string& explicitPath) {
     if (!explicitPath.empty()) {
         const auto expanded = expandTilde(explicitPath);
@@ -42,6 +46,12 @@ std::string locateConfig(const std::string& instance, const std::string& explici
         std::fprintf(stderr, "[!] config not found: %s\n", explicitPath.c_str());
         return {}; // daemon runs configless (reference behavior)
     }
+    // `ybar theme use` records a choice in ~/.config/ybar/current-theme; the
+    // daemon honors it here so a theme survives restarts and autostart
+    // (spec 12) — otherwise "recorded; start ybar to apply" would be a lie.
+    // Explicit -c above always wins; `ybar theme reset` clears it.
+    if (const std::string themed = themeConfigFromCurrentTheme(); !themed.empty())
+        return themed;
     const std::string rcLua = instance + "rc.lua";
     const std::string rc = instance + "rc";
     std::vector<std::string> directories;

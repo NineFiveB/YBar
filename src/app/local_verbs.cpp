@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
+#include <iterator>
 
 #include "ipc/socket.h"
 #include "ipc/wire_format.h"
@@ -46,7 +47,23 @@ std::string narrow(const std::wstring& wide) {
 fs::path executablePath() {
     wchar_t buffer[MAX_PATH];
     const DWORD n = GetModuleFileNameW(nullptr, buffer, MAX_PATH);
-    return fs::path(std::wstring(buffer, n));
+    std::wstring path(buffer, n);
+    // Resolve symlinks: winget's portable install launches through a
+    // Links-directory symlink and GetModuleFileNameW reports the LINK path.
+    // Shipped themes and the autostart Run value need the real location.
+    const HANDLE file = CreateFileW(path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file != INVALID_HANDLE_VALUE) {
+        wchar_t resolved[1024];
+        const DWORD length = GetFinalPathNameByHandleW(file, resolved, 1024, FILE_NAME_NORMALIZED);
+        CloseHandle(file);
+        if (length > 0 && length < 1024) {
+            std::wstring final(resolved, length);
+            if (final.rfind(LR"(\\?\)", 0) == 0) final = final.substr(4);
+            path = final;
+        }
+    }
+    return fs::path(path);
 }
 
 fs::path configDirectory() {
@@ -121,7 +138,17 @@ int autostartStatus() {
         std::printf("autostart: disabled\n");
         return 0;
     }
-    std::printf("autostart: enabled (%s)\n", narrow(std::wstring(buffer)).c_str());
+    // Registry strings "may not have been stored with the proper terminating
+    // null" (RegQueryValueEx docs), and nothing stops another writer from
+    // storing a non-string type — build from the returned byte count.
+    if (type != REG_SZ && type != REG_EXPAND_SZ) {
+        std::printf("autostart: enabled (non-string Run value)\n");
+        return 0;
+    }
+    std::wstring value(buffer, std::min<std::size_t>(size / sizeof(wchar_t),
+                                                     std::size(buffer)));
+    while (!value.empty() && value.back() == L'\0') value.pop_back();
+    std::printf("autostart: enabled (%s)\n", narrow(value).c_str());
     return 0;
 }
 
@@ -239,7 +266,35 @@ int themeUse(const std::string& name, const std::string& instance) {
     return 0;
 }
 
+int themeReset() {
+    const fs::path state = currentThemeFile();
+    std::error_code ec;
+    if (!state.empty() && fs::exists(state, ec)) fs::remove(state, ec);
+    std::printf("theme selection cleared; the default config discovery applies\n");
+    return 0;
+}
+
 } // namespace
+
+std::string themeConfigFromCurrentTheme() {
+    const fs::path state = currentThemeFile();
+    std::error_code ec;
+    if (state.empty() || !fs::exists(state, ec)) return {};
+    std::string name;
+    if (FILE* file = _wfopen(state.c_str(), L"rb")) {
+        char buffer[256];
+        const std::size_t n = std::fread(buffer, 1, sizeof(buffer) - 1, file);
+        std::fclose(file);
+        name.assign(buffer, n);
+        while (!name.empty() && (name.back() == '\n' || name.back() == '\r')) name.pop_back();
+    }
+    if (name.empty()) return {};
+    const auto themes = collectThemes();
+    const auto match = std::find_if(themes.begin(), themes.end(),
+                                    [&name](const auto& pair) { return pair.first == name; });
+    // A stale name (theme deleted) falls back to normal discovery.
+    return match == themes.end() ? std::string{} : match->second.string();
+}
 
 std::optional<int> runLocalVerb(const std::vector<std::string>& args,
                                 const std::string& instance) {
@@ -258,6 +313,7 @@ std::optional<int> runLocalVerb(const std::vector<std::string>& args,
         const std::string action = args.size() > 1 ? args[1] : "list";
         if (action == "list") return themeList();
         if (action == "current") return themeCurrent();
+        if (action == "reset") return themeReset();
         if (action == "use") {
             if (args.size() < 3) {
                 std::fprintf(stderr, "[!] usage: ybar theme use <name>\n");
@@ -265,7 +321,7 @@ std::optional<int> runLocalVerb(const std::vector<std::string>& args,
             }
             return themeUse(args[2], instance);
         }
-        std::fprintf(stderr, "[!] usage: ybar theme list|current|use <name>\n");
+        std::fprintf(stderr, "[!] usage: ybar theme list|current|use <name>|reset\n");
         return 1;
     }
 

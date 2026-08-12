@@ -20,6 +20,10 @@ namespace ybar::app {
 // Empty when no config was found. `explicitPath` may be empty.
 std::string locateConfig(const std::string& instance, const std::string& explicitPath);
 
+// Tilde-expanded existence check for a config file path (used to validate
+// `--reload <path>` before adopting it as the sticky config source).
+bool configFileExists(const std::string& path);
+
 class Hotload {
 public:
     ~Hotload();

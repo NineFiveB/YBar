@@ -104,7 +104,12 @@ Result setColor(Color& field, std::string_view channel, const std::string& value
 } // namespace
 
 void BarPropertySetter::beginAnimation(const AnimationContext& context) {
-    g_barAnimation = &context;
+    // Copy into function-local static storage (mirroring the item domain,
+    // property_setter.cpp): the caller's context is block-scoped and dies
+    // before set() runs — storing its address would dangle.
+    static AnimationContext storage;
+    storage = context;
+    g_barAnimation = &storage;
 }
 
 void BarPropertySetter::endAnimation() {
@@ -137,6 +142,32 @@ std::optional<std::string> BarPropertySetter::set(BarSettings& s, std::string_vi
     if (key == "border_width") return setFloat(s.borderWidth, value);
     if (key == "corner_radius") return setFloat(s.cornerRadius, value);
     if (key == "gradient_color") {
+        // The whole-color path must NOT route a stack local through
+        // setColor: under --animate the scheduler would capture a reference
+        // to it and write through dead stack every tick (the same trap
+        // documented at the item domain's setFloatDirect). Animate onto the
+        // settings field via a closure instead — BarSettings outlives every
+        // animation (reload cancels the scheduler first).
+        if (channel.empty() || channel == "hex") {
+            const auto parsed = Color::parse(value);
+            if (!parsed) return "[!] invalid color: " + value;
+            if (g_barAnimation && g_barAnimation->scheduler) {
+                if (g_barAnimation->frames > 0) {
+                    g_barAnimation->scheduler->add(
+                        animationKey(), g_barAnimation->curve, g_barAnimation->frames,
+                        s.gradientColor.value_or(Color{}), *parsed,
+                        [&s](const ybar::anim::AnimValue& v) {
+                            s.gradientColor = std::get<Color>(v);
+                        });
+                    return std::nullopt;
+                }
+                g_barAnimation->scheduler->cancel(animationKey());
+            }
+            s.gradientColor = *parsed;
+            return std::nullopt;
+        }
+        // Channel writes never register with the scheduler, so the local
+        // round-trip is safe here.
         Color color = s.gradientColor.value_or(Color{});
         const auto result = setColor(color, channel, value);
         if (!result) s.gradientColor = color;
