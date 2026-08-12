@@ -94,7 +94,7 @@ add_library(ybar_win
 # runtimeobject: C++/WinRT (GSMTC media session).
 target_link_libraries(ybar_win PUBLIC ybar_core lua_vendor
   ws2_32 d3d11 dxgi d3dcompiler dcomp dwrite shcore user32 gdi32
-  windowscodecs ole32 shell32 version iphlpapi wlanapi runtimeobject uuid)
+  windowscodecs ole32 shell32 version iphlpapi wlanapi runtimeobject uuid dwmapi)
 if(YBAR_CPPWINRT_INCLUDE)
   target_include_directories(ybar_win PRIVATE ${YBAR_CPPWINRT_INCLUDE})
 endif()

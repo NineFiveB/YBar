@@ -10,6 +10,7 @@
 #include <d3d11.h>
 #include <dxgi1_3.h>
 #include <dcomp.h>
+#include <dwmapi.h>
 #include <shellapi.h>
 #include <shobjidl_core.h> // IVirtualDesktopManager (sticky pinning)
 #include <wrl/client.h>
@@ -113,6 +114,26 @@ public:
         SHAppBarMessage(ABM_SETPOS, &data);
         SetWindowPos(hwnd, zOrder(), data.rc.left, data.rc.top, data.rc.right - data.rc.left,
                      data.rc.bottom - data.rc.top, SWP_NOACTIVATE);
+    }
+
+    // glass / blur_radius (spec 7.6): DWM composes an Acrylic plate behind
+    // the window, showing through wherever the scene leaves alpha. The
+    // undocumented SetWindowCompositionAttribute accent path is dead on
+    // Win11 and is never used.
+    void applyBackdrop() {
+        const auto backdrop = static_cast<int>(
+            (settings.glass || settings.blurRadius > 0) ? DWMSBT_TRANSIENTWINDOW
+                                                        : DWMSBT_NONE);
+        DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop));
+        // Documented only to darken the frame; that it also selects the dark
+        // Acrylic variant is undocumented-but-stable (the same reliance
+        // wezterm ships).
+        const BOOL dark = TRUE;
+        DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
+        // A 1px extended frame is what gives a borderless popup the standard
+        // drop shadow; zero margins remove it again.
+        const MARGINS margins = settings.shadow ? MARGINS{0, 0, 0, 1} : MARGINS{0, 0, 0, 0};
+        DwmExtendFrameIntoClientArea(hwnd, &margins);
     }
 
     // sticky=on: keep the bar on whatever virtual desktop the user is on.
@@ -375,6 +396,7 @@ std::unique_ptr<BarSurface> BarSurface::create(ybar::render::Renderer& renderer,
     SetWindowPos(impl->hwnd, impl->zOrder(), 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     impl->applyAppBar(frame);
+    impl->applyBackdrop();
     impl->applyStickyPinning();
 
     std::unique_ptr<BarSurface> bar(new BarSurface());
@@ -386,6 +408,9 @@ BarSurface::~BarSurface() = default;
 
 void BarSurface::applySettings(const BarSettings& settings) {
     const bool stickyChanged = impl_->settings.sticky != settings.sticky;
+    const bool backdropChanged = impl_->settings.glass != settings.glass ||
+                                 impl_->settings.blurRadius != settings.blurRadius ||
+                                 impl_->settings.shadow != settings.shadow;
     impl_->settings = settings;
     const RECT frame = impl_->frameFor(settings);
     const int widthPx = frame.right - frame.left;
@@ -397,6 +422,7 @@ void BarSurface::applySettings(const BarSettings& settings) {
     impl_->logicalH = heightPx / impl_->monitorInfo.scale;
     ShowWindow(impl_->hwnd, settings.hidden ? SW_HIDE : SW_SHOWNOACTIVATE);
     impl_->applyAppBar(frame);
+    if (backdropChanged) impl_->applyBackdrop();
     if (stickyChanged) impl_->applyStickyPinning();
     impl_->compositionDevice->Commit();
 }

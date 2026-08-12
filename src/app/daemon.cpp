@@ -986,6 +986,8 @@ void DaemonState::updatePopups() {
         const ybar::model::Rect anchor{origin.x + host->frame.x * scale,
                                        origin.y + host->frame.y * scale,
                                        host->frame.width * scale, host->frame.height * scale};
+        live.surface->setBackdrop(host->popup.blurRadius > 0,
+                                  host->popup.background.cornerRadius);
         live.surface->present(layout.panelSize, anchor, host->popup.align,
                               settings.position == ybar::model::BarPosition::Top,
                               host->popup.yOffset);

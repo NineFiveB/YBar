@@ -940,18 +940,40 @@ two captured frames, and a clip hole. **Open on the §14 gate**: golden values
 exported from a macOS run — the accumulation math has headless tests, but
 cross-platform pixel equality is still unproven.
 
+**Also done**: **the remaining providers** (§10) — audio over WASAPI endpoint
+volume with default-device re-arm, media over GSMTC on a dedicated MTA thread
+(the UI thread is an STA for WIC, and every GSMTC entry point blocks on an
+`IAsyncOperation`, which deadlocks an STA), network connectivity + WLAN SSID
+degrading to `"connected"` behind 24H2's Location gate, `app_launched` /
+`app_terminated` from komorebi `Show`/`Destroy` with a Toolhelp snapshot-diff
+fallback, `modifier_change` on a lazily-armed `WH_KEYBOARD_LL` hook that reads
+modifier state only, and the global mouse events over the union of every ybar
+window. App display names now come from the executable's `FileDescription`
+with the `ApplicationFrameHost` unwrap for UWP; `wifi_ssid_prompt=on` opens
+`ms-settings:privacy-location`. Every provider arms on first subscription.
+
+**Also done**: **windowing robustness** (§6) — debounced `WM_DISPLAYCHANGE`
+rebuilds (forwarded from the bar windows, which a message-only window never
+receives), `WM_DPICHANGED`, `topmost=off` re-assertion on
+`WM_WINDOWPOSCHANGING`, `fullscreen_show` per-surface elevation from
+foreground-rect geometry, `reserve=appbar` via `SHAppBarMessage`, `sticky=on`
+following the active virtual desktop through the documented
+`IVirtualDesktopManager` (true pinning needs an undocumented, build-fragile
+interface — it degrades with a one-time warning), `idle_inhibit`, popup and
+tooltip clamping into the anchor's monitor, slider dragging, `--animate` on
+`--bar` keys, `width=dynamic` seeding, and komorebi lazy re-detect. Item
+frames are now recorded **per surface**, which fixed a real multi-monitor bug:
+`layout()` writes `item.frame` in place and ran once per surface, so clicks on
+monitor 2 hit-tested against monitor 1's geometry whenever the two differed in
+width, and `bounding_rects` reported one monitor's rects under every display
+key.
+
 **Remaining to macOS parity**, in impact order:
-1. Providers (§10): audio (WASAPI), media (GSMTC), network/SSID,
-   app_launched/terminated, modifier_change + global mouse events,
-   display_change on topology changes; komorebi lazy re-detect (attach when
-   komorebi starts after the daemon — today requires a daemon restart).
-2. Windowing robustness (§6): WM_DISPLAYCHANGE rebuilds, WM_DPICHANGED,
-   per-display bounding_rects, fullscreen_show, reserve=appbar, sticky
-   pinning, topmost=off re-assertion; slider dragging; --animate on --bar
-   keys; width=dynamic seeding; idle_inhibit; Acrylic backdrops (§7.6);
-   popup/tooltip screen-edge clamping.
-3. Ship (§13): winget + scoop, d3dcompiler app-local, autostart, `ybar
+1. Acrylic backdrops (§7.6): `glass=on` still paints a flat plate.
+2. Ship (§13): winget + scoop, d3dcompiler app-local, autostart, `ybar
    theme`, ported komorebi themes, Windows docs.
+3. Live verification of everything above: it builds and passes headless
+   tests, but only the pre-provider behaviour has been confirmed on screen.
 
 Deliberate divergences (never 1:1): alias items (§10.6), per-item glass
 pills (§7.6), distributed-notification bindings (§9), THERMAL_STATE

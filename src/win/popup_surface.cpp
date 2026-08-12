@@ -8,6 +8,7 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <d3d11.h>
+#include <dwmapi.h>
 #include <dxgi1_3.h>
 #include <dcomp.h>
 #include <wrl/client.h>
@@ -188,6 +189,20 @@ void PopupSurface::present(ybar::model::Size panelSize, const ybar::model::Rect&
         impl_->visible = true;
     }
     impl_->compositionDevice->Commit();
+}
+
+void PopupSurface::setBackdrop(bool acrylic, double cornerRadius) {
+    // spec 7.6: Acrylic behind the panel when popup.blur_radius > 0, plus a
+    // rounded backdrop so the plate does not square off the painted corners.
+    const auto backdrop =
+        static_cast<int>(acrylic ? DWMSBT_TRANSIENTWINDOW : DWMSBT_NONE);
+    DwmSetWindowAttribute(impl_->hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop));
+    const BOOL dark = TRUE;
+    DwmSetWindowAttribute(impl_->hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
+    const auto corner = static_cast<int>(cornerRadius <= 0   ? DWMWCP_DONOTROUND
+                                         : cornerRadius < 6  ? DWMWCP_ROUNDSMALL
+                                                             : DWMWCP_ROUND);
+    DwmSetWindowAttribute(impl_->hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
 }
 
 void PopupSurface::hide() {

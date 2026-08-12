@@ -27,6 +27,10 @@ public:
                  char align, bool below, double yOffset);
     void hide();
 
+    // Acrylic plate + rounded backdrop corners (spec 7.6). Cheap and
+    // idempotent; call whenever the popup's blur/corner settings may differ.
+    void setBackdrop(bool acrylic, double cornerRadius);
+
     ybar::render::Surface& renderSurface();
     double scale() const;
     void setMouseHandler(std::function<void(const MouseEvent&)> handler);
