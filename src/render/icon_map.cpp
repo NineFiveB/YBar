@@ -1,6 +1,6 @@
 #include "render/icon_map.h"
 
-#include <array>
+
 #include <cstdio>
 #include <set>
 #include <string>
@@ -17,7 +17,7 @@ struct Mapping {
 // Covers every symbol the shipped themes use plus the common bar vocabulary.
 // Sorted by name for readability; lookup is linear (tables this small beat a
 // hash map, and this runs once per unique string per font size).
-constexpr std::array<Mapping, 78> kMappings{{
+constexpr Mapping kMappings[] = {
     {"airplayaudio", 0xEC15},      {"airplayvideo", 0xEC15},
     {"alarm", 0xE916},             {"antenna.radiowaves.left.and.right", 0xE704},
     {"appletv", 0xE7F4},           {"applewatch", 0xE916},
@@ -58,7 +58,7 @@ constexpr std::array<Mapping, 78> kMappings{{
     {"thermometer", 0xE9CA},       {"trash", 0xE74D},
     {"volume", 0xE767},            {"wifi", 0xE701},
     {"wrench", 0xE90F},            {"xmark", 0xE711},
-}};
+};
 
 constexpr char32_t kPlaceholder = 0xE9CE; // "Unknown" glyph
 
