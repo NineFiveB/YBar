@@ -2,7 +2,7 @@
 
 **Top bar for Windows** — a GPU-rendered (D3D11 + DirectComposition),
 scriptable status bar with first-class [komorebi](https://github.com/LGUG2Z/komorebi)
-integration. A native C++ implementation of [YBar](https://github.com/JKUSAS/YBar)
+integration. A native C++ implementation of [YBar](https://github.com/AegiosOT/YBar)
 that preserves its user contract: the sketchybar-style CLI/IPC grammar, the
 embedded Lua 5.4 config runtime, themes, and the script/event environment.
 Configs and themes written for YBar on macOS run here with only OS-inherent
