@@ -35,6 +35,9 @@ struct DaemonHooks {
     // Windows extension (spec 11.5): raw SocketMessage passthrough to
     // komorebi. Returns false when komorebi is unavailable.
     std::function<bool(const std::string&)> komorebiMessage;
+    // `--bar wifi_ssid_prompt=on`: the Windows stand-in for the reference's
+    // Core Location authorization request (spec 10).
+    std::function<void()> requestSsidPermission;
     std::function<std::vector<ybar::model::DisplayInfo>()> displays;
     std::function<ybar::model::BoundingRects(const ybar::model::Item&)> boundingRects;
 };

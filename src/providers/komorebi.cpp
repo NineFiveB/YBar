@@ -161,10 +161,38 @@ void KomorebiProvider::readerLoop() {
     }
 }
 
+// Window lifecycle from the notification's `event` field: komorebi's
+// Show/Destroy carry the window, so app_launched/app_terminated are
+// window-scoped here (spec 10) rather than process-scoped.
+namespace {
+void publishAppEvent(
+    const json& parsed,
+    const std::function<void(const std::string&, const std::string&)>& onAppEvent) {
+    if (!onAppEvent || !parsed.contains("event")) return;
+    const auto& event = parsed.at("event");
+    if (!event.is_object() || !event.contains("type")) return;
+    const auto type = event.at("type").get<std::string>();
+    const char* name = type == "Show" ? "app_launched"
+                       : type == "Destroy" ? "app_terminated"
+                                           : nullptr;
+    if (!name || !event.contains("content")) return;
+    // content is a tuple whose window element is the object carrying `exe`.
+    const auto& content = event.at("content");
+    if (!content.is_array()) return;
+    for (const auto& element : content) {
+        if (!element.is_object() || !element.contains("exe")) continue;
+        const auto exe = element.at("exe").get<std::string>();
+        if (!exe.empty()) onAppEvent(name, exe);
+        return;
+    }
+}
+} // namespace
+
 // Accepts either a full {event, state} notification or a bare State reply.
 void KomorebiProvider::publishState(const std::string& payload) {
     try {
         const auto parsed = json::parse(payload);
+        publishAppEvent(parsed, onAppEvent);
         const auto& state = parsed.contains("state") ? parsed.at("state") : parsed;
         if (!state.contains("monitors")) return;
         monitorCount_ = static_cast<int>(state.at("monitors").at("elements").size());

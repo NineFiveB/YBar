@@ -103,8 +103,16 @@ std::string CommandHandler::handleBatch(const Batch& batch,
                 errors.push_back("[!] expected key=value, got: " + token);
                 continue;
             }
-            if (const auto error = BarPropertySetter::set(settings_, key, value))
+            if (const auto error = BarPropertySetter::set(settings_, key, value)) {
                 errors.push_back(*error);
+                continue;
+            }
+            // The reference asks for Core Location here; Windows has no
+            // in-process grant, so the equivalent is opening the privacy
+            // page (spec 10). Never at boot — only on this explicit opt-in.
+            if (key == "wifi_ssid_prompt" && settings_.wifiSsidPrompt &&
+                hooks_.requestSsidPermission)
+                hooks_.requestSsidPermission();
         }
         return joinErrors(errors);
     }

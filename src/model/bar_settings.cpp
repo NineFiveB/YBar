@@ -150,7 +150,7 @@ std::optional<std::string> BarPropertySetter::set(BarSettings& s, std::string_vi
     if (key == "glass") return setBool(s.glass, value, false);
     if (key == "fullscreen_show" || key == "show_in_fullscreen")
         return setBool(s.fullscreenShow, value, false);
-    if (key == "wifi_ssid_prompt") return std::nullopt; // accepted; hook wired later
+    if (key == "wifi_ssid_prompt") return setBool(s.wifiSsidPrompt, value, false);
     if (key == "font_smoothing") return std::nullopt;   // accepted no-op (compat)
     if (key == "reserve") {                             // Windows extension (spec 6.1)
         const auto v = lower(value);

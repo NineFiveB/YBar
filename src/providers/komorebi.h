@@ -35,6 +35,10 @@ public:
     // its UI thread inside this callback.
     std::function<void(const KomorebiUpdate&)> onUpdate;
 
+    // Window lifecycle from Show/Destroy notifications: (event name, exe
+    // path). Same threading contract as onUpdate.
+    std::function<void(const std::string& event, const std::string& exe)> onAppEvent;
+
     // Starts the subscription (listener + registration + reconnect loop).
     // subscriberName becomes the socket file name in komorebi's data dir.
     bool start(const std::string& subscriberName);

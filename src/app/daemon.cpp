@@ -12,6 +12,7 @@
 #include <future>
 #include <memory>
 #include <unordered_map>
+#include <utility>
 
 #include "anim/scheduler.h"
 #include "app/config.h"
@@ -25,7 +26,12 @@
 #include "model/bar_settings.h"
 #include "model/item.h"
 #include "model/layout.h"
+#include "providers/app_info.h"
+#include "providers/app_lifecycle.h"
+#include "providers/audio.h"
 #include "providers/komorebi.h"
+#include "providers/media.h"
+#include "providers/network.h"
 #include "providers/ytile.h"
 #include "render/font_cache.h"
 #include "render/glyph_atlas.h"
@@ -34,6 +40,7 @@
 #include "model/popup_layout.h"
 #include "win/bar_surface.h"
 #include "win/display_manager.h"
+#include "win/input.h"
 #include "win/popup_surface.h"
 
 namespace ybar::app {
@@ -55,8 +62,15 @@ constexpr UINT kMsgKomorebi = WM_APP + 3;
 constexpr UINT kMsgReloadConfig = WM_APP + 4;
 constexpr UINT kMsgYTile = WM_APP + 6; // +5 is Lua's kMsgExecDone
 constexpr UINT kMsgCloseAutoPopups = WM_APP + 7;
+constexpr UINT kMsgVolume = WM_APP + 8;
+constexpr UINT kMsgMedia = WM_APP + 9;
+constexpr UINT kMsgNetwork = WM_APP + 10;
+constexpr UINT kMsgModifier = WM_APP + 11;
+constexpr UINT kMsgGlobalMouse = WM_APP + 12; // wParam: 1 entered, 0 exited
+constexpr UINT kMsgKomorebiApp = WM_APP + 13;
 constexpr UINT_PTR kStatsTimer = 5;
 constexpr UINT_PTR kTooltipTimer = 6;
+constexpr UINT_PTR kAppsTimer = 7;
 
 // Power setting GUIDs (winnt.h declares them; define locally to avoid
 // link-time surprises with initguid ordering).
@@ -102,6 +116,13 @@ struct DaemonState {
     ScriptRunner scripts;
     std::unique_ptr<ybar::providers::KomorebiProvider> komorebi;
     std::unique_ptr<ybar::providers::YTileProvider> ytile;
+    // Lazily armed on first subscription (spec 10) — a config that never
+    // mentions these events pays nothing for them.
+    std::unique_ptr<ybar::providers::AudioProvider> audio;
+    std::unique_ptr<ybar::providers::MediaProvider> media;
+    std::unique_ptr<ybar::providers::NetworkProvider> network;
+    ybar::providers::AppLifecycleProvider appLifecycle;
+    bool appLifecycleArmed = false;
     ybar::anim::AnimationScheduler scheduler;
     bool animationTimerLive = false;
     int appliedOffsetPhysical = -1;
@@ -123,7 +144,14 @@ struct DaemonState {
     std::unordered_map<int, LivePopup> popups;
     std::unique_ptr<ybar::win::PopupSurface> tooltip;
     int tooltipItemId = -1;
-    void* mouseHook = nullptr; // HHOOK (WH_MOUSE_LL) for outside-click close
+    void* mouseHook = nullptr;    // HHOOK (WH_MOUSE_LL) for outside-click close
+    void* keyboardHook = nullptr; // HHOOK (WH_KEYBOARD_LL), modifier_change only
+    // Global pointer tracking (mouse.entered.global / mouse.exited.global) is
+    // the union over every ybar window, so it rides the existing low-level
+    // hook rather than per-window WM_MOUSELEAVE.
+    bool globalMouseArmed = false;
+    bool globalMouseInside = false;
+    std::string lastModifier = "none";
 
     // Providers (spec 10): dedupe state.
     std::string lastPowerSource;
@@ -133,6 +161,9 @@ struct DaemonState {
     bool statsArmed = false;
 
     void executeConfig();
+    void armAudio();
+    void armMedia();
+    void armNetwork();
     void publishPower(bool forced);
     void publishFrontApp(bool forced);
     void sampleStats();
@@ -286,6 +317,8 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                 g_state->syncAnimationTimer();
             } else if (wParam == kStatsTimer && g_state) {
                 g_state->sampleStats();
+            } else if (wParam == kAppsTimer && g_state) {
+                g_state->appLifecycle.sample();
             } else if (wParam == kTooltipTimer && g_state) {
                 KillTimer(hwnd, kTooltipTimer);
                 if (g_state->hoverItemId == g_state->tooltipItemId) {
@@ -308,6 +341,50 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
         }
         case kMsgCloseAutoPopups:
             if (g_state) g_state->closeAutoClosePopups(-1);
+            return 0;
+        case kMsgVolume:
+            if (g_state) g_state->bus.trigger("volume_change",
+                                              std::to_string(static_cast<int>(wParam)));
+            return 0;
+        case kMsgNetwork: {
+            auto* info = reinterpret_cast<std::string*>(lParam);
+            if (g_state) g_state->bus.trigger("wifi_change", *info);
+            delete info;
+            return 0;
+        }
+        case kMsgMedia: {
+            auto* env = reinterpret_cast<ybar::providers::MediaEnvironment*>(lParam);
+            if (g_state) {
+                const auto state = env->find("MEDIA_STATE");
+                g_state->bus.trigger("media_change",
+                                     state == env->end() ? "" : state->second, *env);
+            }
+            delete env;
+            return 0;
+        }
+        case kMsgKomorebiApp: {
+            auto* payload = reinterpret_cast<std::pair<std::string, std::string>*>(lParam);
+            if (g_state) {
+                const std::string name =
+                    ybar::providers::appNameForExecutablePath(payload->second);
+                if (!name.empty()) g_state->bus.trigger(payload->first, name);
+            }
+            delete payload;
+            return 0;
+        }
+        case kMsgModifier:
+            if (g_state) {
+                const std::string modifier = ybar::win::currentModifierAsync();
+                if (modifier != g_state->lastModifier) {
+                    g_state->lastModifier = modifier;
+                    g_state->bus.trigger("modifier_change", "", {{"MODIFIER", modifier}});
+                }
+            }
+            return 0;
+        case kMsgGlobalMouse:
+            if (g_state)
+                g_state->bus.trigger(wParam ? "mouse.entered.global" : "mouse.exited.global",
+                                     "");
             return 0;
         case kMsgReloadConfig:
             if (g_state) {
@@ -377,6 +454,36 @@ LRESULT CALLBACK mouseHookProc(int code, WPARAM wParam, LPARAM lParam) {
         }
         if (!inside) PostMessageW(g_state->messageWindow, kMsgCloseAutoPopups, 0, 0);
     }
+    // mouse.entered.global / mouse.exited.global: the pointer crossing into
+    // or out of the union of every ybar window. Only tracked once something
+    // subscribes — WindowFromPoint on every move is not free.
+    if (code == HC_ACTION && g_state && g_state->globalMouseArmed && wParam == WM_MOUSEMOVE) {
+        const auto* info = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
+        const bool inside = ybar::win::pointOverYBarWindow(info->pt.x, info->pt.y);
+        if (inside != g_state->globalMouseInside) {
+            g_state->globalMouseInside = inside;
+            PostMessageW(g_state->messageWindow, kMsgGlobalMouse, inside ? 1 : 0, 0);
+        }
+    }
+    return CallNextHookEx(nullptr, code, wParam, lParam);
+}
+
+// modifier_change (spec 3.4): armed only when subscribed. This reads modifier
+// key STATE on any key transition — it never inspects which key was pressed.
+LRESULT CALLBACK keyboardHookProc(int code, WPARAM wParam, LPARAM lParam) {
+    if (code == HC_ACTION && g_state) {
+        const auto* info = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
+        switch (info->vkCode) {
+            case VK_LSHIFT: case VK_RSHIFT: case VK_SHIFT:
+            case VK_LCONTROL: case VK_RCONTROL: case VK_CONTROL:
+            case VK_LMENU: case VK_RMENU: case VK_MENU:
+            case VK_LWIN: case VK_RWIN:
+                PostMessageW(g_state->messageWindow, kMsgModifier, 0, 0);
+                break;
+            default:
+                break;
+        }
+    }
     return CallNextHookEx(nullptr, code, wParam, lParam);
 }
 
@@ -414,6 +521,44 @@ void DaemonState::executeConfig() {
         if (lua) lua->runConfig(resolvedConfigPath);
     } else {
         scripts.runFile(resolvedConfigPath, {}); // config drives the bar via the CLI
+    }
+}
+
+// Provider arming (spec 10). Each callback runs on an OS notification thread,
+// so every one of them does nothing but post to the UI thread's mailbox.
+void DaemonState::armAudio() {
+    if (audio) return;
+    audio = std::make_unique<ybar::providers::AudioProvider>();
+    audio->onVolume = [hwnd = messageWindow](int percent) {
+        PostMessageW(hwnd, kMsgVolume, static_cast<WPARAM>(percent), 0);
+    };
+    if (!audio->start()) {
+        std::fprintf(stderr, "[ybar] audio provider unavailable\n");
+        audio.reset();
+    }
+}
+
+void DaemonState::armMedia() {
+    if (media) return;
+    media = std::make_unique<ybar::providers::MediaProvider>();
+    media->onChange = [hwnd = messageWindow](
+                          const ybar::providers::MediaEnvironment& environment) {
+        auto* copy = new ybar::providers::MediaEnvironment(environment);
+        if (!PostMessageW(hwnd, kMsgMedia, 0, reinterpret_cast<LPARAM>(copy))) delete copy;
+    };
+    if (!media->start()) media.reset();
+}
+
+void DaemonState::armNetwork() {
+    if (network) return;
+    network = std::make_unique<ybar::providers::NetworkProvider>();
+    network->onChange = [hwnd = messageWindow](const std::string& info) {
+        auto* copy = new std::string(info);
+        if (!PostMessageW(hwnd, kMsgNetwork, 0, reinterpret_cast<LPARAM>(copy))) delete copy;
+    };
+    if (!network->start()) {
+        std::fprintf(stderr, "[ybar] network provider unavailable\n");
+        network.reset();
     }
 }
 
@@ -911,6 +1056,12 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
             if (!PostMessageW(hwnd, kMsgKomorebi, 0, reinterpret_cast<LPARAM>(copy)))
                 delete copy;
         };
+        state.komorebi->onAppEvent = [hwnd = state.messageWindow](const std::string& event,
+                                                                  const std::string& exe) {
+            auto* payload = new std::pair<std::string, std::string>(event, exe);
+            if (!PostMessageW(hwnd, kMsgKomorebiApp, 0, reinterpret_cast<LPARAM>(payload)))
+                delete payload;
+        };
         state.bus.addEvent("komorebi_workspace_change");
         if (!state.komorebi->start("ybar.sock")) {
             std::fprintf(stderr, "[ybar] komorebi subscription failed\n");
@@ -936,7 +1087,31 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
             state.statsArmed = true;
             state.sampleStats(); // prime the tick deltas
             SetTimer(state.messageWindow, kStatsTimer, 2000, nullptr);
+        } else if (event == "volume_change") {
+            state.armAudio();
+        } else if (event == "wifi_change") {
+            state.armNetwork();
+        } else if (event == "media_change") {
+            state.armMedia();
+        } else if (event == "app_launched" || event == "app_terminated") {
+            // komorebi already feeds these from Show/Destroy; the poller is
+            // only for the WM-less case (spec 10).
+            if (!state.komorebi && !state.appLifecycleArmed) {
+                state.appLifecycleArmed = true;
+                state.appLifecycle.prime(); // never announce the existing world
+                SetTimer(state.messageWindow, kAppsTimer, 2000, nullptr);
+            }
+        } else if (event == "modifier_change") {
+            if (!state.keyboardHook) {
+                state.keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, keyboardHookProc,
+                                                       GetModuleHandleW(nullptr), 0);
+            }
+        } else if (event == "mouse.entered.global" || event == "mouse.exited.global") {
+            state.globalMouseArmed = true;
         }
+    };
+    state.appLifecycle.onEvent = [&state](const std::string& event, const std::string& name) {
+        state.bus.trigger(event, name); // already on the UI thread (timer)
     };
     ybar::win::BarSurface::setBroadcastTarget(state.messageWindow);
     state.hotload.onChange = [hwnd = state.messageWindow] {
@@ -945,6 +1120,9 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
 
     ybar::ipc::DaemonHooks hooks;
     hooks.exit = [hwnd = state.messageWindow] { SetTimer(hwnd, kExitTimer, 150, nullptr); };
+    hooks.requestSsidPermission = [] {
+        ybar::providers::NetworkProvider::openLocationPrivacySettings();
+    };
     hooks.komorebiMessage = [](const std::string& jsonText) {
         return ybar::providers::KomorebiProvider::detect() &&
                ybar::providers::KomorebiProvider::sendMessage(jsonText);
@@ -960,11 +1138,27 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     hooks.forcedUpdate = [&state] {
         state.publishPower(true);
         state.publishFrontApp(true);
+        // Only already-armed providers re-publish here, matching the
+        // reference: --update never arms a provider nothing subscribed to.
+        if (state.audio) state.audio->refresh();
+        if (state.network) state.network->refresh();
         if (state.statsArmed) state.sampleStats();
     };
     hooks.forcedQuery = [&state](const std::string& event) {
-        // The --trigger interception set (spec 3.4); unsupported providers
-        // (volume/wifi/media) fall through to plain bus triggers for now.
+        // The --trigger interception set (spec 3.4). Unlike --update, an
+        // explicit trigger arms the provider first.
+        if (event == "volume_change") {
+            state.armAudio();
+            return state.audio && state.audio->refresh();
+        }
+        if (event == "wifi_change") {
+            state.armNetwork();
+            return state.network && state.network->refresh();
+        }
+        if (event == "media_change") {
+            state.armMedia();
+            return state.media && state.media->refresh();
+        }
         if (event == "power_source_change" || event == "battery_change") {
             state.publishPower(true);
             return true;
@@ -1039,6 +1233,7 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
 
     if (frontAppHook) UnhookWinEvent(frontAppHook);
     if (state.mouseHook) UnhookWindowsHookEx(static_cast<HHOOK>(state.mouseHook));
+    if (state.keyboardHook) UnhookWindowsHookEx(static_cast<HHOOK>(state.keyboardHook));
     server.stop();
     DestroyWindow(state.messageWindow);
     g_state = nullptr;

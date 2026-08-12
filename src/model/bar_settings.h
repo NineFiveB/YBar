@@ -40,6 +40,7 @@ struct BarSettings {
     bool sticky = true;
     bool shadow = false;
     bool idleInhibit = false;
+    bool wifiSsidPrompt = false;
     DisplayPolicy displayPolicy = DisplayPolicy::All;
     std::vector<int> displayList; // 1-based arrangement indices when List
     double notchWidth = 200;      // accepted; no layout effect on Windows

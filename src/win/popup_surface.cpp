@@ -1,5 +1,7 @@
 #include "win/popup_surface.h"
 
+#include "win/input.h"
+
 // clang-format off
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -21,14 +23,6 @@ namespace ybar::win {
 namespace {
 
 constexpr wchar_t kPopupClass[] = L"ybar.popup";
-
-const char* popupModifier() {
-    if (GetKeyState(VK_SHIFT) < 0) return "shift";
-    if (GetKeyState(VK_CONTROL) < 0) return "ctrl";
-    if (GetKeyState(VK_MENU) < 0) return "alt";
-    if (GetKeyState(VK_LWIN) < 0 || GetKeyState(VK_RWIN) < 0) return "cmd";
-    return "none";
-}
 
 LRESULT CALLBACK popupWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -74,7 +68,7 @@ public:
         event.x = static_cast<double>(GET_X_LPARAM(lParam)) / scaleValue;
         event.y = static_cast<double>(GET_Y_LPARAM(lParam)) / scaleValue;
         event.button = button;
-        event.modifier = popupModifier();
+        event.modifier = currentModifier();
         event.scrollDelta = scrollDelta;
         onMouse(event);
     }
