@@ -940,18 +940,58 @@ two captured frames, and a clip hole. **Open on the §14 gate**: golden values
 exported from a macOS run — the accumulation math has headless tests, but
 cross-platform pixel equality is still unproven.
 
+**Also done**: **the remaining providers** (§10) — audio over WASAPI endpoint
+volume with default-device re-arm, media over GSMTC on a dedicated MTA thread
+(the UI thread is an STA for WIC, and every GSMTC entry point blocks on an
+`IAsyncOperation`, which deadlocks an STA), network connectivity + WLAN SSID
+degrading to `"connected"` behind 24H2's Location gate, `app_launched` /
+`app_terminated` from komorebi `Show`/`Destroy` with a Toolhelp snapshot-diff
+fallback, `modifier_change` on a lazily-armed `WH_KEYBOARD_LL` hook that reads
+modifier state only, and the global mouse events over the union of every ybar
+window. App display names now come from the executable's `FileDescription`
+with the `ApplicationFrameHost` unwrap for UWP; `wifi_ssid_prompt=on` opens
+`ms-settings:privacy-location`. Every provider arms on first subscription.
+
+**Also done**: **windowing robustness** (§6) — debounced `WM_DISPLAYCHANGE`
+rebuilds (forwarded from the bar windows, which a message-only window never
+receives), `WM_DPICHANGED`, `topmost=off` re-assertion on
+`WM_WINDOWPOSCHANGING`, `fullscreen_show` per-surface elevation from
+foreground-rect geometry, `reserve=appbar` via `SHAppBarMessage`, `sticky=on`
+following the active virtual desktop through the documented
+`IVirtualDesktopManager` (true pinning needs an undocumented, build-fragile
+interface — it degrades with a one-time warning), `idle_inhibit`, popup and
+tooltip clamping into the anchor's monitor, slider dragging, `--animate` on
+`--bar` keys, `width=dynamic` seeding, and komorebi lazy re-detect. Item
+frames are now recorded **per surface**, which fixed a real multi-monitor bug:
+`layout()` writes `item.frame` in place and ran once per surface, so clicks on
+monitor 2 hit-tested against monitor 1's geometry whenever the two differed in
+width, and `bounding_rects` reported one monitor's rects under every display
+key.
+
+**Also done**: Acrylic backdrops (§7.6) for bars and popups, `ybar theme
+list|current|use`, `ybar autostart enable|disable|status`, the
+`AppUserModelID`, the shipped `examples/catppuccin-komorebi` theme, and CI
+packaging of `examples/` + app-local `d3dcompiler_47.dll`.
+
+**Live-verified on a 2880×1800 200 % display** (build `479c6dc`): WASAPI
+volume tracked six volume-up steps 0 % → 12 %; the network provider resolved
+the real SSID; `modifier_change` reported `ctrl` for a synthetic key press;
+`app_launched` fired with a `FileDescription` name (process-scoped, since
+komorebi was not running); `--animate linear 60 --bar height=60` interpolated
+32 → 44.8 → 60; `width=dynamic` animated 300 → natural and restored the −1
+sentinel on completion; a synthetic drag to a 200 pt track's midpoint set the
+slider to 50.5 %; and the shipped theme populated every item. Two bring-up
+fixes came out of it: COM is now initialized before the first surface (sticky
+pinning was failing at boot), and the icon map gained `wifi.slash` /
+`square.grid.2x2`.
+
 **Remaining to macOS parity**, in impact order:
-1. Providers (§10): audio (WASAPI), media (GSMTC), network/SSID,
-   app_launched/terminated, modifier_change + global mouse events,
-   display_change on topology changes; komorebi lazy re-detect (attach when
-   komorebi starts after the daemon — today requires a daemon restart).
-2. Windowing robustness (§6): WM_DISPLAYCHANGE rebuilds, WM_DPICHANGED,
-   per-display bounding_rects, fullscreen_show, reserve=appbar, sticky
-   pinning, topmost=off re-assertion; slider dragging; --animate on --bar
-   keys; width=dynamic seeding; idle_inhibit; Acrylic backdrops (§7.6);
-   popup/tooltip screen-edge clamping.
-3. Ship (§13): winget + scoop, d3dcompiler app-local, autostart, `ybar
-   theme`, ported komorebi themes, Windows docs.
+1. Ship (§13): winget manifest + scoop bucket, Windows docs.
+2. Media provider observed only at init — no SMTC session was playing during
+   bring-up, so the title/artist path is untested on screen.
+3. Windowing paths with no cheap live test yet: `WM_DISPLAYCHANGE` rebuilds,
+   `WM_DPICHANGED`, `fullscreen_show`, `reserve=appbar`, and sticky pinning
+   across virtual desktops.
 
 Deliberate divergences (never 1:1): alias items (§10.6), per-item glass
 pills (§7.6), distributed-notification bindings (§9), THERMAL_STATE
