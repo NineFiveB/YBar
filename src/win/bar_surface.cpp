@@ -183,13 +183,43 @@ public:
         if (FAILED(desktopManager->IsWindowOnCurrentVirtualDesktop(hwnd, &onCurrent)) ||
             onCurrent)
             return;
+        // The documented manager can move a window but cannot NAME the
+        // current desktop. Explorer records its GUID in the registry — the
+        // reliable source, live-verified: the foreground-window trick fails
+        // on a freshly created EMPTY desktop, because the only windows there
+        // belong to the shell (which is on every desktop), so
+        // GetWindowDesktopId cannot answer. The foreground window stays as
+        // the fallback for builds where the value is absent.
         GUID current{};
-        // Moving to the desktop of a window that IS current is the only
-        // documented way to name it; the foreground window serves.
-        const HWND reference = GetForegroundWindow();
-        if (!reference ||
-            FAILED(desktopManager->GetWindowDesktopId(reference, &current)) ||
-            FAILED(desktopManager->MoveWindowToDesktop(hwnd, current))) {
+        bool haveCurrent = false;
+        HKEY key = nullptr;
+        if (RegOpenKeyExW(HKEY_CURRENT_USER,
+                          L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer"
+                          L"\\VirtualDesktops",
+                          0, KEY_READ, &key) == ERROR_SUCCESS) {
+            GUID value{};
+            DWORD size = sizeof(value);
+            DWORD type = 0;
+            if (RegQueryValueExW(key, L"CurrentVirtualDesktop", nullptr, &type,
+                                 reinterpret_cast<BYTE*>(&value), &size) == ERROR_SUCCESS &&
+                type == REG_BINARY && size == sizeof(GUID)) {
+                current = value;
+                haveCurrent = true;
+            }
+            RegCloseKey(key);
+        }
+        if (!haveCurrent) {
+            const HWND reference = GetForegroundWindow();
+            if (!reference || FAILED(desktopManager->GetWindowDesktopId(reference, &current))) {
+                if (!warnedSticky) {
+                    warnedSticky = true;
+                    std::fprintf(stderr,
+                                 "[ybar] sticky=on could not name the current desktop\n");
+                }
+                return;
+            }
+        }
+        if (FAILED(desktopManager->MoveWindowToDesktop(hwnd, current))) {
             if (!warnedSticky) {
                 warnedSticky = true;
                 std::fprintf(stderr, "[ybar] sticky=on could not follow the virtual desktop\n");
