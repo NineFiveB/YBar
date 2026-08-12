@@ -877,24 +877,28 @@ prelude, single-funnel trampolines, generation-guarded exec/delay, Lua-first
 dispatch) — live-verified with in-process closures driving the komorebi
 workspace pill and the CPU gauge. An in-tree **YTile provider** extension
 mirrors the komorebi update flow (fires `komorebi_workspace_change` for
-config compatibility); its spec entry is pending.
+config compatibility); its spec entry is pending. **Popups + tooltips**
+(§3.9): vertical/horizontal/wrap layouts, per-host panels, WH_MOUSE_LL
+outside-click auto-close, press-on-bar-closes-others, 600 ms tooltip dwell —
+live-verified (panel screenshot, auto-close state flip, tooltip window
+enumeration).
 
 **Remaining to macOS parity**, in impact order:
-1. Popups + tooltips (§3.9, §6): windows, layouts, auto-close, anchoring.
-2. `sf:` icon resolver + images (§7.5): mapping table, fluentui fallback,
+1. `sf:` icon resolver + images (§7.5): mapping table, fluentui fallback,
    WIC file/app.<Name> sources, color atlas page.
-3. Text fidelity (§3.9, §7.4, §14): tight-ink +1.5 metrics with the
+2. Text fidelity (§3.9, §7.4, §14): tight-ink +1.5 metrics with the
    golden-value parity suite, marquee, fixed-width clipping, clip holes,
    highlight colors, text-part shadows, bracket rendering.
-4. Providers (§10): audio (WASAPI), media (GSMTC), network/SSID,
+3. Providers (§10): audio (WASAPI), media (GSMTC), network/SSID,
    app_launched/terminated, modifier_change + global mouse events,
    display_change on topology changes; komorebi lazy re-detect (attach when
    komorebi starts after the daemon — today requires a daemon restart).
-5. Windowing robustness (§6): WM_DISPLAYCHANGE rebuilds, WM_DPICHANGED,
+4. Windowing robustness (§6): WM_DISPLAYCHANGE rebuilds, WM_DPICHANGED,
    per-display bounding_rects, fullscreen_show, reserve=appbar, sticky
    pinning, topmost=off re-assertion; slider dragging; --animate on --bar
-   keys; width=dynamic seeding; idle_inhibit; Acrylic backdrops (§7.6).
-6. Ship (§13): winget + scoop, d3dcompiler app-local, autostart, `ybar
+   keys; width=dynamic seeding; idle_inhibit; Acrylic backdrops (§7.6);
+   popup/tooltip screen-edge clamping.
+5. Ship (§13): winget + scoop, d3dcompiler app-local, autostart, `ybar
    theme`, ported komorebi themes, Windows docs.
 
 Deliberate divergences (never 1:1): alias items (§10.6), per-item glass
