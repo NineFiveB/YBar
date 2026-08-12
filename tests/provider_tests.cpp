@@ -5,6 +5,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+// clang-format off
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h> // GetCurrentProcessId
+// clang-format on
+
 #include "ipc/command_handler.h"
 #include "model/bar_settings.h"
 #include "events/event_bus.h"
@@ -34,6 +40,22 @@ TEST_CASE("a real system binary resolves to its FileDescription") {
     // fallback shape.
     const auto name = ybar::providers::appNameForExecutablePath("C:\\Windows\\System32\\notepad.exe");
     REQUIRE_FALSE(name.empty());
+}
+
+TEST_CASE("a live process resolves to a usable display name") {
+    // The front-app and app-lifecycle paths both go through this. The test
+    // binary has no version resource, so this exercises the basename
+    // fallback against a real, running process.
+    const auto name = ybar::providers::appNameForProcess(GetCurrentProcessId());
+    REQUIRE_FALSE(name.empty());
+    REQUIRE(name.find(".exe") == std::string::npos); // extension always stripped
+}
+
+TEST_CASE("an invalid process id yields an empty name, never a crash") {
+    // Callers treat "" as "skip this event" rather than publishing a
+    // placeholder — a process can exit between the event and the lookup.
+    REQUIRE(ybar::providers::appNameForProcess(0xFFFFFFFCu).empty());
+    REQUIRE(ybar::providers::appNameForWindow(nullptr).empty());
 }
 
 TEST_CASE("wifi_ssid_prompt=on fires the permission hook exactly once per set") {
