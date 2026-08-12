@@ -11,6 +11,7 @@ using ybar::model::BarPropertySetter;
 using ybar::model::Item;
 using ybar::model::ItemKind;
 using ybar::model::ItemPosition;
+using ybar::model::ItemStore;
 using ybar::model::PropertySetter;
 
 namespace {
