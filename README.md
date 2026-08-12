@@ -64,7 +64,7 @@ ybar --query hello                    # live state as JSON
 ## Install
 
 ```sh
-brew tap NineFiveB/ybar        # github.com/NineFiveB/homebrew-ybar
+brew tap AegiosOT/ybar      # github.com/AegiosOT/homebrew-ybar
 brew install ybar           # latest tagged release; --HEAD builds current main
 ```
 
