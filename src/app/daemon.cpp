@@ -530,7 +530,12 @@ LRESULT CALLBACK mouseHookProc(int code, WPARAM wParam, LPARAM lParam) {
     if (code == HC_ACTION && g_state && g_state->globalMouseArmed && wParam == WM_MOUSEMOVE) {
         const auto* info = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
         const bool inside = ybar::win::pointOverYBarWindow(info->pt.x, info->pt.y);
-        if (inside != g_state->globalMouseInside) {
+        // A slider drag vetoes the exit (spec 6): the pointer routinely leaves
+        // every window mid-drag, and a global exit there would let scripts
+        // close the popup out from under the drag and eat the release. The
+        // release re-checks containment.
+        const bool vetoed = !inside && g_state->draggingSliderId != -1;
+        if (inside != g_state->globalMouseInside && !vetoed) {
             g_state->globalMouseInside = inside;
             PostMessageW(g_state->messageWindow, kMsgGlobalMouse, inside ? 1 : 0, 0);
         }
@@ -1187,6 +1192,19 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
                             state.scripts.run(candidate->clickScript, scriptEnv);
                         }
                         state.bus.triggerTargeted(*candidate, "mouse.clicked", "", extra);
+                        // The drag vetoed any global exit; settle it now.
+                        if (state.globalMouseArmed) {
+                            POINT cursor{};
+                            GetCursorPos(&cursor);
+                            const bool inside =
+                                ybar::win::pointOverYBarWindow(cursor.x, cursor.y);
+                            if (inside != state.globalMouseInside) {
+                                state.globalMouseInside = inside;
+                                state.bus.trigger(inside ? "mouse.entered.global"
+                                                         : "mouse.exited.global",
+                                                  "");
+                            }
+                        }
                     }
                     break;
                 }
