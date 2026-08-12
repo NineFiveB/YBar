@@ -187,6 +187,28 @@ void emitGauge(DisplayList& list, const ybar::model::Item& item, const Rect& box
     }
 }
 
+// Inline image component: a color-page quad, vertically centered in the
+// content box. penX advances by the full advance (padding + size).
+void emitImage(DisplayList& list, const ybar::model::ImageState& image, double& penX,
+               const Rect& contentBox, double scale, GlyphAtlas& atlas) {
+    if (!image.drawing || image.source.empty()) return;
+    const int sizePx = static_cast<int>(std::round(image.size * scale));
+    const auto entry = atlas.image(image.source, sizePx);
+    penX += image.paddingLeft;
+    if (entry) {
+        GlyphInstance quad;
+        quad.origin = {static_cast<float>(snap(penX, scale)),
+                       static_cast<float>(snap(contentBox.midY() - image.size / 2, scale))};
+        quad.size = {static_cast<float>(entry->widthPx), static_cast<float>(entry->heightPx)};
+        quad.uvOrigin = {entry->uvOriginX, entry->uvOriginY};
+        quad.uvSize = {entry->uvSizeX, entry->uvSizeY};
+        quad.color = {1, 1, 1, 1}; // color page carries its own pixels
+        quad.flags |= kGlyphFlagColor;
+        list.glyphs.push_back(quad);
+    }
+    penX += image.size + image.paddingRight;
+}
+
 // One text part inside the item's content box. penX advances past the part.
 void emitPart(DisplayList& list, const TextPart& part, double& penX, const Rect& contentBox,
               double scale, FontCache& fonts, GlyphAtlas& atlas) {
@@ -320,6 +342,10 @@ void emitItem(DisplayList& list, Item& item, const Rect& contentBox, double scal
     Rect adjusted = contentBox;
     adjusted.y -= item.yOffset; // y_offset positive-up
     double penX = adjusted.x;
+    // Paint order: image (unless align=r) -> icon -> components -> label ->
+    // image (align=r), per spec 3.9.
+    const bool imageTrails = item.image && item.image->align == 'r';
+    if (item.image && !imageTrails) emitImage(list, *item.image, penX, adjusted, scale, atlas);
     emitPart(list, item.icon, penX, adjusted, scale, fonts, atlas);
 
     if (item.graph) {
@@ -341,8 +367,8 @@ void emitItem(DisplayList& list, Item& item, const Rect& contentBox, double scal
                   fonts, atlas);
         penX += item.gauge->size;
     }
-    if (item.image && item.image->drawing) penX += item.image->advance(); // WIC later
     if (!item.gauge) emitPart(list, item.label, penX, adjusted, scale, fonts, atlas);
+    if (imageTrails) emitImage(list, *item.image, penX, adjusted, scale, atlas);
 }
 
 } // namespace ybar::render

@@ -12,6 +12,8 @@
 #include <cstdio>
 #include <unordered_map>
 
+#include "render/icon_map.h"
+
 using Microsoft::WRL::ComPtr;
 
 namespace ybar::render {
@@ -133,9 +135,28 @@ public:
     std::vector<ComPtr<IDWriteFontFace>> facesKeepAlive;
 
     bool init() {
-        return SUCCEEDED(DWriteCreateFactory(
-            DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
-            reinterpret_cast<IUnknown**>(factory.GetAddressOf())));
+        if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+                                       reinterpret_cast<IUnknown**>(factory.GetAddressOf()))))
+            return false;
+        pickIconFont();
+        return true;
+    }
+
+    // Segoe Fluent Icons (Win11) -> Segoe MDL2 Assets (Win10) -> bundled
+    // fluentui fallback (spec 7.5).
+    void pickIconFont() {
+        ComPtr<IDWriteFontCollection> system;
+        if (FAILED(factory->GetSystemFontCollection(&system))) return;
+        for (const wchar_t* family :
+             {L"Segoe Fluent Icons", L"Segoe MDL2 Assets", L"FluentSystemIcons-Resizable"}) {
+            UINT32 index = 0;
+            BOOL exists = FALSE;
+            if (SUCCEEDED(system->FindFamilyName(family, &index, &exists)) && exists) {
+                setIconFontFamily(family);
+                return;
+            }
+        }
+        std::fprintf(stderr, "[ybar] no icon font found — sf: glyphs will not render\n");
     }
 };
 
@@ -166,14 +187,22 @@ const ShapedLine& FontCache::shape(const std::string& text, const ybar::model::F
     if (const auto it = impl_->lines.find(key); it != impl_->lines.end()) return it->second;
 
     ShapedLine line;
-    const std::wstring family = font.family.empty() ? L"Segoe UI Variable" : widen(font.family);
+    // "sf:<name>" shapes the mapped icon glyph in the icon font, ignoring the
+    // part's own family (spec 7.5) — the grammar is the contract, the artwork
+    // is platform-specific.
+    const auto symbol = symbolName(text);
+    const std::string shapedText =
+        symbol.empty() ? text : resolveSymbol(symbol).text;
+    const std::wstring family = !symbol.empty() ? iconFontFamily()
+                                : font.family.empty() ? L"Segoe UI Variable"
+                                                      : widen(font.family);
     const auto emSize = static_cast<FLOAT>(font.size);
 
     ComPtr<IDWriteTextFormat> format;
     if (SUCCEEDED(impl_->factory->CreateTextFormat(
             family.c_str(), nullptr, weightFor(font.style), styleFor(font.style),
             DWRITE_FONT_STRETCH_NORMAL, emSize, L"", &format))) {
-        const std::wstring wide = widen(text);
+        const std::wstring wide = widen(shapedText);
         ComPtr<IDWriteTextLayout> layout;
         if (SUCCEEDED(impl_->factory->CreateTextLayout(wide.c_str(),
                                                        static_cast<UINT32>(wide.size()),

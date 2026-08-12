@@ -6,10 +6,14 @@
 #include <windows.h>
 #include <d3d11.h>
 #include <dwrite_2.h>
+#include <shellapi.h>
+#include <tlhelp32.h>
+#include <wincodec.h>
 #include <wrl/client.h>
 // clang-format on
 
 #include <cstdio>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -66,6 +70,93 @@ struct GlyphKeyHash {
     }
 };
 
+std::wstring widen(const std::string& utf8) {
+    if (utf8.empty()) return {};
+    const int size = MultiByteToWideChar(CP_UTF8, 0, utf8.data(),
+                                         static_cast<int>(utf8.size()), nullptr, 0);
+    std::wstring wide(static_cast<std::size_t>(size), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), wide.data(),
+                        size);
+    return wide;
+}
+
+// HICON -> premultiplied BGRA pixels at the requested size.
+bool renderIcon(HICON icon, int sizePx, std::vector<BYTE>& pixels) {
+    BITMAPINFO info{};
+    info.bmiHeader.biSize = sizeof(info.bmiHeader);
+    info.bmiHeader.biWidth = sizePx;
+    info.bmiHeader.biHeight = -sizePx; // top-down
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+
+    void* bits = nullptr;
+    const HDC screen = GetDC(nullptr);
+    const HBITMAP bitmap = CreateDIBSection(screen, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
+    ReleaseDC(nullptr, screen);
+    if (!bitmap || !bits) return false;
+
+    const HDC memory = CreateCompatibleDC(nullptr);
+    const auto previous = static_cast<HBITMAP>(SelectObject(memory, bitmap));
+    const bool drawn =
+        DrawIconEx(memory, 0, 0, icon, sizePx, sizePx, 0, nullptr, DI_NORMAL) != 0;
+    SelectObject(memory, previous);
+    DeleteDC(memory);
+
+    if (drawn) {
+        pixels.assign(static_cast<BYTE*>(bits),
+                      static_cast<BYTE*>(bits) + static_cast<std::size_t>(sizePx) * sizePx * 4);
+        // DrawIconEx yields straight alpha; the color page is premultiplied.
+        for (std::size_t i = 0; i + 3 < pixels.size(); i += 4) {
+            const unsigned alpha = pixels[i + 3];
+            pixels[i] = static_cast<BYTE>(pixels[i] * alpha / 255);
+            pixels[i + 1] = static_cast<BYTE>(pixels[i + 1] * alpha / 255);
+            pixels[i + 2] = static_cast<BYTE>(pixels[i + 2] * alpha / 255);
+        }
+    }
+    DeleteObject(bitmap);
+    return drawn;
+}
+
+// Resolves an executable path to its shell icon.
+bool iconForExecutable(const std::wstring& path, int sizePx, std::vector<BYTE>& pixels) {
+    SHFILEINFOW info{};
+    const UINT flags = SHGFI_ICON | (sizePx > 16 ? SHGFI_LARGEICON : SHGFI_SMALLICON);
+    if (!SHGetFileInfoW(path.c_str(), 0, &info, sizeof(info), flags) || !info.hIcon)
+        return false;
+    const bool ok = renderIcon(info.hIcon, sizePx, pixels);
+    DestroyIcon(info.hIcon);
+    return ok;
+}
+
+// Finds a running process whose executable stem matches `name`.
+std::wstring executableForAppName(const std::string& name) {
+    const std::wstring wanted = widen(name);
+    std::wstring found;
+    const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return found;
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    if (Process32FirstW(snapshot, &entry)) {
+        do {
+            std::wstring exe = entry.szExeFile;
+            const auto dot = exe.find_last_of(L'.');
+            const std::wstring stem = dot == std::wstring::npos ? exe : exe.substr(0, dot);
+            if (_wcsicmp(stem.c_str(), wanted.c_str()) != 0) continue;
+            const HANDLE process =
+                OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.th32ProcessID);
+            if (!process) continue;
+            wchar_t path[MAX_PATH];
+            DWORD size = MAX_PATH;
+            if (QueryFullProcessImageNameW(process, 0, path, &size)) found.assign(path, size);
+            CloseHandle(process);
+            if (!found.empty()) break;
+        } while (Process32NextW(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+    return found;
+}
+
 } // namespace
 
 class GlyphAtlasImpl {
@@ -73,6 +164,9 @@ public:
     ID3D11Device* device = nullptr;
     ID3D11DeviceContext* context = nullptr;
     ComPtr<IDWriteFactory2> dwriteFactory;
+    ComPtr<IWICImagingFactory> wicFactory;
+    ShelfPacker colorPacker{kColorSize, kColorSize};
+    std::unordered_map<std::string, std::optional<AtlasEntry>> images;
     double scale = 1.0;
 
     ComPtr<ID3D11Texture2D> maskPage;
@@ -88,6 +182,11 @@ public:
                 DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory2),
                 reinterpret_cast<IUnknown**>(dwriteFactory.GetAddressOf()))))
             return false;
+        // WIC is optional: without it, file-path image sources are skipped
+        // but glyphs and shell icons still work.
+        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+        CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                         IID_PPV_ARGS(&wicFactory));
         auto makePage = [&](int size, DXGI_FORMAT format, ComPtr<ID3D11Texture2D>& tex,
                             ComPtr<ID3D11ShaderResourceView>& view) {
             D3D11_TEXTURE2D_DESC desc{};
@@ -125,6 +224,73 @@ void* GlyphAtlas::maskSrvRaw() { return impl_->maskView.Get(); }
 void* GlyphAtlas::colorSrvRaw() { return impl_->colorView.Get(); }
 ID3D11ShaderResourceView* GlyphAtlas::maskSrv() { return impl_->maskView.Get(); }
 ID3D11ShaderResourceView* GlyphAtlas::colorSrv() { return impl_->colorView.Get(); }
+
+std::optional<AtlasEntry> GlyphAtlas::image(const std::string& source, int sizePx) {
+    if (source.empty() || sizePx <= 0) return std::nullopt;
+    const std::string key = source + "@" + std::to_string(sizePx);
+    if (const auto it = impl_->images.find(key); it != impl_->images.end()) return it->second;
+
+    std::vector<BYTE> pixels; // premultiplied BGRA, sizePx * sizePx
+    if (source.rfind("app.", 0) == 0) {
+        const auto exe = executableForAppName(source.substr(4));
+        if (!exe.empty()) iconForExecutable(exe, sizePx, pixels);
+    } else if (source.rfind("exe.", 0) == 0) {
+        iconForExecutable(widen(source.substr(4)), sizePx, pixels);
+    } else if (impl_->wicFactory) {
+        // File path: decode, convert to premultiplied BGRA, scale to fit.
+        ComPtr<IWICBitmapDecoder> decoder;
+        if (SUCCEEDED(impl_->wicFactory->CreateDecoderFromFilename(
+                widen(source).c_str(), nullptr, GENERIC_READ,
+                WICDecodeMetadataCacheOnLoad, &decoder))) {
+            ComPtr<IWICBitmapFrameDecode> frame;
+            ComPtr<IWICFormatConverter> converter;
+            ComPtr<IWICBitmapScaler> scaler;
+            if (SUCCEEDED(decoder->GetFrame(0, &frame)) &&
+                SUCCEEDED(impl_->wicFactory->CreateFormatConverter(&converter)) &&
+                SUCCEEDED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppPBGRA,
+                                                WICBitmapDitherTypeNone, nullptr, 0.0,
+                                                WICBitmapPaletteTypeCustom)) &&
+                SUCCEEDED(impl_->wicFactory->CreateBitmapScaler(&scaler)) &&
+                SUCCEEDED(scaler->Initialize(converter.Get(), static_cast<UINT>(sizePx),
+                                             static_cast<UINT>(sizePx),
+                                             WICBitmapInterpolationModeFant))) {
+                pixels.resize(static_cast<std::size_t>(sizePx) * sizePx * 4);
+                if (FAILED(scaler->CopyPixels(nullptr, static_cast<UINT>(sizePx * 4),
+                                              static_cast<UINT>(pixels.size()),
+                                              pixels.data())))
+                    pixels.clear();
+            }
+        }
+    }
+    if (pixels.empty()) {
+        impl_->images.emplace(key, std::nullopt); // negative cache
+        return std::nullopt;
+    }
+
+    const auto packed = impl_->colorPacker.pack(sizePx + 2 * kPadding, sizePx + 2 * kPadding);
+    if (!packed) {
+        std::fprintf(stderr, "[ybar] color atlas page full — image skipped\n");
+        impl_->images.emplace(key, std::nullopt);
+        return std::nullopt;
+    }
+    const int x = packed->first + kPadding;
+    const int y = packed->second + kPadding;
+    D3D11_BOX box{static_cast<UINT>(x), static_cast<UINT>(y), 0, static_cast<UINT>(x + sizePx),
+                  static_cast<UINT>(y + sizePx), 1};
+    impl_->context->UpdateSubresource(impl_->colorPage.Get(), 0, &box, pixels.data(),
+                                      static_cast<UINT>(sizePx * 4), 0);
+
+    AtlasEntry entry;
+    entry.uvOriginX = static_cast<float>(x) / kColorSize;
+    entry.uvOriginY = static_cast<float>(y) / kColorSize;
+    entry.uvSizeX = static_cast<float>(sizePx) / kColorSize;
+    entry.uvSizeY = static_cast<float>(sizePx) / kColorSize;
+    entry.widthPx = sizePx;
+    entry.heightPx = sizePx;
+    entry.color = true; // sampled from the premultiplied BGRA page
+    impl_->images.emplace(key, entry);
+    return entry;
+}
 
 std::optional<AtlasEntry> GlyphAtlas::maskGlyph(void* fontFaceRaw, float emSize,
                                                 std::uint16_t glyphId) {

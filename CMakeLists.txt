@@ -58,6 +58,7 @@ add_library(ybar_win
   src/providers/ytile.cpp
   src/render/font_cache.cpp
   src/render/glyph_atlas.cpp
+  src/render/icon_map.cpp
   src/render/renderer.cpp
   src/render/scene_builder.cpp
   src/win/bar_surface.cpp
@@ -65,7 +66,8 @@ add_library(ybar_win
   src/win/display_manager.cpp
 )
 target_link_libraries(ybar_win PUBLIC ybar_core lua_vendor
-  ws2_32 d3d11 dxgi d3dcompiler dcomp dwrite shcore user32 gdi32)
+  ws2_32 d3d11 dxgi d3dcompiler dcomp dwrite shcore user32 gdi32
+  windowscodecs ole32 shell32)
 
 add_executable(ybar src/main.cpp)
 target_link_libraries(ybar PRIVATE ybar_win)

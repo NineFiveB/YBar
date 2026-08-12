@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 
 struct ID3D11ShaderResourceView; // global COM type, defined by d3d11.h
 
@@ -35,6 +36,11 @@ public:
     // IDWriteFontFace*. nullopt when the page is full (stderr warning) or the
     // glyph has no ink.
     std::optional<AtlasEntry> maskGlyph(void* fontFace, float emSize, std::uint16_t glyphId);
+
+    // Decoded image (file path / app.<Name> / exe.<path> / spinner) uploaded
+    // to the premultiplied BGRA color page, keyed by source+size so repeated
+    // frames reuse the same rect (spec 7.5).
+    std::optional<AtlasEntry> image(const std::string& source, int sizePx);
 
     void* maskSrvRaw();  // ID3D11ShaderResourceView*
     void* colorSrvRaw();

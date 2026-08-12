@@ -10,9 +10,12 @@ double partAdvance(const TextPart& part, const Size& measured) {
 
 namespace {
 
+// Component widths BETWEEN icon and label. The image sits outside this run
+// (leading, or trailing the label when align=r) but its advance is part of
+// the item's length either way.
 double componentWidth(const Item& item) {
     double width = 0;
-    if (item.image && item.image->drawing) width += item.image->advance();
+    if (item.image) width += item.image->advance();
     if (item.graph) width += item.graph->capacity; // capacity points, sample_width = 1
     if (item.slider) width += item.slider->width;
     if (item.gauge) width += item.gauge->size;

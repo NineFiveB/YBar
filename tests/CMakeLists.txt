@@ -8,6 +8,7 @@ add_executable(ybar_tests
   curves_tests.cpp
   event_bus_tests.cpp
   font_spec_tests.cpp
+  icon_map_tests.cpp
   instances_tests.cpp
   item_store_tests.cpp
   jsonc_config_tests.cpp
