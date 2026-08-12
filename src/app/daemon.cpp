@@ -26,6 +26,7 @@
 #include "model/item.h"
 #include "model/layout.h"
 #include "providers/komorebi.h"
+#include "providers/ytile.h"
 #include "render/font_cache.h"
 #include "render/glyph_atlas.h"
 #include "render/renderer.h"
@@ -50,6 +51,7 @@ constexpr UINT kMsgIpcRequest = WM_APP + 1;
 constexpr UINT kMsgRender = WM_APP + 2;
 constexpr UINT kMsgKomorebi = WM_APP + 3;
 constexpr UINT kMsgReloadConfig = WM_APP + 4;
+constexpr UINT kMsgYTile = WM_APP + 6; // +5 is Lua's kMsgExecDone
 constexpr UINT_PTR kStatsTimer = 5;
 
 // Power setting GUIDs (winnt.h declares them; define locally to avoid
@@ -95,6 +97,7 @@ struct DaemonState {
 
     ScriptRunner scripts;
     std::unique_ptr<ybar::providers::KomorebiProvider> komorebi;
+    std::unique_ptr<ybar::providers::YTileProvider> ytile;
     ybar::anim::AnimationScheduler scheduler;
     bool animationTimerLive = false;
     int appliedOffsetPhysical = -1;
@@ -191,6 +194,25 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             delete update;
             return 0;
         }
+        case kMsgYTile: {
+            auto* update = reinterpret_cast<ybar::providers::YTileUpdate*>(lParam);
+            if (g_state) {
+                ybar::events::Environment env{
+                    {"FOCUSED_WORKSPACE", update->focusedWorkspace},
+                    {"PREV_WORKSPACE", update->previousWorkspace},
+                    {"FOCUSED_MONITOR_INDEX",
+                     std::to_string(update->focusedMonitorIndex + 1)},
+                };
+                // komorebi_workspace_change fires too so existing configs and
+                // themes keep working unchanged, whichever WM is running.
+                g_state->bus.trigger("ytile_workspace_change", update->focusedWorkspace, env);
+                g_state->bus.trigger("komorebi_workspace_change", update->focusedWorkspace,
+                                     env);
+                g_state->bus.trigger("space_change", "", env);
+            }
+            delete update;
+            return 0;
+        }
         case WM_TIMER:
             if (wParam == kRoutineTimer && g_state) {
                 for (const auto& item : g_state->store.items()) {
@@ -212,6 +234,10 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                 if (g_state && g_state->komorebi) {
                     g_state->komorebi->clearWorkAreaOffset(); // spec 11.4
                     g_state->komorebi->stop();
+                }
+                if (g_state && g_state->ytile) {
+                    g_state->ytile->clearWorkAreaOffset();
+                    g_state->ytile->stop();
                 }
                 PostQuitMessage(0);
             } else if (wParam == kRenderRetryTimer && g_state) {
@@ -242,6 +268,10 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                 g_state->settings = ybar::model::BarSettings{};
                 g_state->bus.reset();
                 if (g_state->komorebi) g_state->bus.addEvent("komorebi_workspace_change");
+                if (g_state->ytile) {
+                    g_state->bus.addEvent("ytile_workspace_change");
+                    g_state->bus.addEvent("komorebi_workspace_change");
+                }
                 if (g_state->fonts) g_state->fonts->clear();
                 g_state->hoverItemId = -1;
                 g_state->appliedOffsetPhysical = -1;
@@ -447,14 +477,15 @@ void DaemonState::renderAll() {
     }
 
     // Work-area handshake follows bar-height changes (spec 11.4).
-    if (komorebi && !surfaces.empty()) {
+    if ((komorebi || ytile) && !surfaces.empty()) {
         const double scale = surfaces.front()->scale();
         const int physical = settings.hidden
                                  ? 0
                                  : static_cast<int>((settings.height + settings.yOffset) * scale + 0.5);
         if (physical != appliedOffsetPhysical) {
             appliedOffsetPhysical = physical;
-            komorebi->applyWorkAreaOffset(physical);
+            if (komorebi) komorebi->applyWorkAreaOffset(physical);
+            if (ytile) ytile->applyWorkAreaOffset(physical);
         }
     }
 }
@@ -567,8 +598,30 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
         });
     }
 
-    // komorebi (spec 11): subscription + work-area handshake, gated by reserve.
+    // YTile: the sibling WM adapter — preferred when its pipe is present
+    // (the user runs one WM at a time; ytiled's presence is the signal).
     if (state.settings.reserve != ybar::model::ReserveMode::Off &&
+        state.settings.reserve != ybar::model::ReserveMode::AppBar &&
+        ybar::providers::YTileProvider::detect()) {
+        state.ytile = std::make_unique<ybar::providers::YTileProvider>();
+        state.ytile->onUpdate = [hwnd = state.messageWindow](
+                                    const ybar::providers::YTileUpdate& update) {
+            auto* copy = new ybar::providers::YTileUpdate(update);
+            if (!PostMessageW(hwnd, kMsgYTile, 0, reinterpret_cast<LPARAM>(copy)))
+                delete copy;
+        };
+        state.bus.addEvent("ytile_workspace_change");
+        state.bus.addEvent("komorebi_workspace_change"); // config compatibility
+        if (!state.ytile->start()) {
+            std::fprintf(stderr, "[ybar] ytile subscription failed\n");
+            state.ytile.reset();
+        } else {
+            trace("ytile: subscribed");
+        }
+    }
+
+    // komorebi (spec 11): subscription + work-area handshake, gated by reserve.
+    if (!state.ytile && state.settings.reserve != ybar::model::ReserveMode::Off &&
         state.settings.reserve != ybar::model::ReserveMode::AppBar &&
         ybar::providers::KomorebiProvider::detect()) {
         state.komorebi = std::make_unique<ybar::providers::KomorebiProvider>();

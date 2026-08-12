@@ -54,6 +54,7 @@ add_library(ybar_win
   src/ipc/socket.cpp
   src/lua/runtime.cpp
   src/providers/komorebi.cpp
+  src/providers/ytile.cpp
   src/render/font_cache.cpp
   src/render/glyph_atlas.cpp
   src/render/renderer.cpp
