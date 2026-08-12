@@ -916,10 +916,16 @@ missing socket DACL, ANSI argv, boot order (the instance lock now binds
 first), the komorebi zero-byte-read reconnect, and the missing 60 s script
 watchdog. Regressions live in `tests/audit_regression_tests.cpp`.
 
+**Also done**: the **`sf:` icon resolver + image pipeline** (§7.5) — SF-name →
+Segoe Fluent Icons table with progressive dotted fallback and a placeholder +
+one-time warning for unmapped names, runtime icon-font selection, WIC decode
+for file paths, shell icons for `app.<Name>` / `exe.<path>`, color-page
+uploads with source@size caching, and leading/trailing (`align=r`) emission.
+Live-verified: nine symbols, the placeholder path, and Explorer's shell icon
+rendering on the bar.
+
 **Remaining to macOS parity**, in impact order:
-1. `sf:` icon resolver + images (§7.5): mapping table, fluentui fallback,
-   WIC file/app.<Name> sources, color atlas page.
-2. Text fidelity (§3.9, §7.4, §14): tight-ink +1.5 metrics with the
+1. Text fidelity (§3.9, §7.4, §14): tight-ink +1.5 metrics with the
    golden-value parity suite, marquee, fixed-width clipping, clip holes,
    highlight colors, text-part shadows, bracket rendering.
 3. Providers (§10): audio (WASAPI), media (GSMTC), network/SSID,
