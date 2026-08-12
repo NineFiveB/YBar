@@ -112,7 +112,30 @@ component attachment, and the exact `[!]`/`[?]` error string formats.
 Windows-specific accepted no-ops: `notch_width`, `notch_offset`,
 `notch_display_height` (no notched hardware — parsed, stored, never affect
 layout), `wifi_ssid_prompt` (SSID needs no location grant from Win32 — but see
-§10.4 for the 24H2 caveat), `font_smoothing`.
+§10.4 for the 24H2 caveat), `font_smoothing`. No-op keys accept any value
+without validation (their values are never read).
+
+**Ambiguity rulings** (resolved 2026-08 after the compliance audit found the
+spec's letter and the reference's behavior disagreeing):
+
+- **`toggle` scope**: accepted on *every* boolean leaf, which is this
+  document's letter. The reference rejects it on a handful of leaves
+  (`scroll_texts`, `popup.horizontal`, `popup.auto_close`, `image.drawing`,
+  `background.image.drawing`, `glass`, `slider.knob.drawing`) — an
+  inconsistency, not a contract. Bar-level `toggle` stays restricted to
+  `hidden` and `idle_inhibit`, where both agree.
+- **`alias.color` / `alias.update_freq`**: accepted-and-ignored on any item
+  (§3.3 wins over §10.6's error wording), so sketchybar configs carrying
+  alias styling load cleanly on a platform that has no aliases. Creating an
+  alias item still errors (§10.6).
+- **"byte-compatible" `--query` output** (§3.6) means the same keys, order,
+  and value *shapes*; JSON pretty-printer whitespace and number formatting
+  are explicitly outside the guarantee (nlohmann writes `"key": v`,
+  JSONSerialization writes `"key" : v`).
+- **Case sensitivity**: enum-ish values (`toggle`, `dynamic`, `active`,
+  `when_shown`, bar `position`/`topmost`/`display`/`reserve`) are matched
+  case-insensitively — a superset of the reference, chosen because rejecting
+  `TOP` helps nobody.
 
 ### 3.4 Events (`EventBus.swift`)
 
@@ -882,6 +905,16 @@ config compatibility); its spec entry is pending. **Popups + tooltips**
 outside-click auto-close, press-on-bar-closes-others, 600 ms tooltip dwell —
 live-verified (panel screenshot, auto-close state flip, tooltip window
 enumeration).
+
+**Compliance audit (2026-08)**: four reviewers checked 387 spec claims across
+the implemented subsystems against this document and the Swift reference. The
+Lua prelude was confirmed byte-identical. 10 contract breaks and ~40 minor
+divergences were found and fixed in one batch — the load-bearing ones being a
+dangling-reference animation path (clip/wrap_width/gradient_color/fill_color),
+unmasked targeted mouse dispatch, batch-abort on the first bad token, a
+missing socket DACL, ANSI argv, boot order (the instance lock now binds
+first), the komorebi zero-byte-read reconnect, and the missing 60 s script
+watchdog. Regressions live in `tests/audit_regression_tests.cpp`.
 
 **Remaining to macOS parity**, in impact order:
 1. `sf:` icon resolver + images (§7.5): mapping table, fluentui fallback,
