@@ -142,11 +142,8 @@ std::unique_ptr<PopupSurface> PopupSurface::create(ybar::render::Renderer& rende
         FAILED(impl->compositionDevice->CreateVisual(&impl->visual)))
         return nullptr;
     impl->visual->SetContent(swapChain);
-    // DComp targets compose in DIPs on DPI-aware windows (spec 7.1 gotcha):
-    // counter-scale so the physical-pixel buffer maps 1:1.
-    const float inverse = static_cast<float>(1.0 / scale);
-    const D2D_MATRIX_3X2_F matrix{inverse, 0, 0, inverse, 0, 0};
-    impl->visual->SetTransform(matrix);
+    // No transform: the target composes in the window's physical-pixel space
+    // (see bar_surface.cpp for the full note).
     impl->target->SetRoot(impl->visual.Get());
     impl->compositionDevice->Commit();
 

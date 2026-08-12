@@ -38,11 +38,6 @@ const char* currentModifier() {
 
 LRESULT CALLBACK barWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-double windowDpiForTransform(HWND hwnd) {
-    const UINT dpi = GetDpiForWindow(hwnd);
-    return dpi != 0 ? static_cast<double>(dpi) : 96.0;
-}
-
 void registerClassOnce() {
     static bool registered = [] {
         WNDCLASSW windowClass{};
@@ -217,16 +212,19 @@ std::unique_ptr<BarSurface> BarSurface::create(ybar::render::Renderer& renderer,
         FAILED(impl->compositionDevice->CreateVisual(&impl->visual)))
         return nullptr;
     impl->visual->SetContent(static_cast<IDXGISwapChain1*>(impl->surface->compositionSurface()));
-    // The composition target composes in DIPs for a DPI-aware window: content
-    // is displayed scaled by windowDpi/96. Counter-scale so our physical-pixel
-    // buffer maps 1:1 to device pixels (verified live: without this the whole
-    // scene displays at 2x on a 200% monitor).
-    {
-        const auto inv = static_cast<float>(96.0 / (windowDpiForTransform(impl->hwnd)));
-        D2D_MATRIX_3X2_F counterScale{};
-        counterScale._11 = inv;
-        counterScale._22 = inv;
-        impl->visual->SetTransform(counterScale);
+    // A composition target composes in the WINDOW's coordinate space, which is
+    // physical pixels for a PerMonitorV2 process — so a physical-pixel buffer
+    // maps 1:1 with no transform. (An earlier 96/dpi counter-scale shrank the
+    // scene to a quarter of the window on a 200% monitor: full-width window,
+    // half-width paint. YBAR_DCOMP_SCALE overrides for diagnosis.)
+    if (const char* override = std::getenv("YBAR_DCOMP_SCALE")) {
+        const auto factor = static_cast<float>(std::atof(override));
+        if (factor > 0) {
+            D2D_MATRIX_3X2_F matrix{};
+            matrix._11 = factor;
+            matrix._22 = factor;
+            impl->visual->SetTransform(matrix);
+        }
     }
     impl->target->SetRoot(impl->visual.Get());
     impl->compositionDevice->Commit();
