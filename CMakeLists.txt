@@ -36,6 +36,7 @@ add_library(ybar_core
   src/model/font_spec.cpp
   src/model/item.cpp
   src/model/layout.cpp
+  src/model/popup_layout.cpp
   src/model/property_setter.cpp
   src/model/serialize.cpp
   src/model/style.cpp
@@ -60,6 +61,7 @@ add_library(ybar_win
   src/render/renderer.cpp
   src/render/scene_builder.cpp
   src/win/bar_surface.cpp
+  src/win/popup_surface.cpp
   src/win/display_manager.cpp
 )
 target_link_libraries(ybar_win PUBLIC ybar_core lua_vendor

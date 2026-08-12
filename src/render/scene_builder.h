@@ -27,4 +27,17 @@ DisplayList buildScene(const std::vector<std::unique_ptr<ybar::model::Item>>& it
                        const ybar::model::BarSettings& settings, const SceneParams& params,
                        FontCache& fonts, GlyphAtlas& atlas);
 
+// One item's full emission (background/shadow/icon/components/label) at a
+// given content box — shared by the bar and popup builds.
+void emitItem(DisplayList& list, ybar::model::Item& item, const ybar::model::Rect& contentBox,
+              double scale, FontCache& fonts, GlyphAtlas& atlas);
+
+// Popup panel: popup.background plate + members at their layout boxes
+// (panel-local, spec 3.9). Same paint order as the bar.
+DisplayList buildPopupScene(const std::vector<ybar::model::Item*>& members,
+                            const std::vector<ybar::model::Rect>& contentBoxes,
+                            const ybar::model::PopupState& popup,
+                            ybar::model::Size panelSize, double scale, FontCache& fonts,
+                            GlyphAtlas& atlas);
+
 } // namespace ybar::render

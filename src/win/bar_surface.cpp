@@ -283,6 +283,13 @@ void BarSurface::setBroadcastTarget(void* messageWindow) {
 
 ybar::render::Surface& BarSurface::renderSurface() { return *impl_->surface; }
 const MonitorInfo& BarSurface::monitor() const { return impl_->monitorInfo; }
+void* BarSurface::hwnd() const { return impl_->hwnd; }
+
+ybar::model::Point BarSurface::screenOrigin() const {
+    RECT rect{};
+    GetWindowRect(impl_->hwnd, &rect);
+    return {static_cast<double>(rect.left), static_cast<double>(rect.top)};
+}
 double BarSurface::scale() const { return impl_->monitorInfo.scale; }
 double BarSurface::logicalWidth() const { return impl_->logicalW; }
 double BarSurface::logicalHeight() const { return impl_->logicalH; }

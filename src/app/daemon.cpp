@@ -31,8 +31,10 @@
 #include "render/glyph_atlas.h"
 #include "render/renderer.h"
 #include "render/scene_builder.h"
+#include "model/popup_layout.h"
 #include "win/bar_surface.h"
 #include "win/display_manager.h"
+#include "win/popup_surface.h"
 
 namespace ybar::app {
 
@@ -52,7 +54,9 @@ constexpr UINT kMsgRender = WM_APP + 2;
 constexpr UINT kMsgKomorebi = WM_APP + 3;
 constexpr UINT kMsgReloadConfig = WM_APP + 4;
 constexpr UINT kMsgYTile = WM_APP + 6; // +5 is Lua's kMsgExecDone
+constexpr UINT kMsgCloseAutoPopups = WM_APP + 7;
 constexpr UINT_PTR kStatsTimer = 5;
+constexpr UINT_PTR kTooltipTimer = 6;
 
 // Power setting GUIDs (winnt.h declares them; define locally to avoid
 // link-time surprises with initguid ordering).
@@ -110,6 +114,17 @@ struct DaemonState {
     Hotload hotload;
     std::unique_ptr<ybar::lua::LuaRuntime> lua;
 
+    // Popups & tooltip (spec 3.9): one panel per open host, keyed by item id.
+    struct LivePopup {
+        std::unique_ptr<ybar::win::PopupSurface> surface;
+        std::vector<int> memberIds;
+        std::vector<ybar::model::Rect> boxes; // panel-local logical
+    };
+    std::unordered_map<int, LivePopup> popups;
+    std::unique_ptr<ybar::win::PopupSurface> tooltip;
+    int tooltipItemId = -1;
+    void* mouseHook = nullptr; // HHOOK (WH_MOUSE_LL) for outside-click close
+
     // Providers (spec 10): dedupe state.
     std::string lastPowerSource;
     int lastBatteryPercent = -1;
@@ -121,6 +136,19 @@ struct DaemonState {
     void publishPower(bool forced);
     void publishFrontApp(bool forced);
     void sampleStats();
+    void updatePopups();
+    void closeAutoClosePopups(int exceptHostId);
+    void dispatchClick(ybar::model::Item& item, const char* button, const char* modifier);
+    void showTooltip(ybar::model::Item& item);
+    void hideTooltip();
+    ybar::model::MeasuredContent measureItem(const ybar::model::Item& item) {
+        ybar::model::MeasuredContent m;
+        const auto& icon = fonts->shape(item.icon.displayString(), item.icon.font);
+        const auto& label = fonts->shape(item.label.displayString(), item.label.font);
+        m.icon = {icon.width, icon.measuredHeight()};
+        m.label = {label.width, label.measuredHeight()};
+        return m;
+    }
 
     // On-demand animation clock: runs only while animations exist (spec 7.2).
     void syncAnimationTimer() {
@@ -249,6 +277,16 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                 g_state->syncAnimationTimer();
             } else if (wParam == kStatsTimer && g_state) {
                 g_state->sampleStats();
+            } else if (wParam == kTooltipTimer && g_state) {
+                KillTimer(hwnd, kTooltipTimer);
+                if (g_state->hoverItemId == g_state->tooltipItemId) {
+                    for (const auto& item : g_state->store.items()) {
+                        if (item->id == g_state->tooltipItemId && !item->tooltip.empty()) {
+                            g_state->showTooltip(*item);
+                            break;
+                        }
+                    }
+                }
             } else if (g_state && g_state->lua && g_state->lua->onTimer(wParam)) {
                 // ybar.delay timers.
             }
@@ -259,6 +297,9 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             delete result;
             return 0;
         }
+        case kMsgCloseAutoPopups:
+            if (g_state) g_state->closeAutoClosePopups(-1);
+            return 0;
         case kMsgReloadConfig:
             if (g_state) {
                 // Full teardown + re-run, no diffing (spec 5).
@@ -304,6 +345,25 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
 
 void CALLBACK foregroundHook(HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD) {
     if (g_state) g_state->publishFrontApp(false); // delivered on the UI thread
+}
+
+// Low-level mouse hook: a press OUTSIDE every ybar window closes auto-close
+// popups (spec 3.9). Minimal work here — just a post to the mailbox.
+LRESULT CALLBACK mouseHookProc(int code, WPARAM wParam, LPARAM lParam) {
+    if (code == HC_ACTION && g_state &&
+        (wParam == WM_LBUTTONDOWN || wParam == WM_RBUTTONDOWN || wParam == WM_MBUTTONDOWN)) {
+        const auto* info = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
+        const HWND target = WindowFromPoint(info->pt);
+        const HWND root = target ? GetAncestor(target, GA_ROOT) : nullptr;
+        bool inside = false;
+        wchar_t className[32] = L"";
+        if (root && GetClassNameW(root, className, 32)) {
+            inside = wcscmp(className, L"ybar.bar") == 0 ||
+                     wcscmp(className, L"ybar.popup") == 0;
+        }
+        if (!inside) PostMessageW(g_state->messageWindow, kMsgCloseAutoPopups, 0, 0);
+    }
+    return CallNextHookEx(nullptr, code, wParam, lParam);
 }
 
 } // namespace
@@ -438,6 +498,166 @@ void DaemonState::sampleStats() {
                  {"THERMAL_STATE", "nominal"}});
 }
 
+void DaemonState::dispatchClick(ybar::model::Item& item, const char* button,
+                                const char* modifier) {
+    const std::string info = std::string("{\"button\":\"") + button + "\",\"modifier\":\"" +
+                             modifier + "\"}";
+    ybar::events::Environment extra{{"BUTTON", button}, {"MODIFIER", modifier}};
+    bus.triggerTargeted(item, "mouse.clicked", info, extra);
+    if (!item.clickScript.empty()) {
+        extra["NAME"] = item.name;
+        extra["INFO"] = info;
+        scripts.run(item.clickScript, extra);
+    }
+}
+
+void DaemonState::closeAutoClosePopups(int exceptHostId) {
+    bool changed = false;
+    for (const auto& item : store.items()) {
+        if (!item->popup.isOpen || !item->popup.autoClose) continue;
+        if (item->id == exceptHostId) continue;
+        item->popup.isOpen = false;
+        changed = true;
+    }
+    if (changed) renderAll();
+}
+
+void DaemonState::showTooltip(ybar::model::Item& item) {
+    if (!renderer || !fonts || surfaces.empty()) return;
+    auto& surface = *surfaces.front();
+    const double scale = surface.scale();
+    auto* atlas = atlasFor(scale);
+    if (!atlas) return;
+
+    // Tooltip constants are visual contract (spec 3.9).
+    ybar::model::TextPart text;
+    text.string = item.tooltip;
+    text.color = ybar::model::Color{0xffffffff};
+    text.font.size = 11;
+    const auto& line = fonts->shape(text.displayString(), text.font);
+    const ybar::model::Size panel{line.width + 20, std::max(line.measuredHeight() + 10, 24.0)};
+
+    ybar::render::DisplayList list;
+    list.viewportSize = {static_cast<float>(std::round(panel.width * scale)),
+                         static_cast<float>(std::round(panel.height * scale))};
+    ybar::model::Item bubble; // transient: background plate + centered text
+    bubble.background.drawing = true;
+    bubble.background.color = ybar::model::Color{0xf2202024};
+    bubble.background.cornerRadius = 6;
+    bubble.background.height = panel.height;
+    bubble.icon.drawing = false;
+    bubble.label = text;
+    bubble.label.paddingLeft = 10;
+    ybar::render::emitItem(list, bubble, ybar::model::Rect{0, 0, panel.width, panel.height},
+                           scale, *fonts, *atlas);
+
+    if (!tooltip) tooltip = ybar::win::PopupSurface::create(*renderer, scale);
+    if (!tooltip) return;
+    const auto origin = surface.screenOrigin();
+    const ybar::model::Rect anchor{origin.x + item.frame.x * scale,
+                                   origin.y + item.frame.y * scale, item.frame.width * scale,
+                                   item.frame.height * scale};
+    tooltip->present(panel, anchor, 'c', settings.position == ybar::model::BarPosition::Top, 4);
+    renderer->render(list, tooltip->renderSurface(), atlas);
+}
+
+void DaemonState::hideTooltip() {
+    if (tooltip) tooltip->hide();
+    KillTimer(messageWindow, kTooltipTimer);
+}
+
+void DaemonState::updatePopups() {
+    if (!renderer || !fonts || surfaces.empty()) return;
+    auto& hostSurface = *surfaces.front(); // popups render at the primary bar's scale
+    const double scale = hostSurface.scale();
+    auto* atlas = atlasFor(scale);
+    if (!atlas) return;
+    const auto measure = [this](const ybar::model::Item& item) { return measureItem(item); };
+
+    // Orphan cleanup: hosts removed since the last frame (e.g. --reload).
+    for (auto it = popups.begin(); it != popups.end();) {
+        bool hostExists = false;
+        for (const auto& item : store.items()) {
+            if (item->id == it->first) {
+                hostExists = true;
+                break;
+            }
+        }
+        if (!hostExists) {
+            it->second.surface->hide();
+            it = popups.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    for (const auto& host : store.items()) {
+        const bool wantsOpen = host->popup.isOpen && !host->frame.isZero();
+        auto liveIt = popups.find(host->id);
+        if (!wantsOpen) {
+            if (liveIt != popups.end()) {
+                liveIt->second.surface->hide();
+                popups.erase(liveIt);
+            }
+            continue;
+        }
+
+        std::vector<ybar::model::Item*> members;
+        for (const auto& member : store.items()) {
+            if (member->position == ybar::model::ItemPosition::Popup &&
+                member->popupHost == host->name && member->drawing)
+                members.push_back(member.get());
+        }
+        if (members.empty()) {
+            if (liveIt != popups.end()) {
+                liveIt->second.surface->hide();
+                popups.erase(liveIt);
+            }
+            continue;
+        }
+
+        const auto layout = ybar::model::layoutPopup(members, host->popup, measure);
+        auto scene = ybar::render::buildPopupScene(members, layout.contentBoxes, host->popup,
+                                                   layout.panelSize, scale, *fonts, *atlas);
+        if (scene.empty()) continue;
+
+        if (liveIt == popups.end()) {
+            auto surface = ybar::win::PopupSurface::create(*renderer, scale);
+            if (!surface) continue;
+            liveIt = popups.emplace(host->id, LivePopup{std::move(surface), {}, {}}).first;
+            liveIt->second.surface->setMouseHandler(
+                [this, hostId = host->id](const ybar::win::MouseEvent& event) {
+                    if (event.kind != ybar::win::MouseEvent::Kind::Up) return;
+                    const auto it = popups.find(hostId);
+                    if (it == popups.end()) return;
+                    for (std::size_t i = 0; i < it->second.boxes.size(); ++i) {
+                        if (!it->second.boxes[i].contains({event.x, event.y})) continue;
+                        for (const auto& item : store.items()) {
+                            if (item->id == it->second.memberIds[i]) {
+                                dispatchClick(*item, event.button, event.modifier);
+                                break;
+                            }
+                        }
+                        break; // press inside a popup never dismisses it (spec 3.9)
+                    }
+                });
+        }
+        auto& live = liveIt->second;
+        live.memberIds.clear();
+        for (auto* member : members) live.memberIds.push_back(member->id);
+        live.boxes = layout.contentBoxes;
+
+        const auto origin = hostSurface.screenOrigin();
+        const ybar::model::Rect anchor{origin.x + host->frame.x * scale,
+                                       origin.y + host->frame.y * scale,
+                                       host->frame.width * scale, host->frame.height * scale};
+        live.surface->present(layout.panelSize, anchor, host->popup.align,
+                              settings.position == ybar::model::BarPosition::Top,
+                              host->popup.yOffset);
+        renderer->render(scene, live.surface->renderSurface(), atlas);
+    }
+}
+
 void DaemonState::renderAll() {
     if (!renderer || !fonts) return;
     trace("renderAll: begin");
@@ -475,6 +695,8 @@ void DaemonState::renderAll() {
         }
         trace("renderAll: surface done");
     }
+
+    updatePopups();
 
     // Work-area handshake follows bar-height changes (spec 11.4).
     if ((komorebi || ytile) && !surfaces.empty()) {
@@ -560,9 +782,10 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
             using Kind = ybar::win::MouseEvent::Kind;
             auto* item = event.kind == Kind::Leave ? nullptr : hitTest(event.x, event.y);
 
-            // Hover transitions (mouse.entered / mouse.exited).
+            // Hover transitions (mouse.entered / mouse.exited) + tooltip dwell.
             const int hoverId = item ? item->id : -1;
             if (hoverId != state.hoverItemId) {
+                state.hideTooltip();
                 if (state.hoverItemId != -1) {
                     for (const auto& candidate : state.store.items()) {
                         if (candidate->id != state.hoverItemId) continue;
@@ -574,22 +797,21 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
                 if (item) {
                     item->mouseOver = true;
                     state.bus.triggerTargeted(*item, "mouse.entered", "");
+                    if (!item->tooltip.empty()) {
+                        state.tooltipItemId = item->id;
+                        SetTimer(state.messageWindow, kTooltipTimer, 600, nullptr);
+                    }
                 }
                 state.hoverItemId = hoverId;
             }
             if (!item) return;
 
-            if (event.kind == Kind::Up) { // clicks fire on mouse-UP (spec 3.5)
-                const std::string info = std::string("{\"button\":\"") + event.button +
-                                         "\",\"modifier\":\"" + event.modifier + "\"}";
-                ybar::events::Environment extra{{"BUTTON", event.button},
-                                                {"MODIFIER", event.modifier}};
-                state.bus.triggerTargeted(*item, "mouse.clicked", info, extra);
-                if (!item->clickScript.empty()) {
-                    extra["NAME"] = item->name;
-                    extra["INFO"] = info;
-                    state.scripts.run(item->clickScript, extra);
-                }
+            if (event.kind == Kind::Down) {
+                // Press on the bar closes auto-close popups except the
+                // pressed host's (spec 3.9).
+                state.closeAutoClosePopups(item->id);
+            } else if (event.kind == Kind::Up) { // clicks fire on mouse-UP (spec 3.5)
+                state.dispatchClick(*item, event.button, event.modifier);
             } else if (event.kind == Kind::Scroll) {
                 state.bus.triggerTargeted(*item, "mouse.scrolled", "",
                                           {{"SCROLL_DELTA", std::to_string(event.scrollDelta)},
@@ -649,6 +871,8 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     const HWINEVENTHOOK frontAppHook =
         SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr,
                         foregroundHook, 0, 0, WINEVENT_OUTOFCONTEXT);
+    state.mouseHook = SetWindowsHookExW(WH_MOUSE_LL, mouseHookProc,
+                                        GetModuleHandleW(nullptr), 0);
     state.bus.onFirstSubscription = [&state](const std::string& event) {
         if (event == "system_stats" && !state.statsArmed) {
             state.statsArmed = true;
@@ -748,6 +972,7 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     }
 
     if (frontAppHook) UnhookWinEvent(frontAppHook);
+    if (state.mouseHook) UnhookWindowsHookEx(static_cast<HHOOK>(state.mouseHook));
     server.stop();
     DestroyWindow(state.messageWindow);
     g_state = nullptr;

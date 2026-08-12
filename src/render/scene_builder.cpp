@@ -255,72 +255,92 @@ DisplayList buildScene(const std::vector<std::unique_ptr<Item>>& items,
         if (item->position == ybar::model::ItemPosition::Popup) continue;
         const auto boxIt = contentBoxes.find(item->id);
         if (boxIt == contentBoxes.end() || boxIt->second.isZero()) continue;
-        const Rect& contentBox = boxIt->second;
-
-        if (item->background.drawing) {
-            const auto& iconLine = fonts.shape(item->icon.displayString(), item->icon.font);
-            const auto& labelLine = fonts.shape(item->label.displayString(), item->label.font);
-            const double contentHeight =
-                std::max(item->icon.drawing ? iconLine.measuredHeight() : 0.0,
-                         item->label.drawing ? labelLine.measuredHeight() : 0.0);
-            const double bgHeight =
-                item->background.height > 0
-                    ? item->background.height
-                    : std::min(contentBox.height, contentHeight + 8); // default rule (3.9)
-            const Rect bgRect{contentBox.x - item->background.paddingLeft +
-                                  item->background.xOffset,
-                              contentBox.midY() - bgHeight / 2 - item->background.yOffset -
-                                  item->yOffset,
-                              contentBox.width + item->background.paddingLeft +
-                                  item->background.paddingRight,
-                              bgHeight};
-
-            if (item->background.shadow.drawing) {
-                const double radians =
-                    item->background.shadow.angle * 3.14159265358979323846 / 180.0;
-                const double dx = std::cos(radians) * item->background.shadow.distance;
-                const double dy = -std::sin(radians) * item->background.shadow.distance;
-                BackgroundStyle shadowStyle = item->background;
-                shadowStyle.color = item->background.shadow.color;
-                shadowStyle.gradientColor.reset();
-                shadowStyle.borderWidth = 0;
-                shadowStyle.glass = false;
-                list.quads.push_back(backgroundQuad(
-                    shadowStyle, Rect{bgRect.x + dx, bgRect.y + dy, bgRect.width, bgRect.height},
-                    scale)); // hard offset copy, no blur (spec 3.9)
-            }
-            list.quads.push_back(backgroundQuad(item->background, bgRect, scale));
-        }
-
-        Rect adjusted = contentBox;
-        adjusted.y -= item->yOffset; // y_offset positive-up
-        double penX = adjusted.x;
-        emitPart(list, item->icon, penX, adjusted, scale, fonts, atlas);
-
-        if (item->graph) {
-            const bool rightToLeft = item->position == ybar::model::ItemPosition::Right ||
-                                     item->position == ybar::model::ItemPosition::CenterLeft;
-            const Rect box{penX, adjusted.y + 1, static_cast<double>(item->graph->capacity),
-                           adjusted.height - 2};
-            emitGraph(list, *item->graph, box, rightToLeft, scale);
-            penX += item->graph->capacity;
-        }
-        if (item->slider) {
-            emitSlider(list, *item->slider, Rect{penX, adjusted.y, item->slider->width,
-                                                 adjusted.height},
-                       scale, fonts, atlas);
-            penX += item->slider->width;
-        }
-        if (item->gauge) {
-            emitGauge(list, *item, Rect{penX, adjusted.y, item->gauge->size, adjusted.height},
-                      scale, fonts, atlas);
-            penX += item->gauge->size;
-        }
-        if (item->image && item->image->drawing) penX += item->image->advance(); // WIC later
-        if (!item->gauge) emitPart(list, item->label, penX, adjusted, scale, fonts, atlas);
+        emitItem(list, *item, boxIt->second, scale, fonts, atlas);
     }
 
     return list;
+}
+
+DisplayList buildPopupScene(const std::vector<Item*>& members,
+                            const std::vector<Rect>& contentBoxes,
+                            const ybar::model::PopupState& popup, ybar::model::Size panelSize,
+                            double scale, FontCache& fonts, GlyphAtlas& atlas) {
+    DisplayList list;
+    list.viewportSize = {static_cast<float>(snap(panelSize.width, scale)),
+                         static_cast<float>(snap(panelSize.height, scale))};
+    if (popup.background.drawing) {
+        list.quads.push_back(backgroundQuad(
+            popup.background, Rect{0, 0, panelSize.width, panelSize.height}, scale));
+    }
+    for (std::size_t i = 0; i < members.size() && i < contentBoxes.size(); ++i) {
+        if (!members[i] || contentBoxes[i].isZero()) continue;
+        emitItem(list, *members[i], contentBoxes[i], scale, fonts, atlas);
+    }
+    return list;
+}
+
+void emitItem(DisplayList& list, Item& item, const Rect& contentBox, double scale,
+              FontCache& fonts, GlyphAtlas& atlas) {
+    if (item.background.drawing) {
+        const auto& iconLine = fonts.shape(item.icon.displayString(), item.icon.font);
+        const auto& labelLine = fonts.shape(item.label.displayString(), item.label.font);
+        const double contentHeight =
+            std::max(item.icon.drawing ? iconLine.measuredHeight() : 0.0,
+                     item.label.drawing ? labelLine.measuredHeight() : 0.0);
+        const double bgHeight =
+            item.background.height > 0
+                ? item.background.height
+                : std::min(contentBox.height, contentHeight + 8); // default rule (3.9)
+        const Rect bgRect{contentBox.x - item.background.paddingLeft + item.background.xOffset,
+                          contentBox.midY() - bgHeight / 2 - item.background.yOffset -
+                              item.yOffset,
+                          contentBox.width + item.background.paddingLeft +
+                              item.background.paddingRight,
+                          bgHeight};
+
+        if (item.background.shadow.drawing) {
+            const double radians =
+                item.background.shadow.angle * 3.14159265358979323846 / 180.0;
+            const double dx = std::cos(radians) * item.background.shadow.distance;
+            const double dy = -std::sin(radians) * item.background.shadow.distance;
+            BackgroundStyle shadowStyle = item.background;
+            shadowStyle.color = item.background.shadow.color;
+            shadowStyle.gradientColor.reset();
+            shadowStyle.borderWidth = 0;
+            shadowStyle.glass = false;
+            list.quads.push_back(backgroundQuad(
+                shadowStyle, Rect{bgRect.x + dx, bgRect.y + dy, bgRect.width, bgRect.height},
+                scale)); // hard offset copy, no blur (spec 3.9)
+        }
+        list.quads.push_back(backgroundQuad(item.background, bgRect, scale));
+    }
+
+    Rect adjusted = contentBox;
+    adjusted.y -= item.yOffset; // y_offset positive-up
+    double penX = adjusted.x;
+    emitPart(list, item.icon, penX, adjusted, scale, fonts, atlas);
+
+    if (item.graph) {
+        const bool rightToLeft = item.position == ybar::model::ItemPosition::Right ||
+                                 item.position == ybar::model::ItemPosition::CenterLeft;
+        const Rect box{penX, adjusted.y + 1, static_cast<double>(item.graph->capacity),
+                       adjusted.height - 2};
+        emitGraph(list, *item.graph, box, rightToLeft, scale);
+        penX += item.graph->capacity;
+    }
+    if (item.slider) {
+        emitSlider(list, *item.slider, Rect{penX, adjusted.y, item.slider->width,
+                                            adjusted.height},
+                   scale, fonts, atlas);
+        penX += item.slider->width;
+    }
+    if (item.gauge) {
+        emitGauge(list, item, Rect{penX, adjusted.y, item.gauge->size, adjusted.height}, scale,
+                  fonts, atlas);
+        penX += item.gauge->size;
+    }
+    if (item.image && item.image->drawing) penX += item.image->advance(); // WIC later
+    if (!item.gauge) emitPart(list, item.label, penX, adjusted, scale, fonts, atlas);
 }
 
 } // namespace ybar::render

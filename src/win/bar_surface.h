@@ -47,6 +47,9 @@ public:
     ybar::render::Surface& renderSurface();
     const MonitorInfo& monitor() const;
     double scale() const;
+    void* hwnd() const;
+    // Window origin in screen physical pixels (popup anchoring).
+    ybar::model::Point screenOrigin() const;
     // Bar content size in logical points (frame minus nothing; margins are
     // outside the window).
     double logicalWidth() const;
