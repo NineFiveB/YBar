@@ -161,9 +161,6 @@ void emitGraph(DisplayList& list, const ybar::model::GraphState& graph, const Re
     }
 }
 
-void emitText(DisplayList& list, const ShapedLine& line, double penX, double baselineY,
-              ybar::model::Color color, double scale, GlyphAtlas& atlas);
-
 // Slider: rounded track, highlight over the left fraction, centered knob text.
 void emitSlider(DisplayList& list, const ybar::model::SliderState& slider, const Rect& box,
                 double scale, FontCache& fonts, GlyphAtlas& atlas) {
