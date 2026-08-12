@@ -1,0 +1,30 @@
+{
+    "version": "0.1.0",
+    "description": "GPU-rendered scriptable status bar for Windows with komorebi integration",
+    "homepage": "https://github.com/JKUSAS/YBar/tree/windows",
+    "license": "GPL-3.0-only",
+    "notes": [
+        "Start the bar with 'ybar', stop it with 'ybar --exit'.",
+        "Run at login: 'ybar autostart enable'.",
+        "Pick a theme: 'ybar theme list' then 'ybar theme use <name>'.",
+        "Configs live in ~/.config/ybar (ybarrc.lua, ybar.jsonc, or ybarrc.jsonc)."
+    ],
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/JKUSAS/YBar/releases/download/win-v0.1.0/ybar-win-0.1.0-x64.zip",
+            "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+    },
+    "bin": "ybar.exe",
+    "checkver": {
+        "github": "https://github.com/JKUSAS/YBar",
+        "regex": "releases/tag/win-v([\\d.]+)"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/JKUSAS/YBar/releases/download/win-v$version/ybar-win-$version-x64.zip"
+            }
+        }
+    }
+}

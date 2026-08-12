@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+#
+# A zip of a portable exe, which is what komorebi ships too: winget unpacks it
+# into its portable-package links directory and puts `ybar` on PATH, so config
+# scripts can call it back. The daemon is started by the user (or by
+# `ybar autostart enable`), never by the installer.
+#
+# InstallerSha256 must match the release asset. The release workflow prints it,
+# or: (Get-FileHash ybar-win-<version>-x64.zip -Algorithm SHA256).Hash
+PackageIdentifier: JKUSAS.ybar-win
+PackageVersion: 0.1.0
+MinimumOSVersion: 10.0.22000.0  # Windows 11: DWM system backdrops, PerMonitorV2
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+  - RelativeFilePath: ybar.exe
+    PortableCommandAlias: ybar
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/JKUSAS/YBar/releases/download/win-v0.1.0/ybar-win-0.1.0-x64.zip
+    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
+ManifestType: installer
+ManifestVersion: 1.6.0

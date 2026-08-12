@@ -1,0 +1,86 @@
+name: Release
+
+# Tag a release with `git tag win-v0.1.0 && git push origin win-v0.1.0`.
+# The tag prefix keeps this branch's tags from colliding with the macOS tree's.
+on:
+  push:
+    tags: ['win-v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (without the win-v prefix), e.g. 0.1.0'
+        required: true
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Point VCPKG_ROOT at the runner's vcpkg
+        run: echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+
+      - name: Resolve version
+        id: version
+        run: |
+          $v = if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+            '${{ github.event.inputs.version }}'
+          } else {
+            '${{ github.ref_name }}' -replace '^win-v',''
+          }
+          echo "value=$v" >> $env:GITHUB_OUTPUT
+          echo "Building ybar-win $v"
+
+      - name: Build and test
+        run: |
+          cmake --preset default
+          cmake --build --preset default
+          ctest --preset default --output-on-failure
+
+      - name: Release build
+        run: |
+          cmake --preset release
+          cmake --build --preset release
+
+      - name: Stage payload
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item build-release/ybar.exe dist/
+          Copy-Item -Recurse shaders dist/shaders
+          Copy-Item -Recurse examples dist/examples
+          Copy-Item README.md, LICENSE dist/
+          $sdk = Get-ChildItem "C:/Program Files (x86)/Windows Kits/10/bin" -Directory |
+                 Where-Object { $_.Name -like "10.*" } | Sort-Object Name | Select-Object -Last 1
+          $dll = Join-Path $sdk.FullName "x64/d3dcompiler_47.dll"
+          if (Test-Path $dll) { Copy-Item $dll dist/ }
+
+      - name: Package
+        id: package
+        run: |
+          $v = '${{ steps.version.outputs.value }}'
+          $zip = "ybar-win-$v-x64.zip"
+          Compress-Archive -Path dist/* -DestinationPath $zip
+          # The hash is what the winget and scoop manifests pin.
+          $sha = (Get-FileHash $zip -Algorithm SHA256).Hash
+          echo "zip=$zip" >> $env:GITHUB_OUTPUT
+          echo "sha256=$sha" >> $env:GITHUB_OUTPUT
+          echo "SHA256 $sha  $zip"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ybar-win ${{ steps.version.outputs.value }}
+          files: ${{ steps.package.outputs.zip }}
+          body: |
+            ybar-win ${{ steps.version.outputs.value }} — x64, self-contained.
+
+            `SHA256` `${{ steps.package.outputs.sha256 }}`
+
+            Unpack anywhere, add the folder to `PATH`, then `ybar autostart enable`.
+            The binary is unsigned, so SmartScreen warns on first run.
+
+            Package manifests to update with this hash live in `packaging/`.

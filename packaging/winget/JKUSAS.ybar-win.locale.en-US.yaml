@@ -1,0 +1,41 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+PackageIdentifier: JKUSAS.ybar-win
+PackageVersion: 0.1.0
+PackageLocale: en-US
+Publisher: JKUSAS
+PublisherUrl: https://github.com/JKUSAS
+PublisherSupportUrl: https://github.com/JKUSAS/YBar/issues
+PackageName: ybar-win
+PackageUrl: https://github.com/JKUSAS/YBar/tree/windows
+License: GPL-3.0-only
+LicenseUrl: https://github.com/JKUSAS/YBar/blob/windows/LICENSE
+Copyright: Copyright (c) JKUSAS
+ShortDescription: GPU-rendered scriptable status bar for Windows with komorebi integration
+Description: |-
+  ybar-win is a GPU-rendered (Direct3D 11 + DirectComposition) status bar for
+  Windows 11 with first-class komorebi integration. It keeps the
+  sketchybar-style CLI and IPC grammar, an embedded Lua 5.4 config runtime,
+  JSONC declarative configs, and themes, so configs written for YBar on macOS
+  run with only OS-inherent edits.
+
+  Providers cover volume (WASAPI), media (system transport controls), network
+  and SSID, battery and power source, system stats, app lifecycle, and
+  modifier keys. With komorebi it subscribes to workspace changes and reserves
+  its strip through MonitorWorkAreaOffset; without it, the shell appbar API
+  reserves the space instead.
+Moniker: ybar
+Tags:
+  - status-bar
+  - komorebi
+  - tiling
+  - taskbar
+  - lua
+  - sketchybar
+ReleaseNotesUrl: https://github.com/JKUSAS/YBar/releases
+Documentations:
+  - DocumentLabel: README
+    DocumentUrl: https://github.com/JKUSAS/YBar/blob/windows/README.md
+  - DocumentLabel: Design and parity contract
+    DocumentUrl: https://github.com/JKUSAS/YBar/blob/windows/docs/WINDOWS-PORT.md
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0
