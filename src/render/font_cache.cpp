@@ -20,6 +20,29 @@ namespace ybar::render {
 
 double ShapedLine::measuredHeight() const { return std::ceil(ascent + descent); }
 
+InkBounds unionInk(const std::vector<GlyphInk>& glyphs) {
+    InkBounds bounds;
+    double maxX = 0;
+    for (const auto& glyph : glyphs) {
+        // Blank glyphs (space) carry no ink and must not widen the box.
+        if (glyph.right <= glyph.left || glyph.top <= glyph.bottom) continue;
+        if (!bounds.hasInk) {
+            bounds.hasInk = true;
+            bounds.minX = glyph.left;
+            maxX = glyph.right;
+            bounds.minY = glyph.bottom;
+            bounds.maxY = glyph.top;
+            continue;
+        }
+        bounds.minX = std::min(bounds.minX, glyph.left);
+        maxX = std::max(maxX, glyph.right);
+        bounds.minY = std::min(bounds.minY, glyph.bottom);
+        bounds.maxY = std::max(bounds.maxY, glyph.top);
+    }
+    bounds.width = bounds.hasInk ? maxX - bounds.minX : 0;
+    return bounds;
+}
+
 namespace {
 
 // Collects glyph runs from IDWriteTextLayout::Draw — the pragmatic
@@ -213,25 +236,67 @@ const ShapedLine& FontCache::shape(const std::string& text, const ybar::model::F
             UINT32 lineCount = 1;
             layout->GetLineMetrics(&lineMetrics, 1, &lineCount);
 
-            // Pragmatic v1 ink model: advance-based width. The per-glyph
-            // tight-ink accumulation (and its golden-value parity suite,
-            // spec 14) replaces this in the metric-parity pass; the +1.5
-            // truncation contract is already applied here.
-            line.inkMinX = 0;
-            line.inkWidth = metrics.widthIncludingTrailingWhitespace;
-            line.width = static_cast<double>(static_cast<int>(line.inkWidth + 1.5));
             line.baselineInLayout = lineMetrics.baseline;
-
-            // Primary-font vertical metrics.
+            // Primary-font vertical metrics (em box).
             line.ascent = lineMetrics.baseline;
             line.descent = lineMetrics.height - lineMetrics.baseline;
-            line.inkMinY = -line.ascent;
-            line.inkMaxY = line.descent;
 
             RunCollector collector;
             collector.runs = &line.runs;
             collector.keepAlive = &impl_->facesKeepAlive;
             layout->Draw(nullptr, &collector, 0, 0);
+
+            // Tight ink bounds (spec 7.4): the reference measures glyph-PATH
+            // bounds, so accumulate per-glyph design metrics along the pen.
+            // DirectWrite has no single-call equivalent of
+            // CTLineGetBoundsWithOptions(.useGlyphPathBounds).
+            std::vector<GlyphInk> inks;
+            for (const auto& run : line.runs) {
+                auto* face = static_cast<IDWriteFontFace*>(run.fontFace);
+                if (!face || run.glyphIds.empty()) continue;
+                DWRITE_FONT_METRICS faceMetrics{};
+                face->GetMetrics(&faceMetrics);
+                if (faceMetrics.designUnitsPerEm == 0) continue;
+                const double unit =
+                    run.fontEmSize / static_cast<double>(faceMetrics.designUnitsPerEm);
+
+                std::vector<DWRITE_GLYPH_METRICS> glyphMetrics(run.glyphIds.size());
+                if (FAILED(face->GetDesignGlyphMetrics(run.glyphIds.data(),
+                                                       static_cast<UINT32>(run.glyphIds.size()),
+                                                       glyphMetrics.data(), FALSE)))
+                    continue;
+
+                double pen = run.baselineOriginX;
+                for (std::size_t i = 0; i < run.glyphIds.size(); ++i) {
+                    const auto& m = glyphMetrics[i];
+                    const double x = pen + run.offsetsX[i];
+                    const double y = run.offsetsY[i]; // y-up offset
+                    GlyphInk ink;
+                    ink.left = x + m.leftSideBearing * unit;
+                    ink.right =
+                        x + (static_cast<double>(m.advanceWidth) - m.rightSideBearing) * unit;
+                    ink.top = y + (static_cast<double>(m.verticalOriginY) - m.topSideBearing) * unit;
+                    ink.bottom = y + (static_cast<double>(m.verticalOriginY) -
+                                      static_cast<double>(m.advanceHeight) +
+                                      m.bottomSideBearing) * unit;
+                    inks.push_back(ink);
+                    pen += run.advances[i];
+                }
+                line.glyphCount += static_cast<int>(run.glyphIds.size());
+            }
+
+            const auto bounds = unionInk(inks);
+            line.inkMinX = bounds.minX;
+            line.inkWidth = bounds.width;
+            line.inkMinY = bounds.minY;
+            line.inkMaxY = bounds.maxY;
+            line.width = inkWidthToLayoutWidth(line.inkWidth);
+            if (!bounds.hasInk) { // whitespace-only: fall back to advances
+                line.inkWidth = metrics.widthIncludingTrailingWhitespace;
+                line.width = inkWidthToLayoutWidth(line.inkWidth);
+                line.inkMinY = -line.ascent;
+                line.inkMaxY = line.descent;
+            }
         }
     }
 

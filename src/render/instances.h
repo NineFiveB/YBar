@@ -91,6 +91,9 @@ struct DisplayList {
     std::vector<GlyphInstance> glyphs;
     std::vector<Hole> holes;
     Float2 viewportSize;
+    // A marquee is on screen: the caller keeps the frame clock running
+    // (continuousDemand, spec 7.2).
+    bool hasMarquee = false;
 
     bool empty() const { return quads.empty() && shapeVertices.empty() && glyphs.empty(); }
 };

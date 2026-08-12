@@ -26,15 +26,38 @@ struct ShapedRun {
     std::vector<float> offsetsY;
 };
 
+// One glyph's ink box in DIPs, positioned along the line's pen.
+struct GlyphInk {
+    double left = 0, right = 0;
+    double bottom = 0, top = 0; // y-UP relative to the baseline (CoreText
+                                // convention: descenders negative)
+};
+
+// Union of glyph ink boxes -> the metrics the layout contract is defined in.
+struct InkBounds {
+    double minX = 0, width = 0;
+    double minY = 0, maxY = 0; // y-up, baseline-relative
+    bool hasInk = false;
+};
+InkBounds unionInk(const std::vector<GlyphInk>& glyphs);
+
+// The sketchybar parity formula (spec 3.9): tight ink, NOT advances, with
+// this exact truncation. Every padding and alignment in a ported config
+// depends on it.
+inline double inkWidthToLayoutWidth(double inkWidth) {
+    return static_cast<double>(static_cast<int>(inkWidth + 1.5));
+}
+
 struct ShapedLine {
     double width = 0;    // (int)(inkWidth + 1.5) — sketchybar parity formula
     double ascent = 0;   // from the primary font's metrics, DIPs
     double descent = 0;
     double inkWidth = 0;
     double inkMinX = 0;  // ink bounds relative to the layout origin
-    double inkMinY = 0;  // relative to the BASELINE, y-down (negative above)
+    double inkMinY = 0;  // y-UP relative to the baseline (negative below)
     double inkMaxY = 0;
     double baselineInLayout = 0; // layout-top -> baseline distance
+    int glyphCount = 0;          // single-glyph icons center on INK (spec 3.9)
     std::vector<ShapedRun> runs;
 
     double measuredHeight() const; // ceil(ascent + descent)

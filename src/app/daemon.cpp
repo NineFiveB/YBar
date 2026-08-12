@@ -150,14 +150,20 @@ struct DaemonState {
         return m;
     }
 
-    // On-demand animation clock: runs only while animations exist (spec 7.2).
+    // On-demand frame clock: runs while animations exist OR a marquee is on
+    // screen (continuousDemand, spec 7.2) — never otherwise.
+    bool marqueeOnScreen = false;
     void syncAnimationTimer() {
-        if (scheduler.active() && !animationTimerLive) {
+        const bool wanted = scheduler.active() || marqueeOnScreen;
+        if (wanted && !animationTimerLive) {
             SetTimer(messageWindow, kAnimationTimer, 16, nullptr);
             animationTimerLive = true;
-        } else if (!scheduler.active() && animationTimerLive) {
+            return;
+        }
+        if (!wanted && animationTimerLive) {
             KillTimer(messageWindow, kAnimationTimer);
             animationTimerLive = false;
+            return;
         }
     }
 
@@ -203,7 +209,7 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             if (g_state) {
                 g_state->renderQueued = false;
                 g_state->renderAll();
-                g_state->syncAnimationTimer();
+                g_state->syncAnimationTimer(); // marquee may have appeared
             }
             return 0;
         case kMsgKomorebi: {
@@ -682,6 +688,7 @@ void DaemonState::updatePopups() {
 void DaemonState::renderAll() {
     if (!renderer || !fonts) return;
     trace("renderAll: begin");
+    marqueeOnScreen = false; // recomputed from this frame's scenes
     for (auto& surface : surfaces) {
         trace("renderAll: applySettings");
         surface->applySettings(settings);
@@ -703,14 +710,23 @@ void DaemonState::renderAll() {
             return m;
         };
         trace("renderAll: layout");
-        const auto boxes = ybar::model::layout(store.items(), layoutSettings, measure);
+        auto boxes = ybar::model::layout(store.items(), layoutSettings, measure);
+
+        // Bracket frames are derived post-layout from member content boxes
+        // (spec 3.9) — they drive both rendering and hit testing.
+        for (const auto& item : store.items()) {
+            if (item->kind != ybar::model::ItemKind::Bracket) continue;
+            item->frame = ybar::model::bracketFrame(*item, store.expandMembers(item->members),
+                                                    boxes, surface->logicalHeight());
+        }
 
         ybar::render::SceneParams params{surface->logicalWidth(), surface->logicalHeight(),
-                                         scale};
+                                         scale, monotonicSeconds()};
         trace("renderAll: buildScene");
         const auto list =
             ybar::render::buildScene(store.items(), boxes, settings, params, *fonts, *atlas);
         trace("renderAll: render");
+        if (list.hasMarquee) marqueeOnScreen = true; // keeps the clock running
         if (!renderer->render(list, surface->renderSurface(), atlas)) {
             SetTimer(messageWindow, kRenderRetryTimer, 1000, nullptr); // spec 7.2
         }

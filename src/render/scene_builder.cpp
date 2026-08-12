@@ -48,9 +48,43 @@ QuadInstance backgroundQuad(const BackgroundStyle& bg, const Rect& rect, double 
 
 // Emits one shaped line at (penX, baselineY) in logical points, snapped to
 // device pixels; returns nothing useful — glyphs go straight into the list.
+// Clips a glyph quad to `clip` (device px) and remaps its UVs proportionally
+// — exact for axis-aligned quads, no scissor or stencil (spec 3.9). Returns
+// false when the glyph lies fully outside.
+bool clipGlyph(GlyphInstance& glyph, const Float2& clipMin, const Float2& clipMax) {
+    const float left = glyph.origin.x;
+    const float top = glyph.origin.y;
+    const float right = left + glyph.size.x;
+    const float bottom = top + glyph.size.y;
+    const float newLeft = std::max(left, clipMin.x);
+    const float newTop = std::max(top, clipMin.y);
+    const float newRight = std::min(right, clipMax.x);
+    const float newBottom = std::min(bottom, clipMax.y);
+    if (newRight <= newLeft || newBottom <= newTop) return false;
+    if (newLeft == left && newTop == top && newRight == right && newBottom == bottom)
+        return true; // fully inside
+
+    const float uScale = glyph.size.x > 0 ? glyph.uvSize.x / glyph.size.x : 0;
+    const float vScale = glyph.size.y > 0 ? glyph.uvSize.y / glyph.size.y : 0;
+    glyph.uvOrigin = {glyph.uvOrigin.x + (newLeft - left) * uScale,
+                      glyph.uvOrigin.y + (newTop - top) * vScale};
+    glyph.uvSize = {(newRight - newLeft) * uScale, (newBottom - newTop) * vScale};
+    glyph.origin = {newLeft, newTop};
+    glyph.size = {newRight - newLeft, newBottom - newTop};
+    return true;
+}
+
 void emitText(DisplayList& list, const ShapedLine& line, double penX, double baselineY,
-              Color color, double scale, GlyphAtlas& atlas) {
+              Color color, double scale, GlyphAtlas& atlas,
+              const Rect* clipRect = nullptr) {
     const Float4 tint = colorOf(color);
+    Float2 clipMin{}, clipMax{};
+    if (clipRect) {
+        clipMin = {static_cast<float>(snap(clipRect->minX(), scale)),
+                   static_cast<float>(snap(clipRect->minY(), scale))};
+        clipMax = {static_cast<float>(snap(clipRect->maxX(), scale)),
+                   static_cast<float>(snap(clipRect->maxY(), scale))};
+    }
     for (const auto& run : line.runs) {
         // Pen walk: baseline origin + per-glyph advances/offsets (DIPs).
         double x = penX + run.baselineOriginX;
@@ -70,6 +104,7 @@ void emitText(DisplayList& list, const ShapedLine& line, double penX, double bas
             glyph.uvSize = {entry->uvSizeX, entry->uvSizeY};
             glyph.color = tint;
             if (entry->color) glyph.flags |= kGlyphFlagColor;
+            if (clipRect && !clipGlyph(glyph, clipMin, clipMax)) continue;
             list.glyphs.push_back(glyph);
         }
     }
@@ -211,26 +246,27 @@ void emitImage(DisplayList& list, const ybar::model::ImageState& image, double& 
 
 // One text part inside the item's content box. penX advances past the part.
 void emitPart(DisplayList& list, const TextPart& part, double& penX, const Rect& contentBox,
-              double scale, FontCache& fonts, GlyphAtlas& atlas) {
+              double scale, FontCache& fonts, GlyphAtlas& atlas, bool isIcon = false,
+              bool scrollTexts = false, double clock = 0, bool* wantsMarquee = nullptr) {
     if (!part.drawing) return;
     const auto& line = fonts.shape(part.displayString(), part.font);
 
-    double slotWidth = part.customWidth >= 0
-                           ? part.customWidth
-                           : part.paddingLeft + line.width + part.paddingRight;
-    double textX = penX + (part.customWidth >= 0 ? part.paddingLeft : part.paddingLeft);
+    const double natural = part.paddingLeft + line.width + part.paddingRight;
+    const double slotWidth = part.customWidth >= 0 ? part.customWidth : natural;
+    double textX = penX + part.paddingLeft;
     if (part.customWidth >= 0) {
         // Alignment slack inside the fixed slot (unclamped, spec 3.9).
-        const double slack = part.customWidth - (part.paddingLeft + line.width + part.paddingRight);
+        const double slack = part.customWidth - natural;
         if (part.align == 'c') textX += slack / 2;
         else if (part.align == 'r') textX += slack;
     }
 
-    // Em vertical centering: baseline = centerY + (ascent - descent) / 2,
-    // y_offset positive-up (spec 3.9). Ink centering for single-glyph icons
-    // arrives with the metric-parity pass.
-    const double baselineY =
-        contentBox.midY() - part.yOffset + (line.ascent - line.descent) / 2;
+    // Vertical placement (spec 3.9): single-glyph icons center on INK;
+    // everything else centers on the em box. y_offset is positive-up.
+    const double centerY = contentBox.midY() - part.yOffset;
+    const double baselineY = (isIcon && line.glyphCount == 1 && line.inkMaxY > line.inkMinY)
+                                 ? centerY + (line.inkMinY + line.inkMaxY) / 2
+                                 : centerY + (line.ascent - line.descent) / 2;
 
     if (part.background.drawing) {
         const double bgHeight = part.background.height > 0 ? part.background.height
@@ -243,7 +279,36 @@ void emitPart(DisplayList& list, const TextPart& part, double& penX, const Rect&
         list.quads.push_back(backgroundQuad(part.background, bgRect, scale));
     }
 
-    emitText(list, line, textX - line.inkMinX, baselineY, part.color, scale, atlas);
+    // Fixed-width slots clip their content; an overflowing one with
+    // scroll_texts becomes a marquee (spec 3.9).
+    const bool overflows = part.customWidth >= 0 && natural > part.customWidth;
+    const Rect slotClip{penX, contentBox.y, slotWidth, contentBox.height};
+    const Color inkColor = part.highlight ? part.highlightColor : part.color;
+
+    if (overflows && scrollTexts && line.inkWidth > 0) {
+        // cycle = ink + 24pt gap; speed = cycle / (scroll_duration / 60 s).
+        // The line is drawn twice, one cycle apart, clipped to the slot.
+        const double cycle = line.inkWidth + 24;
+        const double seconds = std::max(part.scrollDuration, 1) / 60.0;
+        const double offset = std::fmod(clock * (cycle / seconds), cycle);
+        const double start = penX + part.paddingLeft - offset;
+        emitText(list, line, start - line.inkMinX, baselineY, inkColor, scale, atlas, &slotClip);
+        emitText(list, line, start + cycle - line.inkMinX, baselineY, inkColor, scale, atlas,
+                 &slotClip);
+        if (wantsMarquee) *wantsMarquee = true;
+    } else {
+        const Rect* clip = part.customWidth >= 0 ? &slotClip : nullptr;
+        // Text shadow: the same line drawn offset underneath, in the shadow
+        // color (hard offset, no blur — spec 3.9).
+        if (part.shadow.drawing) {
+            const double radians = part.shadow.angle * 3.14159265358979323846 / 180.0;
+            emitText(list, line,
+                     textX - line.inkMinX + std::cos(radians) * part.shadow.distance,
+                     baselineY - std::sin(radians) * part.shadow.distance, part.shadow.color,
+                     scale, atlas, clip);
+        }
+        emitText(list, line, textX - line.inkMinX, baselineY, inkColor, scale, atlas, clip);
+    }
     penX += slotWidth;
 }
 
@@ -258,6 +323,31 @@ DisplayList buildScene(const std::vector<std::unique_ptr<Item>>& items,
     list.viewportSize = {static_cast<float>(snap(params.barWidth, scale)),
                          static_cast<float>(snap(params.barHeight, scale))};
 
+    // 0) background.clip cutouts: items punch item-shaped rounded holes in
+    // the BAR background only, max 16 per frame (spec 3.9).
+    for (const auto& item : items) {
+        if (list.holes.size() >= DisplayList::kMaxHoles) break;
+        if (!item->drawing || item->background.clip <= 0) continue;
+        if (item->kind == ybar::model::ItemKind::Bracket) continue;
+        const auto boxIt = contentBoxes.find(item->id);
+        if (boxIt == contentBoxes.end() || boxIt->second.width <= 0) continue;
+        const Rect& box = boxIt->second;
+        const double height = item->background.height > 0 ? item->background.height
+                                                          : box.height;
+        const Rect holeRect{box.x - item->background.paddingLeft,
+                            box.midY() - height / 2 - item->yOffset,
+                            box.width + item->background.paddingLeft +
+                                item->background.paddingRight,
+                            height};
+        Hole hole;
+        Float2 origin{}, size{};
+        snappedRect(holeRect, scale, origin, size);
+        hole.origin = origin;
+        hole.size = size;
+        hole.radius = static_cast<float>(item->background.cornerRadius * scale);
+        list.holes.push_back(hole);
+    }
+
     // 1) Bar background.
     {
         BackgroundStyle barBg;
@@ -269,17 +359,30 @@ DisplayList buildScene(const std::vector<std::unique_ptr<Item>>& items,
         barBg.cornerRadius = settings.cornerRadius;
         barBg.cornerExponent = settings.cornerExponent;
         barBg.glass = settings.glass;
-        list.quads.push_back(
-            backgroundQuad(barBg, Rect{0, 0, params.barWidth, params.barHeight}, scale));
+        auto quad = backgroundQuad(barBg, Rect{0, 0, params.barWidth, params.barHeight}, scale);
+        if (!list.holes.empty()) quad.flags |= kQuadFlagHoles;
+        list.quads.push_back(quad);
     }
 
-    // 2) Per item (paint order: shadow -> background -> icon -> label; spec 3.9).
+    // 2) Bracket backgrounds, painted BEFORE members so paint order replaces
+    // z-order (spec 3.9). Frames are computed post-layout by the caller.
+    for (const auto& item : items) {
+        if (!item->drawing || item->kind != ybar::model::ItemKind::Bracket) continue;
+        if (item->frame.isZero() || !item->background.drawing) continue;
+        const double height = item->background.height > 0 ? item->background.height
+                                                          : params.barHeight - 4;
+        const Rect box{item->frame.x, item->frame.midY() - height / 2 - item->yOffset,
+                       item->frame.width, height};
+        list.quads.push_back(backgroundQuad(item->background, box, scale));
+    }
+
+    // 3) Per item (paint order: shadow -> background -> icon -> label; spec 3.9).
     for (const auto& item : items) {
         if (!item->drawing || item->kind == ybar::model::ItemKind::Bracket) continue;
         if (item->position == ybar::model::ItemPosition::Popup) continue;
         const auto boxIt = contentBoxes.find(item->id);
         if (boxIt == contentBoxes.end() || boxIt->second.isZero()) continue;
-        emitItem(list, *item, boxIt->second, scale, fonts, atlas);
+        emitItem(list, *item, boxIt->second, scale, fonts, atlas, params.clock);
     }
 
     return list;
@@ -304,7 +407,7 @@ DisplayList buildPopupScene(const std::vector<Item*>& members,
 }
 
 void emitItem(DisplayList& list, Item& item, const Rect& contentBox, double scale,
-              FontCache& fonts, GlyphAtlas& atlas) {
+              FontCache& fonts, GlyphAtlas& atlas, double clock) {
     if (item.background.drawing) {
         const auto& iconLine = fonts.shape(item.icon.displayString(), item.icon.font);
         const auto& labelLine = fonts.shape(item.label.displayString(), item.label.font);
@@ -346,7 +449,8 @@ void emitItem(DisplayList& list, Item& item, const Rect& contentBox, double scal
     // image (align=r), per spec 3.9.
     const bool imageTrails = item.image && item.image->align == 'r';
     if (item.image && !imageTrails) emitImage(list, *item.image, penX, adjusted, scale, atlas);
-    emitPart(list, item.icon, penX, adjusted, scale, fonts, atlas);
+    emitPart(list, item.icon, penX, adjusted, scale, fonts, atlas, /*isIcon=*/true,
+             item.scrollTexts, clock, &list.hasMarquee);
 
     if (item.graph) {
         const bool rightToLeft = item.position == ybar::model::ItemPosition::Right ||
@@ -367,7 +471,9 @@ void emitItem(DisplayList& list, Item& item, const Rect& contentBox, double scal
                   fonts, atlas);
         penX += item.gauge->size;
     }
-    if (!item.gauge) emitPart(list, item.label, penX, adjusted, scale, fonts, atlas);
+    if (!item.gauge)
+        emitPart(list, item.label, penX, adjusted, scale, fonts, atlas, /*isIcon=*/false,
+                 item.scrollTexts, clock, &list.hasMarquee);
     if (imageTrails) emitImage(list, *item.image, penX, adjusted, scale, atlas);
 }
 

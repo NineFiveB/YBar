@@ -20,6 +20,7 @@ struct SceneParams {
     double barWidth = 0; // logical points
     double barHeight = 0;
     double scale = 1.0;
+    double clock = 0; // monotonic seconds, drives marquee phase
 };
 
 DisplayList buildScene(const std::vector<std::unique_ptr<ybar::model::Item>>& items,
@@ -30,7 +31,7 @@ DisplayList buildScene(const std::vector<std::unique_ptr<ybar::model::Item>>& it
 // One item's full emission (background/shadow/icon/components/label) at a
 // given content box — shared by the bar and popup builds.
 void emitItem(DisplayList& list, ybar::model::Item& item, const ybar::model::Rect& contentBox,
-              double scale, FontCache& fonts, GlyphAtlas& atlas);
+              double scale, FontCache& fonts, GlyphAtlas& atlas, double clock = 0);
 
 // Popup panel: popup.background plate + members at their layout boxes
 // (panel-local, spec 3.9). Same paint order as the bar.
