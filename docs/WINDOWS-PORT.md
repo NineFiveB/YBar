@@ -985,13 +985,31 @@ fixes came out of it: COM is now initialized before the first surface (sticky
 pinning was failing at boot), and the icon map gained `wifi.slash` /
 `square.grid.2x2`.
 
-**Remaining to macOS parity**, in impact order:
-1. Ship (§13): winget manifest + scoop bucket, Windows docs.
-2. Media provider observed only at init — no SMTC session was playing during
-   bring-up, so the title/artist path is untested on screen.
-3. Windowing paths with no cheap live test yet: `WM_DISPLAYCHANGE` rebuilds,
-   `WM_DPICHANGED`, `fullscreen_show`, `reserve=appbar`, and sticky pinning
-   across virtual desktops.
+A second live pass covered the rest: `reserve=appbar` moved the shell work
+area's top edge 0 → 34 (exactly the bar height) and restored it on
+`reserve=off`; `fullscreen_show` added `WS_EX_TOPMOST` to a `topmost=off` bar
+while a window covered the monitor and dropped it again when that window
+closed; and the media provider published `MEDIA_TITLE`/`MEDIA_STATE` for a real
+SMTC session, with `--trigger media_change` replaying the cached env after the
+label was cleared — the reload-mid-song contract. That pass also caught
+`front_app_switched` still using the old exe-basename resolution, so packaged
+apps reported `ApplicationFrameHost`; it now goes through the same
+FileDescription + frame-host unwrap as the app-lifecycle events.
+
+**Also done**: shipping (§13) — a tagged `win-v*` release workflow that
+publishes a self-contained zip and prints its SHA256, winget manifests
+(`winget validate` passes) and a scoop manifest with `checkver`/`autoupdate`
+under `packaging/`, and a user-facing README covering install, themes, the
+komorebi contract, the event list, the Windows-specific behaviours, and a
+macOS-config porting table.
+
+**Remaining to macOS parity**:
+1. `WM_DISPLAYCHANGE` rebuilds and `WM_DPICHANGED` — built and unit-tested,
+   but not exercised live: both need a display-topology change, which is too
+   intrusive to trigger on a working machine.
+2. Sticky pinning across virtual desktops (documented as best-effort: true
+   pinning needs an undocumented interface).
+3. Signing — the binary is unsigned, so SmartScreen warns on first run.
 
 Deliberate divergences (never 1:1): alias items (§10.6), per-item glass
 pills (§7.6), distributed-notification bindings (§9), THERMAL_STATE
