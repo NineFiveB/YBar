@@ -11,12 +11,13 @@ struct Measured {
     double length;        // content length (fixed width honored)
     double contentHeight; // max part height
     bool separator;       // no visible content -> slim separator row
+    bool hidden = false;  // drawing=off -> occupies nothing at all
 };
 
 Measured measureMember(Item* item, const Measure& measure) {
     // A member with drawing=off contributes nothing at all (matching bar
-    // layout, where invisible items get zero frames) — not a separator row.
-    if (!item->drawing) return Measured{item, 0, 0, true};
+    // layout, where invisible items get zero frames) — not even a separator.
+    if (!item->drawing) return Measured{item, 0, 0, false, /*hidden=*/true};
     const auto m = measure(*item);
     Measured result{item, contentLength(*item, m),
                     std::max(item->icon.drawing ? m.icon.height : 0.0,
@@ -28,6 +29,7 @@ Measured measureMember(Item* item, const Measure& measure) {
 }
 
 double rowHeight(const Measured& member, double cellHeight) {
+    if (member.hidden) return 0;
     if (cellHeight > 0) return cellHeight;
     if (member.separator) return std::max(member.contentHeight + 8, 10.0);
     return std::max(member.contentHeight + 8, 22.0);
@@ -66,6 +68,11 @@ PopupLayoutResult layoutPopup(const std::vector<Item*>& members, const PopupStat
         };
         for (std::size_t i = 0; i < measured.size(); ++i) {
             const auto& member = measured[i];
+            if (member.hidden) { // takes no slot in the flow
+                xs[i] = x;
+                lines[i] = lineTops.size();
+                continue;
+            }
             const double advance =
                 member.item->paddingLeft + member.length + member.item->paddingRight;
             if (i > lineStart && x + advance > kPopupInset + popup.wrapWidth) flushLine(i);
@@ -78,6 +85,7 @@ PopupLayoutResult layoutPopup(const std::vector<Item*>& members, const PopupStat
 
         result.contentBoxes.resize(measured.size());
         for (std::size_t i = 0; i < measured.size(); ++i) {
+            if (measured[i].hidden) continue; // stays a zero rect
             const auto line = lines[i];
             const double height = rowHeight(measured[i], popup.cellHeight);
             result.contentBoxes[i] =
@@ -95,6 +103,10 @@ PopupLayoutResult layoutPopup(const std::vector<Item*>& members, const PopupStat
             maxHeight = std::max(maxHeight, rowHeight(member, popup.cellHeight));
         double x = kPopupInset;
         for (const auto& member : measured) {
+            if (member.hidden) { // no cell, no advance
+                result.contentBoxes.push_back(Rect{});
+                continue;
+            }
             x += member.item->paddingLeft;
             result.contentBoxes.push_back(Rect{x, kPopupInset, member.length, maxHeight});
             x += member.length + member.item->paddingRight;
@@ -108,6 +120,10 @@ PopupLayoutResult layoutPopup(const std::vector<Item*>& members, const PopupStat
     double y = kPopupInset;
     double widest = 0;
     for (const auto& member : measured) {
+        if (member.hidden) { // zero row AND no contribution to the width
+            result.contentBoxes.push_back(Rect{});
+            continue;
+        }
         const double height = rowHeight(member, popup.cellHeight);
         result.contentBoxes.push_back(
             Rect{kPopupInset + member.item->paddingLeft, y, member.length, height});
