@@ -274,6 +274,9 @@ void KomorebiProvider::applyWorkAreaOffset(int barHeightPhysical) {
 }
 
 void KomorebiProvider::clearWorkAreaOffset() {
+    // Zero the replay value too, or a reconnect re-applies the old height
+    // right after these zeros land.
+    appliedOffset_ = 0;
     for (int i = 0; i < monitorCount_; ++i) {
         const std::string message =
             json{{"type", "MonitorWorkAreaOffset"},

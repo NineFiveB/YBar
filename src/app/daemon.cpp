@@ -284,7 +284,9 @@ std::string exeDirectory() {
         CloseHandle(file);
         if (length > 0 && length < 1024) {
             std::wstring final(resolved, length);
-            if (final.rfind(LR"(\\?\)", 0) == 0) final = final.substr(4);
+            // \\?\UNC\server\share -> \\server\share; \\?\C:\... -> C:\...
+            if (final.rfind(LR"(\\?\UNC\)", 0) == 0) final = L"\\\\" + final.substr(8);
+            else if (final.rfind(LR"(\\?\)", 0) == 0) final = final.substr(4);
             path = final;
         }
     }
@@ -384,13 +386,15 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                     SetThreadExecutionState(ES_CONTINUOUS);
             } else if (wParam == kExitTimer) {
                 KillTimer(hwnd, kExitTimer);
+                // stop() before clearing (spec 11.4): the reader's reconnect
+                // path re-applies the offset, and must be joined first.
                 if (g_state && g_state->komorebi) {
-                    g_state->komorebi->clearWorkAreaOffset(); // spec 11.4
                     g_state->komorebi->stop();
+                    g_state->komorebi->clearWorkAreaOffset();
                 }
                 if (g_state && g_state->ytile) {
-                    g_state->ytile->clearWorkAreaOffset();
                     g_state->ytile->stop();
+                    g_state->ytile->clearWorkAreaOffset();
                 }
                 PostQuitMessage(0);
             } else if (wParam == kRenderRetryTimer && g_state) {
@@ -730,8 +734,10 @@ void DaemonState::detachKomorebiIfReserveChanged() {
     const bool komorebiMode = settings.reserve != ybar::model::ReserveMode::Off &&
                               settings.reserve != ybar::model::ReserveMode::AppBar;
     if (komorebiMode || !komorebi) return;
-    komorebi->clearWorkAreaOffset();
+    // stop() FIRST: it joins the reader thread, whose reconnect path would
+    // otherwise re-apply the old offset right after our zeros land.
     komorebi->stop();
+    komorebi->clearWorkAreaOffset();
     komorebi.reset();
     appliedOffsetPhysical = -1;
     // The WM-less fallback poller resumes if anything still subscribes.
@@ -930,6 +936,10 @@ void DaemonState::updateSlider(ybar::model::Item& item, std::size_t surfaceIndex
 double DaemonState::sliderContentOffset(const ybar::model::Item& item) {
     double offset = 0;
     if (item.customWidth >= 0 && fonts) {
+        // Clamped to >= 0 while the emit side is unclamped — a deliberate
+        // reference-parity choice: the Swift updateSlider clamps
+        // (max(0, ...)) while its SceneBuilder shifts unclamped, so an
+        // overflowing fixed-width slider mis-maps identically on macOS.
         const double slack =
             std::max(0.0, item.customWidth - ybar::model::naturalLength(item, measureItem(item)));
         if (item.align == 'c') offset += slack / 2;
@@ -1147,27 +1157,22 @@ void DaemonState::updatePopups() {
                 [this, hostId = host->id](const ybar::win::MouseEvent& event) {
                     using Kind = ybar::win::MouseEvent::Kind;
                     const auto it = popups.find(hostId);
-                    if (it == popups.end()) return;
-                    const auto memberAt = [this, &it](double x,
-                                                      double y) -> ybar::model::Item* {
-                        for (std::size_t i = 0; i < it->second.boxes.size(); ++i) {
-                            if (!it->second.boxes[i].contains({x, y})) continue;
-                            for (const auto& item : store.items())
-                                if (item->id == it->second.memberIds[i]) return item.get();
-                            return nullptr;
-                        }
-                        return nullptr;
-                    };
 
                     // The shared slider drag machinery works here verbatim —
                     // only the frame source differs (spec 3.9, mirroring the
-                    // reference's popup press/drag routing).
+                    // reference's popup press/drag routing). Runs BEFORE the
+                    // dead-popup early-return so a popup erased mid-drag
+                    // still ends its drag cleanly.
                     if (draggingSliderId != -1 &&
                         (event.kind == Kind::Move || event.kind == Kind::Up)) {
                         bool handled = false;
                         for (const auto& candidate : store.items()) {
                             if (candidate->id != draggingSliderId || !candidate->slider)
                                 continue;
+                            if (it == popups.end()) { // popup died mid-drag
+                                candidate->slider->isDragged = false;
+                                break;
+                            }
                             handled = true;
                             const bool released = event.kind == Kind::Up;
                             candidate->slider->isDragged = !released;
@@ -1179,8 +1184,22 @@ void DaemonState::updatePopups() {
                             break;
                         }
                         if (handled) return;
-                        draggingSliderId = -1; // self-heal a stale drag id
+                        // Self-heal a stale drag id; a release must never
+                        // become a click on whatever sits under the cursor.
+                        draggingSliderId = -1;
+                        if (event.kind == Kind::Up) return;
                     }
+                    if (it == popups.end()) return;
+                    const auto memberAt = [this, &it](double x,
+                                                      double y) -> ybar::model::Item* {
+                        for (std::size_t i = 0; i < it->second.boxes.size(); ++i) {
+                            if (!it->second.boxes[i].contains({x, y})) continue;
+                            for (const auto& item : store.items())
+                                if (item->id == it->second.memberIds[i]) return item.get();
+                            return nullptr;
+                        }
+                        return nullptr;
+                    };
                     if (event.kind == Kind::Down) {
                         auto* member = memberAt(event.x, event.y);
                         if (member && member->slider) {
@@ -1407,6 +1426,13 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
                 bool handled = false;
                 for (const auto& candidate : state.store.items()) {
                     if (candidate->id != state.draggingSliderId || !candidate->slider) continue;
+                    // No frame on this bar means the drag belongs to a popup
+                    // that died mid-drag — heal instead of swallowing bar
+                    // input on an item the bar never laid out.
+                    if (!state.frameFor(surfaceIndex, candidate->id)) {
+                        candidate->slider->isDragged = false;
+                        break;
+                    }
                     handled = true;
                     const bool released = event.kind == Kind::Up;
                     candidate->slider->isDragged = !released;
@@ -1419,9 +1445,11 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
                 }
                 if (handled) return;
                 // Self-heal: the dragged item was removed mid-drag (reload,
-                // --remove). Drop the stale id and fall through to normal
-                // dispatch instead of swallowing bar input forever.
+                // --remove). Drop the stale id; consume a release outright —
+                // an Up that began a slider drag must never turn into a
+                // click on whatever item sits under the cursor.
                 state.draggingSliderId = -1;
+                if (event.kind == Kind::Up) return;
             }
 
             auto* item = event.kind == Kind::Leave ? nullptr : hitTest(event.x, event.y);

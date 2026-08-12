@@ -104,6 +104,11 @@ public:
     bool running = false;
     // Volume and device-change callbacks arrive on different WASAPI threads.
     std::mutex publishMutex;
+    // Serializes whole arm/teardown sequences (a device switch during start
+    // runs two armEndpoint calls concurrently; unserialized, the loser's
+    // control-change registration leaks with a dangling owner). Lock order:
+    // armMutex before publishMutex, and never held while publishing.
+    std::mutex armMutex;
 
     void publish(bool forced) {
         std::lock_guard<std::mutex> lock(publishMutex);
@@ -121,6 +126,7 @@ public:
     // (unregister can block on an in-flight OnNotify that is itself waiting
     // for publishMutex).
     bool armEndpoint() {
+        std::lock_guard<std::mutex> arm(armMutex);
         ComPtr<IAudioEndpointVolume> old;
         {
             std::lock_guard<std::mutex> lock(publishMutex);
@@ -193,16 +199,21 @@ void AudioProvider::stop() {
     // partially armed provider (registration live, running still false) that
     // must be torn down the same way.
     if (!impl_ || !impl_->enumerator) return;
+    // Order matters: unhook the device notification FIRST (no locks held —
+    // it synchronizes with in-flight OnDefaultDeviceChanged, which may be
+    // waiting on armMutex), so no NEW arm can start; then wait out any arm
+    // already in flight before harvesting the endpoint it may have created.
+    if (impl_->deviceCallback)
+        impl_->enumerator->UnregisterEndpointNotificationCallback(impl_->deviceCallback.Get());
     ComPtr<IAudioEndpointVolume> old;
     {
+        std::lock_guard<std::mutex> arm(impl_->armMutex);
         std::lock_guard<std::mutex> lock(impl_->publishMutex);
         old = std::move(impl_->volume);
     }
     if (old && impl_->volumeCallback)
         old->UnregisterControlChangeNotify(impl_->volumeCallback.Get());
     old.Reset();
-    if (impl_->deviceCallback)
-        impl_->enumerator->UnregisterEndpointNotificationCallback(impl_->deviceCallback.Get());
     impl_->enumerator.Reset();
     impl_->running = false;
 }

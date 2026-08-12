@@ -59,7 +59,9 @@ fs::path executablePath() {
         CloseHandle(file);
         if (length > 0 && length < 1024) {
             std::wstring final(resolved, length);
-            if (final.rfind(LR"(\\?\)", 0) == 0) final = final.substr(4);
+            // \\?\UNC\server\share -> \\server\share; \\?\C:\... -> C:\...
+            if (final.rfind(LR"(\\?\UNC\)", 0) == 0) final = L"\\\\" + final.substr(8);
+            else if (final.rfind(LR"(\\?\)", 0) == 0) final = final.substr(4);
             path = final;
         }
     }

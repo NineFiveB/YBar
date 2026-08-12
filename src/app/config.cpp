@@ -49,9 +49,12 @@ std::string locateConfig(const std::string& instance, const std::string& explici
     // `ybar theme use` records a choice in ~/.config/ybar/current-theme; the
     // daemon honors it here so a theme survives restarts and autostart
     // (spec 12) — otherwise "recorded; start ybar to apply" would be a lie.
-    // Explicit -c above always wins; `ybar theme reset` clears it.
-    if (const std::string themed = themeConfigFromCurrentTheme(); !themed.empty())
-        return themed;
+    // Explicit -c above always wins; `ybar theme reset` clears it. Gated to
+    // the default instance: the state file is not instance-scoped, and a
+    // renamed secondary bar must not be hijacked by the primary's theme.
+    if (instance == "ybar")
+        if (const std::string themed = themeConfigFromCurrentTheme(); !themed.empty())
+            return themed;
     const std::string rcLua = instance + "rc.lua";
     const std::string rc = instance + "rc";
     std::vector<std::string> directories;

@@ -151,6 +151,11 @@ MediaProvider::~MediaProvider() { stop(); }
 
 bool MediaProvider::start() {
     if (impl_->running) return true;
+    // A previous stop() (or failed start) leaves poison flags behind; a
+    // restarted provider must not silently no-op every handler.
+    impl_->stopping = false;
+    impl_->started = false;
+    impl_->startResult = false;
     impl_->stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (!impl_->stopEvent) return false;
     {
