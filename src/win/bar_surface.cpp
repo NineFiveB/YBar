@@ -31,6 +31,11 @@ namespace {
 
 constexpr wchar_t kBarClass[] = L"ybar.bar";
 
+// The SDK declares IVirtualDesktopManager but no coclass, so the CLSID has to
+// be spelled out: {AA509086-5CA9-4C25-8F95-589D3C07B48A}.
+constexpr CLSID kClsidVirtualDesktopManager = {
+    0xaa509086, 0x5ca9, 0x4c25, {0x8f, 0x95, 0x58, 0x9d, 0x3c, 0x07, 0xb4, 0x8a}};
+
 LRESULT CALLBACK barWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 void registerClassOnce() {
@@ -124,7 +129,7 @@ public:
     void followCurrentDesktop() {
         if (!settings.sticky || !hwnd) return;
         if (!desktopManager) {
-            if (FAILED(CoCreateInstance(CLSID_VirtualDesktopManager, nullptr,
+            if (FAILED(CoCreateInstance(kClsidVirtualDesktopManager, nullptr,
                                         CLSCTX_INPROC_SERVER,
                                         IID_PPV_ARGS(&desktopManager)))) {
                 if (!warnedSticky) {

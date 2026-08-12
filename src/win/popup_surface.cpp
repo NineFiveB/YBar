@@ -157,8 +157,24 @@ void PopupSurface::present(ybar::model::Size panelSize, const ybar::model::Rect&
     double x = anchor.x; // left-aligned default
     if (align == 'c') x = anchor.midX() - widthPx / 2.0;
     else if (align == 'r') x = anchor.maxX() - widthPx;
-    const double y = below ? anchor.maxY() + yOffset * scale
-                           : anchor.y - heightPx - yOffset * scale;
+    double y = below ? anchor.maxY() + yOffset * scale
+                     : anchor.y - heightPx - yOffset * scale;
+
+    // Clamp into the anchor's monitor (spec 6): an item near a screen edge
+    // would otherwise push half its popup onto the neighbouring display, or
+    // off the desktop entirely.
+    const POINT anchorPoint{static_cast<LONG>(std::lround(anchor.midX())),
+                            static_cast<LONG>(std::lround(anchor.midY()))};
+    MONITORINFO info{sizeof(info)};
+    if (GetMonitorInfoW(MonitorFromPoint(anchorPoint, MONITOR_DEFAULTTONEAREST), &info)) {
+        const auto& bounds = info.rcMonitor;
+        if (x + widthPx > bounds.right) x = bounds.right - widthPx;
+        if (x < bounds.left) x = bounds.left;
+        // Vertical flip rather than a slide: a panel overlapping its own host
+        // swallows the clicks meant for it.
+        if (y + heightPx > bounds.bottom) y = anchor.y - heightPx - yOffset * scale;
+        if (y < bounds.top) y = anchor.maxY() + yOffset * scale;
+    }
 
     if (widthPx != impl_->widthPx || heightPx != impl_->heightPx) {
         impl_->surface->resize(widthPx, heightPx);

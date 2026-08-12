@@ -162,11 +162,35 @@ struct DaemonState {
     bool statsArmed = false;
 
     // Attached to every surface, including ones built by a display-change
-    // rebuild — so it outlives any single surface set.
-    std::function<void(const ybar::win::MouseEvent&)> mouseHandler;
+    // rebuild — so it outlives any single surface set. The index identifies
+    // which surface the event came from.
+    std::function<void(std::size_t, const ybar::win::MouseEvent&)> mouseHandler;
+
+    // Item frames per surface, parallel to `surfaces`. Layout runs once per
+    // surface and monitors can differ in width, so a single shared frame set
+    // would hit-test monitor 2 against monitor 1's geometry and report the
+    // last-rendered monitor's rects for every display in bounding_rects.
+    std::vector<std::unordered_map<int, ybar::model::Rect>> surfaceFrames;
+
+    const ybar::model::Rect* frameFor(std::size_t surfaceIndex, int itemId) const {
+        if (surfaceIndex >= surfaceFrames.size()) return nullptr;
+        const auto& frames = surfaceFrames[surfaceIndex];
+        const auto it = frames.find(itemId);
+        return it == frames.end() ? nullptr : &it->second;
+    }
+
+    void attachMouseHandlers() {
+        for (std::size_t i = 0; i < surfaces.size(); ++i) {
+            surfaces[i]->setMouseHandler(
+                [this, i](const ybar::win::MouseEvent& event) {
+                    if (mouseHandler) mouseHandler(i, event);
+                });
+        }
+    }
 
     void executeConfig();
     void rebuildSurfaces();
+    bool tryAttachKomorebi();
     void updateFullscreenElevation();
     void armAudio();
     void armMedia();
@@ -304,9 +328,9 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                             *item, {{"NAME", item->name}, {"SENDER", "routine"}, {"INFO", ""}});
                     }
                 }
-                // Per-second window upkeep (spec 6): none of these have a
-                // window message to hang off.
+                // Per-second upkeep: none of these have a message to hang off.
                 g_state->updateFullscreenElevation();
+                g_state->tryAttachKomorebi(); // komorebi may have just started
                 if (g_state->settings.sticky) {
                     for (const auto& surface : g_state->surfaces) surface->followCurrentDesktop();
                 }
@@ -581,11 +605,45 @@ void DaemonState::rebuildSurfaces() {
         if (!settings.includesDisplay(monitor.arrangementIndex, monitor.primary)) continue;
         auto surface = ybar::win::BarSurface::create(*renderer, monitor, settings);
         if (!surface) continue;
-        if (mouseHandler) surface->setMouseHandler(mouseHandler);
         surfaces.push_back(std::move(surface));
     }
+    surfaceFrames.assign(surfaces.size(), {});
+    attachMouseHandlers();
     appliedOffsetPhysical = -1; // force the work-area handshake to re-run
     renderAll();
+}
+
+// Subscribes to komorebi when it is running and we are not already attached.
+// Re-tried from the 1 s tick, so starting komorebi after ybar attaches on its
+// own instead of needing a daemon restart (spec 11.3).
+bool DaemonState::tryAttachKomorebi() {
+    if (komorebi || ytile) return false;
+    if (settings.reserve == ybar::model::ReserveMode::Off ||
+        settings.reserve == ybar::model::ReserveMode::AppBar)
+        return false;
+    if (!ybar::providers::KomorebiProvider::detect()) return false;
+
+    komorebi = std::make_unique<ybar::providers::KomorebiProvider>();
+    komorebi->onUpdate = [hwnd = messageWindow](const ybar::providers::KomorebiUpdate& update) {
+        auto* copy = new ybar::providers::KomorebiUpdate(update);
+        if (!PostMessageW(hwnd, kMsgKomorebi, 0, reinterpret_cast<LPARAM>(copy))) delete copy;
+    };
+    komorebi->onAppEvent = [hwnd = messageWindow](const std::string& event,
+                                                  const std::string& exe) {
+        auto* payload = new std::pair<std::string, std::string>(event, exe);
+        if (!PostMessageW(hwnd, kMsgKomorebiApp, 0, reinterpret_cast<LPARAM>(payload)))
+            delete payload;
+    };
+    bus.addEvent("komorebi_workspace_change");
+    if (!komorebi->start("ybar.sock")) {
+        std::fprintf(stderr, "[ybar] komorebi subscription failed\n");
+        komorebi.reset();
+        return false;
+    }
+    trace("komorebi: subscribed");
+    appliedOffsetPhysical = -1; // re-run the work-area handshake
+    renderAll();
+    return true;
 }
 
 void DaemonState::updateFullscreenElevation() {
@@ -908,7 +966,9 @@ void DaemonState::renderAll() {
     if (!renderer || !fonts) return;
     trace("renderAll: begin");
     marqueeOnScreen = false; // recomputed from this frame's scenes
-    for (auto& surface : surfaces) {
+    surfaceFrames.resize(surfaces.size());
+    for (std::size_t surfaceIndex = 0; surfaceIndex < surfaces.size(); ++surfaceIndex) {
+        auto& surface = surfaces[surfaceIndex];
         trace("renderAll: applySettings");
         surface->applySettings(settings);
         if (settings.hidden) continue;
@@ -938,6 +998,13 @@ void DaemonState::renderAll() {
             item->frame = ybar::model::bracketFrame(*item, store.expandMembers(item->members),
                                                     boxes, surface->logicalHeight());
         }
+
+        // Snapshot this surface's geometry before the next one overwrites
+        // item->frame (layout writes it in place).
+        auto& frames = surfaceFrames[surfaceIndex];
+        frames.clear();
+        for (const auto& item : store.items())
+            if (!item->frame.isZero()) frames[item->id] = item->frame;
 
         ybar::render::SceneParams params{surface->logicalWidth(), surface->logicalHeight(),
                                          scale, monotonicSeconds()};
@@ -1035,16 +1102,20 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     // Mouse routing: hit-test bar-local item frames, targeted dispatch
     // bypassing the updates policy (spec 3.4, 6).
     {
-        state.mouseHandler = [&state](const ybar::win::MouseEvent& event) {
+        state.mouseHandler = [&state](std::size_t surfaceIndex,
+                                      const ybar::win::MouseEvent& event) {
             // Two-pass hit test (spec 3.9): non-bracket members win; a
-            // bracket is hit only where no member covers the point.
-            auto hitTest = [&state](double x, double y) -> ybar::model::Item* {
+            // bracket is hit only where no member covers the point. Frames
+            // come from the surface the event arrived on — item->frame holds
+            // whichever monitor rendered last.
+            auto hitTest = [&state, surfaceIndex](double x, double y) -> ybar::model::Item* {
                 const auto& items = state.store.items();
                 ybar::model::Item* bracket = nullptr;
                 for (auto it = items.rbegin(); it != items.rend(); ++it) {
                     auto* item = it->get();
                     if (item->position == ybar::model::ItemPosition::Popup) continue;
-                    if (item->frame.isZero() || !item->frame.contains({x, y})) continue;
+                    const auto* frame = state.frameFor(surfaceIndex, item->id);
+                    if (!frame || !frame->contains({x, y})) continue;
                     if (item->kind == ybar::model::ItemKind::Bracket) {
                         if (!bracket) bracket = item;
                         continue;
@@ -1095,7 +1166,7 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
                                            {"MODIFIER", event.modifier}});
             }
         };
-        for (auto& surface : state.surfaces) surface->setMouseHandler(state.mouseHandler);
+        state.attachMouseHandlers();
     }
 
     // YTile: the sibling WM adapter — preferred when its pipe is present
@@ -1121,30 +1192,7 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     }
 
     // komorebi (spec 11): subscription + work-area handshake, gated by reserve.
-    if (!state.ytile && state.settings.reserve != ybar::model::ReserveMode::Off &&
-        state.settings.reserve != ybar::model::ReserveMode::AppBar &&
-        ybar::providers::KomorebiProvider::detect()) {
-        state.komorebi = std::make_unique<ybar::providers::KomorebiProvider>();
-        state.komorebi->onUpdate = [hwnd = state.messageWindow](
-                                       const ybar::providers::KomorebiUpdate& update) {
-            auto* copy = new ybar::providers::KomorebiUpdate(update);
-            if (!PostMessageW(hwnd, kMsgKomorebi, 0, reinterpret_cast<LPARAM>(copy)))
-                delete copy;
-        };
-        state.komorebi->onAppEvent = [hwnd = state.messageWindow](const std::string& event,
-                                                                  const std::string& exe) {
-            auto* payload = new std::pair<std::string, std::string>(event, exe);
-            if (!PostMessageW(hwnd, kMsgKomorebiApp, 0, reinterpret_cast<LPARAM>(payload)))
-                delete payload;
-        };
-        state.bus.addEvent("komorebi_workspace_change");
-        if (!state.komorebi->start("ybar.sock")) {
-            std::fprintf(stderr, "[ybar] komorebi subscription failed\n");
-            state.komorebi.reset();
-        } else {
-            trace("komorebi: subscribed");
-        }
-    }
+    state.tryAttachKomorebi();
 
     // System providers (spec 10): power push notifications + front-app hook
     // always on; stats armed lazily on first subscription.
@@ -1268,9 +1316,9 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     hooks.displays = [] { return ybar::win::displayInfos(); };
     hooks.boundingRects = [&state](const ybar::model::Item& item) {
         ybar::model::BoundingRects rects;
-        for (const auto& surface : state.surfaces) {
-            if (!item.frame.isZero())
-                rects[surface->monitor().arrangementIndex] = item.frame;
+        for (std::size_t i = 0; i < state.surfaces.size(); ++i) {
+            if (const auto* frame = state.frameFor(i, item.id))
+                rects[state.surfaces[i]->monitor().arrangementIndex] = *frame;
         }
         return rects;
     };
