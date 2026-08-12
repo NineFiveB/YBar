@@ -44,7 +44,9 @@ struct Fixture {
 
 } // namespace
 
-TEST_CASE("--animate reaches bar float keys") {
+// Test names must not begin with "--": ctest passes the name to the Catch2
+// binary, which would parse it as a command-line flag.
+TEST_CASE("animate reaches bar float keys") {
     Fixture f;
     f.settings.height = 20;
     REQUIRE(f.handler->handle({"--animate", "linear", "60", "--bar", "height=50"}).empty());
@@ -67,7 +69,7 @@ TEST_CASE("a direct bar set cancels an in-flight animation on the same key") {
     CHECK(f.settings.height == 33); // the cancelled animation never lands
 }
 
-TEST_CASE("--animate reaches bar color keys") {
+TEST_CASE("animate reaches bar color keys") {
     Fixture f;
     f.settings.color = ybar::model::Color{0xff000000};
     REQUIRE(f.handler->handle({"--animate", "linear", "60", "--bar", "color=0xffffffff"})
