@@ -36,7 +36,15 @@ jobs:
           path: build.log
 
       - name: Test
-        run: ctest --preset default
+        shell: cmd
+        run: ctest --preset default --output-on-failure > test.log 2>&1
+
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log
+          path: test.log
 
       - name: Release build
         run: |

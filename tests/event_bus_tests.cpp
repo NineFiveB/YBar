@@ -98,6 +98,8 @@ TEST_CASE("targeted mouse dispatch bypasses the updates policy") {
     item.name = "a";
     item.script = "echo";
     item.updatePolicy = UpdatePolicy::Off;
+    // The POLICY is bypassed; the subscription mask still governs delivery.
+    REQUIRE(bus.subscribe(item, "mouse.clicked"));
 
     bool ran = false;
     bus.runItemScript = [&](Item&, const Environment& env) {

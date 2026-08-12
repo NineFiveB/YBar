@@ -76,11 +76,13 @@ TEST_CASE("graph add validates capacity and push feeds it") {
     CHECK(f.run({"--add", "graph", "g", "left", "60"}).empty());
     CHECK(f.run({"--push", "g", "0.5", "-0.25", "2"}).empty());
     REQUIRE(f.store.find("g")->graph);
+    // The ring is pre-filled to capacity (reference), so pushes land at the
+    // END of a full-width series.
     const auto samples = f.store.find("g")->graph->ordered();
-    REQUIRE(samples.size() == 3);
-    CHECK(samples[0] == 0.5);
-    CHECK(samples[1] == 0.0); // clamped
-    CHECK(samples[2] == 1.0); // clamped
+    REQUIRE(samples.size() == 60);
+    CHECK(samples[57] == 0.5);
+    CHECK(samples[58] == 0.0); // clamped
+    CHECK(samples[59] == 1.0); // clamped
     CHECK(f.run({"--push", "g", "abc"}) == "[!] invalid graph value: abc");
 }
 

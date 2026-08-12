@@ -80,8 +80,9 @@ TEST_CASE("update_freq validates a non-negative integer and resets the counter")
     CHECK_FALSE(PropertySetter::set(item, "update_freq", "30"));
     CHECK(item.updateFrequency == 30);
     CHECK(item.routineCounter == 0);
-    CHECK(PropertySetter::set(item, "update_freq", "2.5") == "[!] invalid number: 2.5");
-    CHECK(PropertySetter::set(item, "update_freq", "-1") == "[!] invalid number: -1");
+    // Errors name their property (reference strings).
+    CHECK(PropertySetter::set(item, "update_freq", "2.5") == "[!] invalid update_freq: 2.5");
+    CHECK(PropertySetter::set(item, "update_freq", "-1") == "[!] invalid update_freq: -1");
 }
 
 TEST_CASE("updates policy accepts on/off/when_shown") {
