@@ -66,10 +66,10 @@ TEST_CASE("animating clip/wrap_width/gradient_color/fill_color never dangles") {
 }
 
 TEST_CASE("JSONC with non-string values reports an error instead of crashing") {
-    CHECK(translateJsonc(R"({"items":[{"name": 5}]})", "t.jsonc").empty());
-    CHECK(translateJsonc(R"({"items":[{"name":"a","bracket":[1,2]}]})", "t.jsonc").empty());
-    CHECK(translateJsonc(R"({"items":[{"name":"a","subscribe":[7]}]})", "t.jsonc").empty());
-    CHECK(translateJsonc(R"({"items":[{"name":"a","position":3}]})", "t.jsonc").empty());
+    CHECK(ybar::app::translateJsonc(R"({"items":[{"name": 5}]})", "t.jsonc").empty());
+    CHECK(ybar::app::translateJsonc(R"({"items":[{"name":"a","bracket":[1,2]}]})", "t.jsonc").empty());
+    CHECK(ybar::app::translateJsonc(R"({"items":[{"name":"a","subscribe":[7]}]})", "t.jsonc").empty());
+    CHECK(ybar::app::translateJsonc(R"({"items":[{"name":"a","position":3}]})", "t.jsonc").empty());
 }
 
 // --- contract breaks ------------------------------------------------------
