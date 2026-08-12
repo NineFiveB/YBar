@@ -1003,6 +1003,27 @@ under `packaging/`, and a user-facing README covering install, themes, the
 komorebi contract, the event list, the Windows-specific behaviours, and a
 macOS-config porting table.
 
+**Second audit** (post-slice-10 code): a 76-agent adversarial pass — six
+dimension finders (COM/WinRT lifetimes, provider contract, windowing,
+animation/input state machines, daemon wiring, ship/verbs), two refuters per
+finding — confirmed 33 findings, all fixed: UAF-class races in the audio and
+media providers and the komorebi dedupe state, a dangling block-scoped bar
+animation context and a stack-local routed through the scheduler, the appbar
+registered with no callback message (every ABN_* lost) and repositioned to
+un-negotiated frames each frame, popups anchored to the wrong surface on
+mixed-width monitors and frozen at creation DPI, missing SetCapture on
+slider presses, `--trigger battery_change` also firing power_source_change,
+the reload-mid-song media replay missing, reserve changes never detaching
+komorebi, `ybar theme use` being write-only (config discovery now honors
+`current-theme` for the default instance; `ybar theme reset` clears it), the
+winget portable symlink breaking every exe-relative lookup, and more. A
+three-lens review of the fix commit itself then confirmed 8 regressions the
+fixes introduced (arm serialization, teardown orderings, drag-release
+consumption, `\\?\UNC\` path mangling, instance hijack via current-theme) —
+also fixed. One deliberate skip, now documented in place: slider hit-mapping
+clamps align slack while the emit side is unclamped, because the Swift
+reference has the identical asymmetry.
+
 **Remaining to macOS parity**:
 1. `WM_DISPLAYCHANGE` rebuilds and `WM_DPICHANGED` — built and unit-tested,
    but not exercised live: both need a display-topology change, which is too
@@ -1010,6 +1031,9 @@ macOS-config porting table.
 2. Sticky pinning across virtual desktops (documented as best-effort: true
    pinning needs an undocumented interface).
 3. Signing — the binary is unsigned, so SmartScreen warns on first run.
+4. Live re-verification of the provider paths after the audit rework (the
+   pre-audit build was verified on screen; the reworked audio/media/komorebi
+   internals are covered by CI tests only).
 
 Deliberate divergences (never 1:1): alias items (§10.6), per-item glass
 pills (§7.6), distributed-notification bindings (§9), THERMAL_STATE
