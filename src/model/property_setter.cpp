@@ -1,6 +1,9 @@
 #include "model/property_setter.h"
 
+#include <algorithm>
 #include <charconv>
+#include <cmath>
+#include <functional>
 #include <vector>
 
 namespace ybar::model {
@@ -34,6 +37,9 @@ std::optional<double> parseFloat(const std::string& value) {
     const char* end = begin + value.size();
     const auto [ptr, ec] = std::from_chars(begin, end, parsed);
     if (ec != std::errc() || ptr != end || value.empty()) return std::nullopt;
+    // from_chars accepts inf/nan; the reference requires a finite number
+    // (an infinite padding would poison layout).
+    if (!std::isfinite(parsed)) return std::nullopt;
     return parsed;
 }
 
@@ -82,6 +88,37 @@ Result setFloat(double& field, const std::string& value) {
         g_animation->scheduler->cancel(animationKey()); // direct set cancels
     }
     field = *parsed;
+    return ok;
+}
+
+// Non-animatable float leaf (reference treats clip/wrap_width as direct sets).
+// NEVER route a stack local through setFloat: the scheduler keeps the capture
+// alive and would write through a dangling reference every tick.
+Result setFloatDirect(double& field, const std::string& value, double minimum) {
+    const auto parsed = parseFloat(value);
+    if (!parsed) return errNumber(value);
+    if (g_animation && g_animation->scheduler) g_animation->scheduler->cancel(animationKey());
+    field = std::max(minimum, *parsed);
+    return ok;
+}
+
+// Animatable color leaf addressed through a setter closure — for fields that
+// live behind std::optional (gradient_color, graph.fill_color) and so have no
+// stable Color& to capture.
+Result setColorVia(Color current, const std::function<void(Color)>& apply,
+                   const std::string& value) {
+    const auto parsed = Color::parse(value);
+    if (!parsed) return errColor(value);
+    if (g_animation && g_animation->scheduler) {
+        if (g_animation->frames > 0) {
+            g_animation->scheduler->add(
+                animationKey(), g_animation->curve, g_animation->frames, current, *parsed,
+                [apply](const ybar::anim::AnimValue& v) { apply(std::get<Color>(v)); });
+            return ok;
+        }
+        g_animation->scheduler->cancel(animationKey());
+    }
+    apply(*parsed);
     return ok;
 }
 
@@ -138,8 +175,13 @@ Result setColor(Color& field, const Segments& segs, std::size_t at, const std::s
     return ok;
 }
 
-char parseAlignChar(const std::string& value, char fallback) {
-    return value.empty() ? fallback : value.front();
+// Align accepts only l/c/r (reference validates; an invalid align must not
+// silently reach layout).
+std::optional<char> parseAlignChar(const std::string& value) {
+    if (value.empty()) return std::nullopt;
+    const char first = value.front();
+    if (first == 'l' || first == 'c' || first == 'r') return first;
+    return std::nullopt;
 }
 
 Result setShadow(ShadowStyle& shadow, const Segments& segs, std::size_t at,
@@ -155,13 +197,15 @@ Result setShadow(ShadowStyle& shadow, const Segments& segs, std::size_t at,
 
 Result setBackground(BackgroundStyle& bg, const Segments& segs, std::size_t at,
                      const std::string& value, std::string_view fullPath) {
-    if (at >= segs.size()) return errUnknown(fullPath);
+    // Bare "background=" is an error, not an unknown property (reference).
+    if (at >= segs.size()) return "[!] background needs a sub-property";
     const auto key = segs[at];
     if (key == "drawing") return setBool(bg.drawing, value);
     if (key == "color") {
-        const auto result = setColor(bg.color, segs, at + 1, value, fullPath);
-        if (!result) bg.drawing = true; // setting color auto-enables drawing
-        return result;
+        // Reference enables drawing BEFORE parsing: even an invalid color
+        // leaves the background drawing.
+        bg.drawing = true;
+        return setColor(bg.color, segs, at + 1, value, fullPath);
     }
     if (key == "border_color") return setColor(bg.borderColor, segs, at + 1, value, fullPath);
     if (key == "border_width") return setFloat(bg.borderWidth, value);
@@ -173,20 +217,17 @@ Result setBackground(BackgroundStyle& bg, const Segments& segs, std::size_t at,
     if (key == "y_offset") return setFloat(bg.yOffset, value);
     if (key == "glass") return setBool(bg.glass, value);
     if (key == "gradient_color") {
-        Color color = bg.gradientColor.value_or(Color{});
-        const auto result = setColor(color, segs, at + 1, value, fullPath);
-        if (!result) {
-            bg.gradientColor = color;
-            bg.drawing = true; // gradient_color auto-enables drawing
-        }
+        // Whole-color only (reference rejects channel addressing here).
+        if (at + 1 != segs.size()) return errColor(value);
+        const auto result = setColorVia(bg.gradientColor.value_or(Color{}),
+                                        [&bg](Color c) { bg.gradientColor = c; }, value);
+        if (!result) bg.drawing = true; // gradient_color auto-enables drawing
         return result;
     }
     if (key == "gradient_angle") return setFloat(bg.gradientAngle, value);
     if (key == "clip") {
-        double parsed = 0;
-        const auto result = setFloat(parsed, value);
-        if (result) return result;
-        bg.clip = std::max(0.0, parsed);
+        const auto result = setFloatDirect(bg.clip, value, 0.0);
+        if (result) return "[!] invalid clip: " + value;
         return ok;
     }
     if (key == "image") {
@@ -203,11 +244,14 @@ Result setBackground(BackgroundStyle& bg, const Segments& segs, std::size_t at,
         }
         if (sub == "scale") {
             const auto parsed = parseFloat(value);
-            if (!parsed || *parsed <= 0) return errNumber(value);
+            if (!parsed || *parsed <= 0) return "[!] invalid image.scale: " + value;
             bg.imageScale = *parsed;
             return ok;
         }
-        if (sub == "drawing") return setBool(bg.imageDrawing, value);
+        if (sub == "drawing") {
+            const auto result = setBool(bg.imageDrawing, value);
+            return result ? Result("[!] invalid image.drawing: " + value) : ok;
+        }
         return ok; // background.image.<anything else> accepted-and-ignored
     }
     if (key == "shadow") return setShadow(bg.shadow, segs, at + 1, value, fullPath);
@@ -248,13 +292,13 @@ Result setText(TextPart& text, const Segments& segs, std::size_t at, const std::
     if (key == "y_offset") return setFloat(text.yOffset, value);
     if (key == "scroll_duration") {
         const auto parsed = parseInt(value);
-        if (!parsed || *parsed <= 0) return errNumber(value);
+        if (!parsed || *parsed <= 0) return "[!] invalid scroll_duration: " + value;
         text.scrollDuration = *parsed;
         return ok;
     }
     if (key == "max_chars") {
         const auto parsed = parseInt(value);
-        if (!parsed || *parsed < 0) return errNumber(value);
+        if (!parsed || *parsed < 0) return "[!] invalid max_chars: " + value;
         text.maxChars = *parsed;
         return ok;
     }
@@ -262,7 +306,12 @@ Result setText(TextPart& text, const Segments& segs, std::size_t at, const std::
         if (lower(value) == "dynamic") { text.customWidth = -1; return ok; }
         return setFloat(text.customWidth, value);
     }
-    if (key == "align") { text.align = parseAlignChar(value, 'l'); return ok; }
+    if (key == "align") {
+        const auto align = parseAlignChar(value);
+        if (!align) return "[!] invalid align: " + value;
+        text.align = *align;
+        return ok;
+    }
     if (key == "background") return setBackground(text.background, segs, at + 1, value, fullPath);
     if (key == "shadow") return setShadow(text.shadow, segs, at + 1, value, fullPath);
     return errUnknown(fullPath);
@@ -275,10 +324,12 @@ Result setGraph(Item& item, const Segments& segs, std::size_t at, const std::str
     const auto key = segs[at];
     if (key == "color") return setColor(item.graph->lineColor, segs, at + 1, value, fullPath);
     if (key == "fill_color") {
-        Color color = item.graph->fillColor.value_or(item.graph->effectiveFillColor());
-        const auto result = setColor(color, segs, at + 1, value, fullPath);
-        if (!result) item.graph->fillColor = color;
-        return result;
+        // Animates from the EFFECTIVE color (the derived 20%-alpha fill when
+        // unset), through a closure — the field lives behind an optional.
+        if (at + 1 != segs.size()) return errColor(value);
+        auto* graph = &*item.graph;
+        return setColorVia(graph->fillColor.value_or(graph->effectiveFillColor()),
+                           [graph](Color c) { graph->fillColor = c; }, value);
     }
     if (key == "line_width") return setFloat(item.graph->lineWidth, value);
     return errUnknown(fullPath);
@@ -376,14 +427,17 @@ Result setPopup(Item& item, const Segments& segs, std::size_t at, const std::str
     if (key == "drawing") return setBool(popup.isOpen, value);
     if (key == "horizontal") return setBool(popup.horizontal, value);
     if (key == "wrap_width") {
-        double parsed = 0;
-        const auto result = setFloat(parsed, value);
-        if (result) return result;
-        popup.wrapWidth = std::max(0.0, parsed);
+        const auto result = setFloatDirect(popup.wrapWidth, value, 0.0);
+        if (result) return "[!] invalid wrap_width: " + value;
         return ok;
     }
     if (key == "auto_close") return setBool(popup.autoClose, value);
-    if (key == "align") { popup.align = parseAlignChar(value, 'l'); return ok; }
+    if (key == "align") {
+        const auto align = parseAlignChar(value);
+        if (!align) return "[!] invalid align: " + value;
+        popup.align = *align;
+        return ok;
+    }
     if (key == "blur_radius") return setFloat(popup.blurRadius, value);
     if (key == "topmost") return ok; // accepted-and-ignored
     if (key == "height") return setFloat(popup.cellHeight, value);
@@ -416,7 +470,9 @@ Result setDisplay(Item& item, const std::string& value) {
         if (i == list.size() || list[i] == ',') {
             const std::string part = list.substr(start, i - start);
             start = i + 1;
-            if (part.empty()) return "[!] invalid display list: " + value;
+            // Empty components are dropped (reference splits and ignores
+            // them): "display=" and "1,2," are legal; mask 0 = all displays.
+            if (part.empty()) continue;
             const auto parsed = parseInt(part);
             if (!parsed || *parsed < 1 || *parsed > 32)
                 return "[!] invalid display list: " + value;
@@ -478,7 +534,7 @@ std::optional<std::string> PropertySetter::set(Item& item, std::string_view path
     if (key == "click_script") { item.clickScript = value; return std::nullopt; }
     if (key == "update_freq") {
         const auto parsed = parseInt(value);
-        if (!parsed || *parsed < 0) return errNumber(value);
+        if (!parsed || *parsed < 0) return "[!] invalid update_freq: " + value;
         item.updateFrequency = *parsed;
         item.routineCounter = 0;
         return std::nullopt;
@@ -487,7 +543,7 @@ std::optional<std::string> PropertySetter::set(Item& item, std::string_view path
         const auto v = lower(value);
         if (v == "when_shown") { item.updatePolicy = UpdatePolicy::WhenShown; return std::nullopt; }
         const auto parsed = parseBool(value);
-        if (!parsed) return errBool(value);
+        if (!parsed) return "[!] invalid updates: " + value;
         item.updatePolicy = *parsed ? UpdatePolicy::On : UpdatePolicy::Off;
         return std::nullopt;
     }
@@ -495,7 +551,12 @@ std::optional<std::string> PropertySetter::set(Item& item, std::string_view path
         if (lower(value) == "dynamic") { item.customWidth = -1; return std::nullopt; }
         return setFloat(item.customWidth, value);
     }
-    if (key == "align") { item.align = parseAlignChar(value, 'c'); return std::nullopt; }
+    if (key == "align") {
+        const auto align = parseAlignChar(value);
+        if (!align) return "[!] invalid align: " + value;
+        item.align = *align;
+        return std::nullopt;
+    }
     if (key == "y_offset") return setFloat(item.yOffset, value);
     if (key == "padding_left") return setFloat(item.paddingLeft, value);
     if (key == "padding_right") return setFloat(item.paddingRight, value);

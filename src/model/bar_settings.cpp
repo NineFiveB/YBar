@@ -135,6 +135,7 @@ std::optional<std::string> BarPropertySetter::set(BarSettings& s, std::string_vi
             if (i == value.size() || value[i] == ',') {
                 const std::string part = value.substr(start, i - start);
                 start = i + 1;
+                if (part.empty()) continue; // empty components are dropped
                 int parsed = 0;
                 const auto [ptr, ec] = std::from_chars(part.data(), part.data() + part.size(), parsed);
                 if (ec != std::errc() || ptr != part.data() + part.size() || parsed < 1)

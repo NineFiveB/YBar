@@ -8,7 +8,10 @@
 #include <windows.h>
 // clang-format on
 
+#include <aclapi.h>
+
 #include <cstring>
+#include <vector>
 
 #include "ipc/wire_format.h"
 
@@ -61,6 +64,39 @@ std::optional<std::vector<std::uint8_t>> recvFrame(SOCKET socket) {
     std::vector<std::uint8_t> payload(*length);
     if (*length > 0 && !recvExactly(socket, payload.data(), payload.size())) return std::nullopt;
     return payload;
+}
+
+// Restrict the socket file to the current user (spec 5.1: the macOS
+// chmod 0600 equivalent — this endpoint executes commands unauthenticated).
+void restrictToCurrentUser(const std::string& path) {
+    HANDLE token = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return;
+    DWORD size = 0;
+    GetTokenInformation(token, TokenUser, nullptr, 0, &size);
+    std::vector<BYTE> buffer(size);
+    if (size == 0 || !GetTokenInformation(token, TokenUser, buffer.data(), size, &size)) {
+        CloseHandle(token);
+        return;
+    }
+    auto* user = reinterpret_cast<TOKEN_USER*>(buffer.data());
+
+    EXPLICIT_ACCESSW access{};
+    access.grfAccessPermissions = GENERIC_ALL;
+    access.grfAccessMode = SET_ACCESS;
+    access.grfInheritance = NO_INHERITANCE;
+    access.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+    access.Trustee.TrusteeType = TRUSTEE_IS_USER;
+    access.Trustee.ptstrName = static_cast<LPWSTR>(user->User.Sid);
+
+    PACL acl = nullptr;
+    if (SetEntriesInAclW(1, &access, nullptr, &acl) == ERROR_SUCCESS && acl) {
+        const std::wstring widePath(path.begin(), path.end());
+        SetNamedSecurityInfoW(const_cast<LPWSTR>(widePath.c_str()), SE_FILE_OBJECT,
+                              DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                              nullptr, nullptr, acl, nullptr);
+        LocalFree(acl);
+    }
+    CloseHandle(token);
 }
 
 bool connectTo(SOCKET socket, const std::string& path) {
@@ -135,6 +171,22 @@ std::optional<std::string> rawQuery(const std::string& path, const std::string& 
 SocketServer::~SocketServer() { stop(); }
 
 std::optional<std::string> SocketServer::start(const std::string& path, Handler handler) {
+    if (const auto error = reserve(path)) return error;
+    serve(std::move(handler));
+    return std::nullopt;
+}
+
+void SocketServer::serve(Handler handler) {
+    if (listenSocket_ == static_cast<std::uintptr_t>(~0ull) || running_) return;
+    handler_ = std::move(handler);
+    running_ = true;
+    thread_ = std::thread([this] {
+        SetThreadDescription(GetCurrentThread(), L"ybar-ipc"); // spec 3.1
+        acceptLoop();
+    });
+}
+
+std::optional<std::string> SocketServer::reserve(const std::string& path) {
     if (!ensureWinsock()) return "[!] could not bind socket at " + path;
 
     // Instance lock: a live daemon answers --ping; a stale file is deleted.
@@ -164,18 +216,19 @@ std::optional<std::string> SocketServer::start(const std::string& path, Handler 
         return "[!] could not bind socket at " + path;
     }
 
+    restrictToCurrentUser(path);
+
     path_ = path;
-    handler_ = std::move(handler);
     listenSocket_ = static_cast<std::uintptr_t>(sock);
-    running_ = true;
-    thread_ = std::thread([this] { acceptLoop(); });
     return std::nullopt;
 }
 
 void SocketServer::stop() {
-    if (!running_.exchange(false)) return;
+    const bool wasRunning = running_.exchange(false);
+    if (listenSocket_ == static_cast<std::uintptr_t>(~0ull)) return;
     closesocket(static_cast<SOCKET>(listenSocket_)); // unblocks accept()
-    if (thread_.joinable()) thread_.join();
+    listenSocket_ = static_cast<std::uintptr_t>(~0ull);
+    if (wasRunning && thread_.joinable()) thread_.join();
     DeleteFileA(path_.c_str());
 }
 

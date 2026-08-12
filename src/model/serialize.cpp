@@ -169,12 +169,14 @@ std::string serializeBar(const BarSettings& s, const ItemStore& store) {
         {"border_width", s.borderWidth},
         {"corner_radius", s.cornerRadius},
         {"blur_radius", s.blurRadius},
-        {"hidden", onOff(s.hidden)},
+        // hidden/sticky/idle_inhibit are JSON booleans in the reference
+        // (unlike item-level "drawing", which is an on/off string).
+        {"hidden", s.hidden},
         {"topmost", s.topmost == BarLevel::Off      ? "off"
                     : s.topmost == BarLevel::Window ? "window"
                                                     : "on"},
-        {"sticky", onOff(s.sticky)},
-        {"idle_inhibit", onOff(s.idleInhibit)},
+        {"sticky", s.sticky},
+        {"idle_inhibit", s.idleInhibit},
         {"notch_width", s.notchWidth},
         {"notch_offset", s.notchOffset},
         {"notch_display_height", s.notchDisplayHeight},

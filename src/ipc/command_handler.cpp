@@ -83,14 +83,29 @@ std::string CommandHandler::handleBatch(const Batch& batch,
         return {};
     }
 
+    // Token loops emit errors and CONTINUE (reference behavior): one bad
+    // token must not discard the rest of the message.
+    const auto joinErrors = [](const std::vector<std::string>& errors) {
+        std::string joined;
+        for (std::size_t i = 0; i < errors.size(); ++i) {
+            if (i) joined += "\n";
+            joined += errors[i];
+        }
+        return joined;
+    };
+
     if (batch.domain == "bar") {
+        std::vector<std::string> errors;
         for (const auto& token : args) {
             const auto [key, value] = keyValue(token);
-            if (value.empty() && token.find('=') == std::string::npos)
-                return "[!] expected key=value, got: " + token;
-            if (const auto error = BarPropertySetter::set(settings_, key, value)) return *error;
+            if (value.empty() && token.find('=') == std::string::npos) {
+                errors.push_back("[!] expected key=value, got: " + token);
+                continue;
+            }
+            if (const auto error = BarPropertySetter::set(settings_, key, value))
+                errors.push_back(*error);
         }
-        return {};
+        return joinErrors(errors);
     }
 
     if (batch.domain == "default") {
@@ -98,22 +113,25 @@ std::string CommandHandler::handleBatch(const Batch& batch,
             store_.resetDefaults();
             return {};
         }
+        std::vector<std::string> errors;
         for (const auto& token : args) {
             const auto [key, value] = keyValue(token);
-            if (value.empty() && token.find('=') == std::string::npos)
-                return "[!] expected key=value, got: " + token;
+            if (value.empty() && token.find('=') == std::string::npos) {
+                errors.push_back("[!] expected key=value, got: " + token);
+                continue;
+            }
             // --default never animates (contract).
             if (const auto error = PropertySetter::set(store_.defaults(), key, value))
-                return *error;
+                errors.push_back(*error);
         }
-        return {};
+        return joinErrors(errors);
     }
 
     if (batch.domain == "add") {
         if (args.empty()) return "[!] --add needs a type";
         const auto& kind = args[0];
         if (kind == "item") {
-            if (args.size() != 3) return "[!] usage: --add item <name> <position>";
+            if (args.size() < 3) return "[!] usage: --add item <name> <position>";
             const auto position = parseAddPosition(args[2]);
             if (!position) return "[!] invalid position or duplicate name: " + args[1] + " " + args[2];
             auto* item = store_.add(args[1], position->position);
@@ -128,26 +146,35 @@ std::string CommandHandler::handleBatch(const Batch& batch,
             return {};
         }
         if (kind == "graph") {
-            if (args.size() != 4) return "[!] usage: --add graph <name> <position> <width> (1...8192)";
+            if (args.size() < 4) return "[!] usage: --add graph <name> <position> <width> (1...8192)";
             const auto position = parseAddPosition(args[2]);
             const auto width = parseInt(args[3]);
             if (!position || !width || *width < 1 || *width > 8192)
                 return "[!] usage: --add graph <name> <position> <width> (1...8192)";
+            // Duplicate name / missing popup host use the --add item wording.
+            const std::string duplicate =
+                "[!] invalid position or duplicate name: " + args[1] + " " + args[2];
+            if (position->position == ItemPosition::Popup && !store_.find(position->popupHost))
+                return duplicate;
             auto* item = store_.add(args[1], position->position, ItemKind::Graph);
-            if (!item) return "[!] usage: --add graph <name> <position> <width> (1...8192)";
+            if (!item) return duplicate;
             item->popupHost = position->popupHost;
             item->graph.emplace();
-            item->graph->capacity = *width;
+            item->graph->setCapacity(*width);
             return {};
         }
         if (kind == "slider") {
-            if (args.size() != 4) return "[!] usage: --add slider <name> <position> <width>";
+            if (args.size() < 4) return "[!] usage: --add slider <name> <position> <width>";
             const auto position = parseAddPosition(args[2]);
             const auto width = parseFloat(args[3]);
             if (!position || !width || *width <= 0)
                 return "[!] usage: --add slider <name> <position> <width>";
+            const std::string duplicate =
+                "[!] invalid position or duplicate name: " + args[1] + " " + args[2];
+            if (position->position == ItemPosition::Popup && !store_.find(position->popupHost))
+                return duplicate;
             auto* item = store_.add(args[1], position->position, ItemKind::Slider);
-            if (!item) return "[!] usage: --add slider <name> <position> <width>";
+            if (!item) return duplicate;
             item->popupHost = position->popupHost;
             item->slider.emplace();
             item->slider->width = *width;
@@ -158,7 +185,11 @@ std::string CommandHandler::handleBatch(const Batch& batch,
             std::vector<std::string> members(args.begin() + 2, args.end());
             std::string unknown;
             for (const auto& member : members) {
-                if (store_.matching(member).empty()) {
+                // A /regex/ member is legal even when it matches nothing today
+                // — members re-expand dynamically (reference behavior).
+                const bool isRegex = member.size() > 2 && member.front() == '/' &&
+                                     member.back() == '/';
+                if (!isRegex && store_.matching(member).empty()) {
                     if (!unknown.empty()) unknown += ", ";
                     unknown += member;
                 }
@@ -185,11 +216,14 @@ std::string CommandHandler::handleBatch(const Batch& batch,
         if (args.empty()) return "[!] --set needs an item name";
         const auto matches = store_.matching(args[0]);
         if (matches.empty()) return "[!] no item matching " + args[0];
+        std::vector<std::string> errors;
         for (std::size_t i = 1; i < args.size(); ++i) {
             const auto& token = args[i];
             const auto [key, value] = keyValue(token);
-            if (value.empty() && token.find('=') == std::string::npos)
-                return "[!] expected key=value, got: " + token;
+            if (value.empty() && token.find('=') == std::string::npos) {
+                errors.push_back("[!] expected key=value, got: " + token);
+                continue;
+            }
             for (auto* item : matches) {
                 if (scheduler_) {
                     PropertySetter::AnimationContext context;
@@ -203,20 +237,22 @@ std::string CommandHandler::handleBatch(const Batch& batch,
                 }
                 const auto error = PropertySetter::set(*item, key, value);
                 if (scheduler_) PropertySetter::endAnimation();
-                if (error) return *error;
+                if (error) errors.push_back(*error);
             }
         }
-        return {};
+        return joinErrors(errors);
     }
 
     if (batch.domain == "subscribe") {
         if (args.empty()) return "[!] --subscribe needs an item name";
         auto* item = store_.find(args[0]);
         if (!item) return "[!] no item named " + args[0];
+        std::vector<std::string> errors;
         for (std::size_t i = 1; i < args.size(); ++i) {
-            if (!bus_.subscribe(*item, args[i])) return "[!] unknown event: " + args[i];
+            if (!bus_.subscribe(*item, args[i]))
+                errors.push_back("[!] unknown event: " + args[i]);
         }
-        return {};
+        return joinErrors(errors);
     }
 
     if (batch.domain == "trigger") {
@@ -226,6 +262,9 @@ std::string CommandHandler::handleBatch(const Batch& batch,
         Environment extra;
         std::string info;
         for (std::size_t i = 1; i < args.size(); ++i) {
+            // Tokens without '=' are skipped (reference), not injected as
+            // KEY="" env entries.
+            if (args[i].find('=') == std::string::npos) continue;
             const auto [key, value] = keyValue(args[i]);
             if (key == "INFO") info = value;
             extra[key] = value;
@@ -248,7 +287,7 @@ std::string CommandHandler::handleBatch(const Batch& batch,
     }
 
     if (batch.domain == "query") {
-        if (args.size() != 1) return "[!] --query needs a target";
+        if (args.empty()) return "[!] --query needs a target";
         const auto& target = args[0];
         if (target == "bar") return ybar::model::serializeBar(settings_, store_);
         if (target == "defaults") return ybar::model::serializeDefaults(store_.defaults());
@@ -275,7 +314,7 @@ std::string CommandHandler::handleBatch(const Batch& batch,
     }
 
     if (batch.domain == "remove") {
-        if (args.size() != 1) return "[!] --remove needs an item name";
+        if (args.empty()) return "[!] --remove needs an item name";
         if (scheduler_) { // in-flight animations must not touch freed fields
             for (const auto* item : store_.matching(args[0]))
                 scheduler_->cancelPrefix("item." + std::to_string(item->id) + ".");
@@ -293,7 +332,8 @@ std::string CommandHandler::handleBatch(const Batch& batch,
     }
 
     if (batch.domain == "reorder") {
-        if (!store_.reorder(args)) return "[!] could not reorder (unknown names?)";
+        if (args.empty() || !store_.reorder(args))
+            return "[!] could not reorder (unknown names?)";
         return {};
     }
 
@@ -304,23 +344,27 @@ std::string CommandHandler::handleBatch(const Batch& batch,
     }
 
     if (batch.domain == "clone") {
-        if (args.size() < 2 || args.size() > 3)
-            return "[!] usage: --clone <new-name> <source> [before|after]";
-        const bool before = args.size() == 3 && args[2] == "before";
-        if (args.size() == 3 && args[2] != "before" && args[2] != "after")
-            return "[!] usage: --clone <new-name> <source> [before|after]";
-        if (!store_.clone(args[0], args[1], before)) return "[!] could not clone " + args[1];
+        if (args.size() < 2) return "[!] usage: --clone <new-name> <source> [before|after]";
+        // Any third token other than "before" means "after" (reference); with
+        // no placement token the copy appends at the end.
+        const auto placement = args.size() >= 3
+                                   ? (args[2] == "before" ? ItemStore::Placement::Before
+                                                          : ItemStore::Placement::After)
+                                   : ItemStore::Placement::Append;
+        if (!store_.clone(args[0], args[1], placement))
+            return "[!] could not clone " + args[1];
         return {};
     }
 
     if (batch.domain == "reload") {
         if (scheduler_) scheduler_->cancelAll();
-        if (hooks_.reload) hooks_.reload();
+        // --reload [path] re-points the config (spec 3.2).
+        if (hooks_.reload) hooks_.reload(args.empty() ? std::string() : args[0]);
         return {};
     }
 
     if (batch.domain == "hotload") {
-        if (args.size() != 1) return "[!] usage: --hotload <on|off>";
+        if (args.empty()) return "[!] usage: --hotload <on|off>";
         const auto parsed = PropertySetter::parseBool(args[0]);
         if (!parsed) return "[!] usage: --hotload <on|off>";
         if (hooks_.setHotload) hooks_.setHotload(*parsed);

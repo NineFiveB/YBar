@@ -1,6 +1,7 @@
 find_package(Catch2 3 CONFIG REQUIRED)
 
 add_executable(ybar_tests
+  audit_regression_tests.cpp
   color_tests.cpp
   command_handler_tests.cpp
   command_parser_tests.cpp

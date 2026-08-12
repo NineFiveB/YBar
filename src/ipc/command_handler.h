@@ -25,7 +25,7 @@ namespace ybar::ipc {
 
 struct DaemonHooks {
     std::function<void()> setNeedsRender;
-    std::function<void()> reload;
+    std::function<void(const std::string&)> reload; // optional explicit path
     std::function<void(bool)> setHotload;
     std::function<void()> exit;
     std::function<void()> forcedUpdate; // provider re-queries after --update

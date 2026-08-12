@@ -89,8 +89,12 @@ void EventBus::trigger(std::string_view eventName, const std::string& info,
 
 void EventBus::triggerTargeted(Item& item, std::string_view eventName, const std::string& info,
                                const Environment& extraEnvironment) {
-    // Mouse events bypass the updates-policy gate deliberately (spec 3.4).
+    // Mouse events bypass the updates-POLICY gate, but the subscription mask
+    // still governs delivery (spec 3.4) — otherwise every scripted item fires
+    // on any hover/click.
     if (!runItemScript) return;
+    const auto bit = eventBit(eventName);
+    if (!bit || !(item.updateMask & *bit)) return;
     if (item.script.empty() && !item.hasLuaHandlers) return;
     runItemScript(item, merged(extraEnvironment, item, eventName, info));
 }

@@ -48,8 +48,14 @@ public:
     // Send one raw SocketMessage JSON to komorebi (click commands, --komorebi).
     static bool sendMessage(const std::string& json);
 
+    // Re-queries komorebi and publishes an update (forced-query path for
+    // `ybar --trigger komorebi_workspace_change`, spec 11.3).
+    bool refresh();
+
 private:
     void readerLoop();
+    void reregister();
+    void publishState(const std::string& notificationOrState);
 
     std::string subscriberPath_;
     std::string subscriberName_;
@@ -58,6 +64,8 @@ private:
     std::atomic<bool> running_{false};
     std::string lastFocused_;
     int monitorCount_ = 1;
+    bool monitorCountKnown_ = false;
+    int appliedOffset_ = 0;
 };
 
 } // namespace ybar::providers

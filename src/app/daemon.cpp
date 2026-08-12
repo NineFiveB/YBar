@@ -243,16 +243,19 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
         }
         case WM_TIMER:
             if (wParam == kRoutineTimer && g_state) {
+                // Gate BEFORE incrementing (reference ordering): policy-off or
+                // hidden items must not advance their counters, or re-enabling
+                // fires at a different phase.
                 for (const auto& item : g_state->store.items()) {
                     if (item->updateFrequency <= 0) continue;
-                    if (++item->routineCounter < item->updateFrequency) continue;
-                    item->routineCounter = 0;
+                    if (item->script.empty() && !item->hasLuaHandlers) continue;
                     if (item->updatePolicy == ybar::model::UpdatePolicy::Off) continue;
                     if (item->updatePolicy == ybar::model::UpdatePolicy::WhenShown &&
                         !item->drawing)
                         continue;
-                    if (g_state->bus.runItemScript &&
-                        (!item->script.empty() || item->hasLuaHandlers)) {
+                    if (++item->routineCounter < item->updateFrequency) continue;
+                    item->routineCounter = 0;
+                    if (g_state->bus.runItemScript) {
                         g_state->bus.runItemScript(
                             *item, {{"NAME", item->name}, {"SENDER", "routine"}, {"INFO", ""}});
                     }
@@ -336,7 +339,12 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             if (g_state && g_state->fonts) g_state->fonts->clear();
             return 0;
         case WM_ENDSESSION:
-            if (wParam) PostQuitMessage(0);
+            if (wParam) {
+                // Same cleanup as --exit: never leave a reserved strip behind.
+                if (g_state && g_state->komorebi) g_state->komorebi->clearWorkAreaOffset();
+                if (g_state && g_state->ytile) g_state->ytile->clearWorkAreaOffset();
+                PostQuitMessage(0);
+            }
             return 0;
         default:
             return DefWindowProcW(hwnd, msg, wParam, lParam);
@@ -503,12 +511,14 @@ void DaemonState::dispatchClick(ybar::model::Item& item, const char* button,
     const std::string info = std::string("{\"button\":\"") + button + "\",\"modifier\":\"" +
                              modifier + "\"}";
     ybar::events::Environment extra{{"BUTTON", button}, {"MODIFIER", modifier}};
-    bus.triggerTargeted(item, "mouse.clicked", info, extra);
+    // click_script runs FIRST, then the event (reference ordering).
     if (!item.clickScript.empty()) {
-        extra["NAME"] = item.name;
-        extra["INFO"] = info;
-        scripts.run(item.clickScript, extra);
+        auto scriptEnv = extra;
+        scriptEnv["NAME"] = item.name;
+        scriptEnv["INFO"] = info;
+        scripts.run(item.clickScript, scriptEnv);
     }
+    bus.triggerTargeted(item, "mouse.clicked", info, extra);
 }
 
 void DaemonState::closeAutoClosePopups(int exceptHostId) {
@@ -619,7 +629,13 @@ void DaemonState::updatePopups() {
         const auto layout = ybar::model::layoutPopup(members, host->popup, measure);
         auto scene = ybar::render::buildPopupScene(members, layout.contentBoxes, host->popup,
                                                    layout.panelSize, scale, *fonts, *atlas);
-        if (scene.empty()) continue;
+        if (scene.empty()) { // never leave a stale, still-clickable panel
+            if (liveIt != popups.end()) {
+                liveIt->second.surface->hide();
+                popups.erase(liveIt);
+            }
+            continue;
+        }
 
         if (liveIt == popups.end()) {
             auto surface = ybar::win::PopupSurface::create(*renderer, scale);
@@ -654,7 +670,12 @@ void DaemonState::updatePopups() {
         live.surface->present(layout.panelSize, anchor, host->popup.align,
                               settings.position == ybar::model::BarPosition::Top,
                               host->popup.yOffset);
-        renderer->render(scene, live.surface->renderSurface(), atlas);
+        // A panel counts as live only once its scene actually rendered.
+        if (!renderer->render(scene, live.surface->renderSurface(), atlas)) {
+            live.surface->hide();
+            popups.erase(liveIt);
+            SetTimer(messageWindow, kRenderRetryTimer, 1000, nullptr);
+        }
     }
 }
 
@@ -732,6 +753,17 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
         return 1;
     }
 
+    // Instance lock FIRST (spec 5): a second launch must fail before it can
+    // create windows or touch shared provider state — otherwise it deletes
+    // and re-registers the live instance's komorebi subscriber socket.
+    ybar::ipc::SocketServer server;
+    const auto socketPath = ybar::ipc::socketPath(instance);
+    if (const auto error = server.reserve(socketPath)) {
+        std::fprintf(stderr, "%s\n", error->c_str());
+        return 1;
+    }
+    trace("instance lock: acquired");
+
     // GPU stack — graceful degradation to headless when unavailable.
     trace("renderer: create");
     state.renderer = ybar::render::Renderer::create(exeDirectory() + "\\shaders\\ybar.hlsl");
@@ -769,15 +801,22 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     // bypassing the updates policy (spec 3.4, 6).
     for (auto& surface : state.surfaces) {
         surface->setMouseHandler([&state](const ybar::win::MouseEvent& event) {
+            // Two-pass hit test (spec 3.9): non-bracket members win; a
+            // bracket is hit only where no member covers the point.
             auto hitTest = [&state](double x, double y) -> ybar::model::Item* {
                 const auto& items = state.store.items();
+                ybar::model::Item* bracket = nullptr;
                 for (auto it = items.rbegin(); it != items.rend(); ++it) {
                     auto* item = it->get();
-                    if (item->kind == ybar::model::ItemKind::Bracket) continue;
                     if (item->position == ybar::model::ItemPosition::Popup) continue;
-                    if (!item->frame.isZero() && item->frame.contains({x, y})) return item;
+                    if (item->frame.isZero() || !item->frame.contains({x, y})) continue;
+                    if (item->kind == ybar::model::ItemKind::Bracket) {
+                        if (!bracket) bracket = item;
+                        continue;
+                    }
+                    return item;
                 }
-                return nullptr;
+                return bracket;
             };
             using Kind = ybar::win::MouseEvent::Kind;
             auto* item = event.kind == Kind::Leave ? nullptr : hitTest(event.x, event.y);
@@ -804,13 +843,16 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
                 }
                 state.hoverItemId = hoverId;
             }
+
+            // A press ANYWHERE on the bar — including empty space — closes
+            // auto-close popups except the pressed host's (spec 3.9).
+            if (event.kind == Kind::Down) {
+                state.closeAutoClosePopups(item ? item->id : -1);
+                return;
+            }
             if (!item) return;
 
-            if (event.kind == Kind::Down) {
-                // Press on the bar closes auto-close popups except the
-                // pressed host's (spec 3.9).
-                state.closeAutoClosePopups(item->id);
-            } else if (event.kind == Kind::Up) { // clicks fire on mouse-UP (spec 3.5)
+            if (event.kind == Kind::Up) { // clicks fire on mouse-UP (spec 3.5)
                 state.dispatchClick(*item, event.button, event.modifier);
             } else if (event.kind == Kind::Scroll) {
                 state.bus.triggerTargeted(*item, "mouse.scrolled", "",
@@ -891,8 +933,10 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
         return ybar::providers::KomorebiProvider::detect() &&
                ybar::providers::KomorebiProvider::sendMessage(jsonText);
     };
-    hooks.reload = [hwnd = state.messageWindow] {
-        PostMessageW(hwnd, kMsgReloadConfig, 0, 0);
+    hooks.reload = [&state](const std::string& explicitPath) {
+        // --reload [path] re-points the config before the teardown re-run.
+        if (!explicitPath.empty()) state.explicitConfigPath = explicitPath;
+        PostMessageW(state.messageWindow, kMsgReloadConfig, 0, 0);
     };
     hooks.setHotload = [&state](bool enabled) {
         state.hotload.setEnabled(enabled, state.resolvedConfigPath);
@@ -922,6 +966,13 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
                               std::to_string(ybar::win::enumerateMonitors().size()));
             return true;
         }
+        // Workspace re-query: the boot-population idiom every workspaces
+        // widget uses (spec 11.3) — replays FOCUSED_WORKSPACE from live state.
+        if (event == "komorebi_workspace_change" || event == "ytile_workspace_change") {
+            if (state.komorebi) return state.komorebi->refresh();
+            if (state.ytile) return state.ytile->refresh();
+            return false;
+        }
         return false;
     };
     hooks.setNeedsRender = [&state] {
@@ -944,22 +995,21 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     state.lua = std::make_unique<ybar::lua::LuaRuntime>(state.store, state.bus, *state.handler,
                                                         state.scripts, state.messageWindow);
 
-    ybar::ipc::SocketServer server;
-    const auto socketPath = ybar::ipc::socketPath(instance);
-    const auto error = server.start(socketPath, [hwnd = state.messageWindow](
-                                                    const std::vector<std::string>& argv) {
+    // The socket is already bound (instance lock); start serving it now that
+    // the handler exists.
+    server.serve([hwnd = state.messageWindow](const std::vector<std::string>& argv) {
         auto request = std::make_unique<IpcRequest>();
         request->argv = argv;
         auto future = request->reply.get_future();
         if (!PostMessageW(hwnd, kMsgIpcRequest, 0, reinterpret_cast<LPARAM>(request.get())))
             return std::string();
         request.release(); // UI thread owns it now and deletes after replying
+        // Bounded wait (spec 5): a wedged UI thread must not wedge the serial
+        // accept loop for every client.
+        if (future.wait_for(std::chrono::seconds(2)) != std::future_status::ready)
+            return std::string();
         return future.get();
     });
-    if (error) {
-        std::fprintf(stderr, "%s\n", error->c_str());
-        return 1;
-    }
 
     SetTimer(state.messageWindow, kRoutineTimer, 1000, nullptr);
     state.executeConfig();

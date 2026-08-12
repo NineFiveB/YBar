@@ -90,7 +90,28 @@ std::string sanitizeJsonc(const std::string& text) {
     return out;
 }
 
+namespace {
+
+std::vector<CommandBatch> translateChecked(const std::string& text,
+                                           const std::string& filename);
+
+} // namespace
+
 std::vector<CommandBatch> translateJsonc(const std::string& text, const std::string& filename) {
+    // Belt and braces: the per-field type guards below cover every documented
+    // shape, but a config must never be able to terminate the daemon.
+    try {
+        return translateChecked(text, filename);
+    } catch (const json::exception& error) {
+        warn(filename, std::string("parse error: ") + error.what());
+        return {};
+    }
+}
+
+namespace {
+
+std::vector<CommandBatch> translateChecked(const std::string& text,
+                                           const std::string& filename) {
     std::vector<CommandBatch> batches;
     json root;
     try {
@@ -147,9 +168,17 @@ std::vector<CommandBatch> translateJsonc(const std::string& text, const std::str
                 warn(filename, context + " must be an object");
                 return {};
             }
-            const std::string name = item.value("name", std::string());
-            if (name.empty()) {
+            // Every accessor below is type-guarded: a non-string "name" or a
+            // numeric bracket member must produce the reference's error line,
+            // never an nlohmann type_error escaping into the daemon.
+            if (!item.contains("name") || !item["name"].is_string() ||
+                item["name"].get<std::string>().empty()) {
                 warn(filename, context + " needs a \"name\"");
+                return {};
+            }
+            const std::string name = item["name"].get<std::string>();
+            if (item.contains("position") && !item["position"].is_string()) {
+                warn(filename, context + ".position must be a string");
                 return {};
             }
             if (item.contains("bracket")) {
@@ -158,11 +187,20 @@ std::vector<CommandBatch> translateJsonc(const std::string& text, const std::str
                     return {};
                 }
                 CommandBatch batch{"--add", "bracket", name};
-                for (const auto& member : item["bracket"])
+                for (const auto& member : item["bracket"]) {
+                    if (!member.is_string()) {
+                        warn(filename,
+                             context + ".bracket must be a non-empty array of member names");
+                        return {};
+                    }
                     batch.push_back(member.get<std::string>());
+                }
                 batches.push_back(std::move(batch));
             } else {
-                batches.push_back({"--add", "item", name, item.value("position", "left")});
+                batches.push_back({"--add", "item", name,
+                                   item.contains("position")
+                                       ? item["position"].get<std::string>()
+                                       : std::string("left")});
             }
             if (item.contains("props")) {
                 if (!item["props"].is_object()) {
@@ -179,8 +217,14 @@ std::vector<CommandBatch> translateJsonc(const std::string& text, const std::str
                     return {};
                 }
                 CommandBatch batch{"--subscribe", name};
-                for (const auto& event : item["subscribe"])
+                for (const auto& event : item["subscribe"]) {
+                    if (!event.is_string()) {
+                        warn(filename,
+                             context + ".subscribe must be a non-empty array of event names");
+                        return {};
+                    }
                     batch.push_back(event.get<std::string>());
+                }
                 batches.push_back(std::move(batch));
             }
             for (const auto& [key, value] : item.items()) {
@@ -208,5 +252,7 @@ std::vector<CommandBatch> translateJsonc(const std::string& text, const std::str
     if (!batches.empty()) batches.push_back({"--update"}); // boot population
     return batches;
 }
+
+} // namespace
 
 } // namespace ybar::app

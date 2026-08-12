@@ -117,7 +117,7 @@ TEST_CASE("invisible items and brackets take zero space") {
 TEST_CASE("graph natural length is capacity plus label (the sandwich)") {
     auto item = makeItem("g", ItemPosition::Left);
     item->graph.emplace();
-    item->graph->capacity = 60;
+    item->graph->setCapacity(60);
     item->icon.drawing = false;
     const auto m = fixedMeasure(*item);
     CHECK(naturalLength(*item, m) == 70); // 60 capacity + 10 label

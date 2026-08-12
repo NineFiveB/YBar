@@ -14,6 +14,9 @@ struct Measured {
 };
 
 Measured measureMember(Item* item, const Measure& measure) {
+    // A member with drawing=off contributes nothing at all (matching bar
+    // layout, where invisible items get zero frames) — not a separator row.
+    if (!item->drawing) return Measured{item, 0, 0, true};
     const auto m = measure(*item);
     Measured result{item, contentLength(*item, m),
                     std::max(item->icon.drawing ? m.icon.height : 0.0,

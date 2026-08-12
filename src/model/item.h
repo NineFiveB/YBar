@@ -87,7 +87,11 @@ public:
     bool move(std::string_view name, bool before, std::string_view anchor);
     bool reorder(const std::vector<std::string>& names);
     bool rename(std::string_view oldName, std::string_view newName);
-    Item* clone(const std::string& newName, std::string_view source, bool before);
+
+    // Append = end of the list (the 2-arg --clone form); Before/After place
+    // the copy adjacent to the source.
+    enum class Placement { Append, Before, After };
+    Item* clone(const std::string& newName, std::string_view source, Placement placement);
 
     Item& defaults() { return *defaults_; }
     void resetDefaults();

@@ -355,7 +355,9 @@ struct Trampolines {
         const char* name = argCString(L, 1);
         if (!name || lua_type(L, 2) != LUA_TTABLE) return 0;
         std::vector<std::string> tokens{"--push", name};
-        const lua_Integer count = luaL_len(L, 2);
+        // lua_rawlen, never luaL_len: the latter can raise through a __len
+        // metamethod, and a longjmp across this C++ frame is UB (spec 3.7).
+        const auto count = static_cast<lua_Integer>(lua_rawlen(L, 2));
         for (lua_Integer i = 1; i <= count; ++i) {
             lua_rawgeti(L, 2, i);
             if (lua_type(L, -1) == LUA_TNUMBER) {
@@ -385,7 +387,12 @@ struct Trampolines {
     }
 
     static int update(lua_State*) {
-        handleTokens({"--update"});
+        // Lua handlers only ("forced", falling back to "routine") — no shell
+        // scripts and no provider re-queries, unlike the CLI --update.
+        for (const auto& item : rt().store_.items()) {
+            if (!item->hasLuaHandlers) continue;
+            rt().handleEvent(*item, {{"NAME", item->name}, {"SENDER", "forced"}, {"INFO", ""}});
+        }
         return 0;
     }
 
@@ -577,8 +584,9 @@ void LuaRuntime::spawnExec(const std::string& command, int ref) {
     const int generation = generation_;
     const HWND hwnd = static_cast<HWND>(messageWindow_);
     const std::wstring commandLine = scripts_.commandLineFor(command);
+    const std::vector<wchar_t> environmentBlock = scripts_.environmentBlock({});
 
-    std::thread([hwnd, generation, ref, commandLine] {
+    std::thread([hwnd, generation, ref, commandLine, environmentBlock] {
         auto* result = new ExecResult{ref, generation, {}, -1};
 
         SECURITY_ATTRIBUTES security{sizeof(security), nullptr, TRUE};
@@ -593,8 +601,13 @@ void LuaRuntime::spawnExec(const std::string& command, int ref) {
             PROCESS_INFORMATION process{};
             std::vector<wchar_t> mutableCmd(commandLine.begin(), commandLine.end());
             mutableCmd.push_back(L'\0');
+            // Same PATH augmentation as shell scripts: config code calls
+            // `ybar` back, which may not be on the inherited PATH.
+            std::vector<wchar_t> block = environmentBlock;
             if (CreateProcessW(nullptr, mutableCmd.data(), nullptr, nullptr, TRUE,
-                               CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process)) {
+                               CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
+                               block.empty() ? nullptr : block.data(), nullptr, &startup,
+                               &process)) {
                 CloseHandle(writeEnd);
                 writeEnd = nullptr;
                 // Drain CONCURRENTLY with the child: reading after exit
@@ -644,8 +657,10 @@ void LuaRuntime::scheduleDelay(double seconds, int ref) {
     }
     const std::uintptr_t timerId = nextDelayId_++;
     delays_[timerId] = {ref, generation_};
+    // Clamp: a negative interval wraps UINT into a ~49-day timer.
+    const double milliseconds = std::max(0.0, seconds * 1000.0);
     SetTimer(static_cast<HWND>(messageWindow_), timerId,
-             static_cast<UINT>(seconds * 1000.0), nullptr);
+             static_cast<UINT>(std::min(milliseconds, 4294967294.0)), nullptr);
 }
 
 bool LuaRuntime::onTimer(std::uintptr_t timerId) {

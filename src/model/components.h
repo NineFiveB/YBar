@@ -16,10 +16,19 @@ namespace ybar::model {
 
 struct GraphState {
     int capacity = 60; // == width in points (sample_width = 1)
-    std::deque<double> samples;
+    // Pre-filled with `capacity` zeros: the reference ring always yields a
+    // full-width series, so a fresh graph draws a flat baseline rather than a
+    // growing partial polyline.
+    std::deque<double> samples = std::deque<double>(60, 0.0);
     Color lineColor{0xffffffff};
     std::optional<Color> fillColor; // unset -> lineColor at 20% alpha
     double lineWidth = 1.0;
+
+    // Resizes the ring in place (--add graph <width> after construction).
+    void setCapacity(int newCapacity) {
+        capacity = newCapacity;
+        samples.assign(static_cast<std::size_t>(std::max(newCapacity, 0)), 0.0);
+    }
 
     void push(double value) {
         samples.push_back(std::clamp(value, 0.0, 1.0));

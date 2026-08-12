@@ -148,9 +148,11 @@ void emitSlider(DisplayList& list, const ybar::model::SliderState& slider, const
     }
     if (slider.knob.drawing && !slider.knob.string.empty()) {
         const auto& line = fonts.shape(slider.knob.displayString(), slider.knob.font);
-        const double knobX =
-            std::clamp(track.x + track.width * fraction - line.width / 2, track.x,
-                       track.maxX() - line.width);
+        // std::clamp's precondition fails when the knob is wider than the
+        // track (hi < lo, UB): fall back to the track origin in that case.
+        const double desired = track.x + track.width * fraction - line.width / 2;
+        const double hi = track.maxX() - line.width;
+        const double knobX = hi > track.x ? std::clamp(desired, track.x, hi) : track.x;
         const double baselineY =
             box.midY() - slider.knob.yOffset + (line.ascent - line.descent) / 2;
         emitText(list, line, knobX - line.inkMinX, baselineY, slider.knob.color, scale, atlas);

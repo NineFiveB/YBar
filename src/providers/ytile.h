@@ -42,6 +42,9 @@ public:
     void applyWorkAreaOffset(int barHeightPhysical);
     void clearWorkAreaOffset();
 
+    // Forced re-query (spec 11.3 boot-population idiom).
+    bool refresh();
+
     // One-shot request/reply on its own connection (the server allows
     // concurrent instances). Returns false if the daemon is unreachable.
     static bool sendCommand(const std::string& cmd, const std::string& arg,

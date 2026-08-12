@@ -162,6 +162,20 @@ void YTileProvider::handleState(const std::string& stateJson) {
     }
 }
 
+bool YTileProvider::refresh() {
+    std::string reply;
+    if (!sendCommand("state", "", &reply)) return false;
+    try {
+        const auto parsed = json::parse(reply);
+        if (!parsed.contains("state")) return false;
+        lastFocused_.clear(); // forced re-query always republishes
+        handleState(parsed.at("state").dump());
+        return true;
+    } catch (const json::exception&) {
+        return false;
+    }
+}
+
 void YTileProvider::applyWorkAreaOffset(int barHeightPhysical) {
     for (int i = 0; i < monitorCount_; ++i) {
         sendCommand("reserve",

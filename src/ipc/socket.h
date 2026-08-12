@@ -41,8 +41,16 @@ public:
     // thread inside this callback and returns the reply.
     using Handler = std::function<std::string(const std::vector<std::string>&)>;
 
-    // Returns an error string on failure ("[!] another ybar daemon is already
-    // running (socket: <path>)", "[!] could not bind socket at <path>").
+    // Binds the socket and claims the instance lock — call FIRST at boot, so a
+    // second launch fails before touching shared state (spec 5). Returns an
+    // error string on failure ("[!] another ybar daemon is already running
+    // (socket: <path>)", "[!] could not bind socket at <path>").
+    std::optional<std::string> reserve(const std::string& path);
+
+    // Starts the accept loop on an already-reserved socket.
+    void serve(Handler handler);
+
+    // reserve() + serve() in one call (tests).
     std::optional<std::string> start(const std::string& path, Handler handler);
     void stop();
 

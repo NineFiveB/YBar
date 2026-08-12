@@ -7,6 +7,7 @@
 // clang-format on
 
 #include <cstdlib>
+#include <thread>
 #include <vector>
 
 namespace ybar::app {
@@ -107,10 +108,10 @@ void ScriptRunner::runFile(const std::string& path,
     spawn(commandLine, env);
 }
 
-void ScriptRunner::spawn(const std::wstring& commandLine,
-                         const std::map<std::string, std::string>& env) {
-    // Environment block: parent env overlaid with base + event vars; PATH
-    // gets the ybar.exe directory prepended so scripts can call `ybar` back.
+std::vector<wchar_t> ScriptRunner::environmentBlock(
+    const std::map<std::string, std::string>& env) const {
+    // Parent env overlaid with base + event vars; PATH gets the ybar.exe
+    // directory prepended so scripts can call `ybar` back.
     std::map<std::wstring, std::wstring> merged;
     if (LPWCH parent = GetEnvironmentStringsW()) {
         for (LPWCH cursor = parent; *cursor;) {
@@ -136,6 +137,12 @@ void ScriptRunner::spawn(const std::wstring& commandLine,
         block.push_back(L'\0');
     }
     block.push_back(L'\0');
+    return block;
+}
+
+void ScriptRunner::spawn(const std::wstring& commandLine,
+                         const std::map<std::string, std::string>& env) {
+    std::vector<wchar_t> block = environmentBlock(env);
 
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
@@ -144,10 +151,31 @@ void ScriptRunner::spawn(const std::wstring& commandLine,
     mutableCmd.push_back(L'\0');
     const std::wstring cwd = widen(workingDirectory);
     if (CreateProcessW(nullptr, mutableCmd.data(), nullptr, nullptr, FALSE,
-                       CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT, block.data(),
-                       cwd.empty() ? nullptr : cwd.c_str(), &startup, &process)) {
-        CloseHandle(process.hThread);
-        CloseHandle(process.hProcess); // fire-and-forget
+                       CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED,
+                       block.data(), cwd.empty() ? nullptr : cwd.c_str(), &startup,
+                       &process)) {
+        // Job object: the 60 s watchdog kills the whole tree, fixing the
+        // latent "children of the shell survive" gap the spec calls out.
+        if (const HANDLE job = CreateJobObjectW(nullptr, nullptr)) {
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits,
+                                    sizeof(limits));
+            AssignProcessToJobObject(job, process.hProcess);
+            ResumeThread(process.hThread);
+            CloseHandle(process.hThread);
+            // Watchdog thread owns both handles; closing the job handle after
+            // the wait terminates any survivor (fire-and-forget otherwise).
+            std::thread([job, handle = process.hProcess] {
+                WaitForSingleObject(handle, 60000);
+                CloseHandle(job); // KILL_ON_JOB_CLOSE reaps stragglers
+                CloseHandle(handle);
+            }).detach();
+        } else {
+            ResumeThread(process.hThread);
+            CloseHandle(process.hThread);
+            CloseHandle(process.hProcess);
+        }
     }
 }
 

@@ -112,6 +112,25 @@ void KomorebiProvider::stop() {
     DeleteFileA(subscriberPath_.c_str());
 }
 
+void KomorebiProvider::reregister() {
+    // komorebi died or pruned us: retry every 1 s until it takes, then
+    // re-apply the offset and re-publish state (spec 11.3).
+    while (running_) {
+        const std::string registration =
+            json{{"type", "AddSubscriberSocketWithOptions"},
+                 {"content", json::array({subscriberName_, {{"filter_state_changes", true}}})}}
+                .dump();
+        if (sendMessage(registration)) {
+            if (appliedOffset_ > 0) applyWorkAreaOffset(appliedOffset_);
+            lastFocused_.clear(); // force the next state through the dedupe
+            if (const auto reply = ybar::ipc::rawQuery(komorebiSocket(), json{{"type", "State"}}.dump()))
+                publishState(*reply);
+            return;
+        }
+        Sleep(1000);
+    }
+}
+
 void KomorebiProvider::readerLoop() {
     // One notification per connection: accept -> read to EOF -> parse
     // (verified v0.1.41 framing, spec 11.1).
@@ -119,17 +138,7 @@ void KomorebiProvider::readerLoop() {
         const SOCKET connection = accept(static_cast<SOCKET>(listenSocket_), nullptr, nullptr);
         if (connection == INVALID_SOCKET) {
             if (!running_) break;
-            // komorebi died or pruned us: re-register every 1 s
-            // (komorebi-bar's pattern, WithOptions preserved — spec 11.3).
-            while (running_) {
-                const std::string registration =
-                    json{{"type", "AddSubscriberSocketWithOptions"},
-                         {"content",
-                          json::array({subscriberName_, {{"filter_state_changes", true}}})}}
-                        .dump();
-                if (sendMessage(registration)) break;
-                Sleep(1000);
-            }
+            reregister();
             continue;
         }
         std::string payload;
@@ -140,27 +149,65 @@ void KomorebiProvider::readerLoop() {
             payload.append(buffer, static_cast<std::size_t>(n));
         }
         closesocket(connection);
-        if (payload.empty()) continue;
-
-        try {
-            const auto notification = json::parse(payload, nullptr, true, /*ignore_comments=*/false);
-            if (!notification.contains("state")) continue;
-            const auto& state = notification.at("state");
-            monitorCount_ =
-                static_cast<int>(state.at("monitors").at("elements").size());
-            auto update = extractUpdate(state);
-            if (!update.workspacesChanged) continue;
-            update.previousWorkspace = lastFocused_;
-            if (update.focusedWorkspace == lastFocused_) continue; // dedupe
-            lastFocused_ = update.focusedWorkspace;
-            if (onUpdate) onUpdate(update);
-        } catch (const json::exception&) {
-            // Tolerant parsing: schema drift must not kill the provider.
+        if (payload.empty()) {
+            // Zero-byte read: komorebi shut the connection without a
+            // notification — the documented "it died" signal (spec 11.3).
+            if (!ybar::ipc::rawSend(komorebiSocket(), json{{"type", "State"}}.dump()))
+                reregister();
+            continue;
         }
+
+        publishState(payload);
     }
 }
 
+// Accepts either a full {event, state} notification or a bare State reply.
+void KomorebiProvider::publishState(const std::string& payload) {
+    try {
+        const auto parsed = json::parse(payload);
+        const auto& state = parsed.contains("state") ? parsed.at("state") : parsed;
+        if (!state.contains("monitors")) return;
+        monitorCount_ = static_cast<int>(state.at("monitors").at("elements").size());
+        monitorCountKnown_ = true;
+        auto update = extractUpdate(state);
+        if (!update.workspacesChanged) return;
+        update.previousWorkspace = lastFocused_;
+        // Dedupe on monitor+workspace: two monitors can focus workspaces with
+        // the same display string (spec 11.3 fires on monitor OR workspace).
+        const std::string key =
+            std::to_string(update.focusedMonitorIndex) + "\x1f" + update.focusedWorkspace;
+        if (key == lastFocused_) return;
+        lastFocused_ = key;
+        if (onUpdate) onUpdate(update);
+    } catch (const json::exception&) {
+        // Tolerant parsing: schema drift must not kill the provider.
+    }
+}
+
+bool KomorebiProvider::refresh() {
+    const auto reply = ybar::ipc::rawQuery(komorebiSocket(), json{{"type", "State"}}.dump());
+    if (!reply) return false;
+    lastFocused_.clear(); // forced re-query always republishes
+    publishState(*reply);
+    return true;
+}
+
 void KomorebiProvider::applyWorkAreaOffset(int barHeightPhysical) {
+    appliedOffset_ = barHeightPhysical; // replayed after a reconnect
+    // Learn the real monitor count before the first notification arrives,
+    // otherwise a multi-monitor setup only ever reserves monitor 0.
+    if (!monitorCountKnown_) {
+        if (const auto reply =
+                ybar::ipc::rawQuery(komorebiSocket(), json{{"type", "State"}}.dump())) {
+            try {
+                const auto state = json::parse(*reply);
+                monitorCount_ =
+                    static_cast<int>(state.at("monitors").at("elements").size());
+                monitorCountKnown_ = true;
+            } catch (const json::exception&) {
+            }
+        }
+    }
     // {left:0, top:H, right:0, bottom:H} — bottom is a HEIGHT reduction;
     // top alone would push tiles off-screen (spec 11.4).
     for (int i = 0; i < monitorCount_; ++i) {

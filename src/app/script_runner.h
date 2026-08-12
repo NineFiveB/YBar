@@ -7,6 +7,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 namespace ybar::app {
 
@@ -25,6 +26,10 @@ public:
     // The full command line `run(script)` would spawn — used by ybar.exec,
     // which captures stdout itself.
     std::wstring commandLineFor(const std::string& script) const;
+
+    // CreateProcessW environment block (parent env + base env + extras, with
+    // the exe directory prepended to PATH) — shared with ybar.exec.
+    std::vector<wchar_t> environmentBlock(const std::map<std::string, std::string>& env) const;
 
     // CONFIG_DIR/BAR_NAME base env + script cwd (the config directory).
     std::map<std::string, std::string> baseEnvironment;

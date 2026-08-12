@@ -160,13 +160,15 @@ bool ItemStore::rename(std::string_view oldName, std::string_view newName) {
     return true;
 }
 
-Item* ItemStore::clone(const std::string& newName, std::string_view source, bool before) {
+Item* ItemStore::clone(const std::string& newName, std::string_view source,
+                       Placement placement) {
     auto* src = find(source);
     if (!src || newName.empty() || find(newName)) return nullptr;
     auto item = std::make_unique<Item>();
     item->name = newName;
     item->position = src->position;
-    item->kind = src->kind;
+    // kind is NOT copied: the reference clones through add(), so a cloned
+    // bracket/graph becomes a plain item.
     // defaults-set fields plus the documented clone extras; components are
     // deliberately NOT copied (reference asymmetry).
     item->icon = src->icon;
@@ -186,9 +188,13 @@ Item* ItemStore::clone(const std::string& newName, std::string_view source, bool
     item->members = src->members;
     item->popupHost = src->popupHost;
 
+    if (placement == Placement::Append) {
+        items_.push_back(std::move(item));
+        return items_.back().get();
+    }
     auto anchor = std::find_if(items_.begin(), items_.end(),
                                [&](const auto& i) { return i->name == source; });
-    const auto position = before ? anchor : std::next(anchor);
+    const auto position = placement == Placement::Before ? anchor : std::next(anchor);
     return items_.insert(position, std::move(item))->get();
 }
 

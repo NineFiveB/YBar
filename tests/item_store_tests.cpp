@@ -93,21 +93,35 @@ TEST_CASE("rename fixes bracket members and popup hosts") {
     CHECK_FALSE(store.rename("audio", "taken"));
 }
 
-TEST_CASE("clone copies value fields but never components") {
+TEST_CASE("clone copies value fields but never components or kind") {
     ItemStore store;
-    auto* src = store.add("src", ItemPosition::Left);
+    auto* src = store.add("src", ItemPosition::Left, ItemKind::Bracket);
     CHECK_FALSE(PropertySetter::set(*src, "label", "text"));
     CHECK_FALSE(PropertySetter::set(*src, "width", "50"));
     src->graph.emplace();
     src->members = {"m1"};
 
-    auto* copy = store.clone("copy", "src", /*before=*/false);
+    auto* copy = store.clone("copy", "src", ItemStore::Placement::After);
     REQUIRE(copy);
     CHECK(copy->label.string == "text");
     CHECK(copy->customWidth == 50);
     CHECK(copy->members == std::vector<std::string>{"m1"});
-    CHECK_FALSE(copy->graph.has_value()); // components deliberately not copied
+    CHECK_FALSE(copy->graph.has_value());     // components deliberately not copied
+    CHECK(copy->kind == ItemKind::Item);      // reference clones through add()
     CHECK(order(store) == std::vector<std::string>{"src", "copy"});
+}
+
+TEST_CASE("clone placement: append by default, adjacent when asked") {
+    ItemStore store;
+    store.add("a", ItemPosition::Left);
+    store.add("b", ItemPosition::Left);
+    store.add("c", ItemPosition::Left);
+
+    REQUIRE(store.clone("a-copy", "a", ItemStore::Placement::Append));
+    CHECK(order(store) == std::vector<std::string>{"a", "b", "c", "a-copy"});
+
+    REQUIRE(store.clone("b-before", "b", ItemStore::Placement::Before));
+    CHECK(order(store) == std::vector<std::string>{"a", "b-before", "b", "c", "a-copy"});
 }
 
 TEST_CASE("regex targets match unanchored substrings") {
