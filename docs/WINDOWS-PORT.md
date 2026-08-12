@@ -1024,16 +1024,29 @@ also fixed. One deliberate skip, now documented in place: slider hit-mapping
 clamps align slack while the emit side is unclamped, because the Swift
 reference has the identical asymmetry.
 
+**Third live pass** (audited build): the reworked providers were re-verified
+on screen (volume/SSID/battery/clock populate; `--trigger battery_change`
+leaves a power-only subscriber untouched while `--trigger
+power_source_change` fires it; a bare media trigger with an empty cache
+dispatches nothing; a bare `ybar` start picked the theme up from
+`current-theme`). The `WM_DISPLAYCHANGE` sledgehammer was exercised by
+posting the message to a bar window: forward → 500 ms debounce → full
+teardown/recreate (new hwnd), rebuilt bar painting uniformly at
+x=5/1440/2875 with providers still answering. Sticky pinning was tested with
+a synthetic Win+Ctrl+D — and FAILED: on a freshly created empty desktop the
+only windows belong to the shell (present on every desktop), so naming the
+current desktop via the foreground window cannot work. The follow now reads
+Explorer's `CurrentVirtualDesktop` registry GUID (verified present on this
+build whenever a second desktop exists) with the foreground trick as
+fallback; the retest shows the bar full-width on a fresh desktop within one
+follow tick.
+
 **Remaining to macOS parity**:
-1. `WM_DISPLAYCHANGE` rebuilds and `WM_DPICHANGED` — built and unit-tested,
-   but not exercised live: both need a display-topology change, which is too
-   intrusive to trigger on a working machine.
-2. Sticky pinning across virtual desktops (documented as best-effort: true
-   pinning needs an undocumented interface).
-3. Signing — the binary is unsigned, so SmartScreen warns on first run.
-4. Live re-verification of the provider paths after the audit rework (the
-   pre-audit build was verified on screen; the reworked audio/media/komorebi
-   internals are covered by CI tests only).
+1. `WM_DPICHANGED` live — needs a real per-monitor scaling change; the
+   handler and the popup-rebuild-on-scale-mismatch are unit-covered only.
+2. Signing — the binary is unsigned, so SmartScreen warns on first run.
+3. Cutting the first `win-v0.1.0` tag (release workflow + manifests are
+   ready and validated; the tag is the maintainer's call).
 
 Deliberate divergences (never 1:1): alias items (§10.6), per-item glass
 pills (§7.6), distributed-notification bindings (§9), THERMAL_STATE
