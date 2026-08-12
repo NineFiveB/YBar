@@ -968,12 +968,30 @@ monitor 2 hit-tested against monitor 1's geometry whenever the two differed in
 width, and `bounding_rects` reported one monitor's rects under every display
 key.
 
+**Also done**: Acrylic backdrops (§7.6) for bars and popups, `ybar theme
+list|current|use`, `ybar autostart enable|disable|status`, the
+`AppUserModelID`, the shipped `examples/catppuccin-komorebi` theme, and CI
+packaging of `examples/` + app-local `d3dcompiler_47.dll`.
+
+**Live-verified on a 2880×1800 200 % display** (build `479c6dc`): WASAPI
+volume tracked six volume-up steps 0 % → 12 %; the network provider resolved
+the real SSID; `modifier_change` reported `ctrl` for a synthetic key press;
+`app_launched` fired with a `FileDescription` name (process-scoped, since
+komorebi was not running); `--animate linear 60 --bar height=60` interpolated
+32 → 44.8 → 60; `width=dynamic` animated 300 → natural and restored the −1
+sentinel on completion; a synthetic drag to a 200 pt track's midpoint set the
+slider to 50.5 %; and the shipped theme populated every item. Two bring-up
+fixes came out of it: COM is now initialized before the first surface (sticky
+pinning was failing at boot), and the icon map gained `wifi.slash` /
+`square.grid.2x2`.
+
 **Remaining to macOS parity**, in impact order:
-1. Acrylic backdrops (§7.6): `glass=on` still paints a flat plate.
-2. Ship (§13): winget + scoop, d3dcompiler app-local, autostart, `ybar
-   theme`, ported komorebi themes, Windows docs.
-3. Live verification of everything above: it builds and passes headless
-   tests, but only the pre-provider behaviour has been confirmed on screen.
+1. Ship (§13): winget manifest + scoop bucket, Windows docs.
+2. Media provider observed only at init — no SMTC session was playing during
+   bring-up, so the title/artist path is untested on screen.
+3. Windowing paths with no cheap live test yet: `WM_DISPLAYCHANGE` rebuilds,
+   `WM_DPICHANGED`, `fullscreen_show`, `reserve=appbar`, and sticky pinning
+   across virtual desktops.
 
 Deliberate divergences (never 1:1): alias items (§10.6), per-item glass
 pills (§7.6), distributed-notification bindings (§9), THERMAL_STATE

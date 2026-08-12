@@ -36,7 +36,7 @@
       "name": "workspace",
       "position": "left",
       "props": {
-        "icon": "sf:square.grid.2x2.fill",
+        "icon": "sf:apps",
         "icon.color": "0xff89b4fa",
         "label": "-",
         "label.color": "0xff89b4fa",

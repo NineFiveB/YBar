@@ -56,7 +56,8 @@ constexpr Mapping kMappings[] = {
     {"stop.fill", 0xE71A},         {"storefront", 0xE719},
     {"sun.max", 0xE706},           {"terminal", 0xE756},
     {"thermometer", 0xE9CA},       {"trash", 0xE74D},
-    {"volume", 0xE767},            {"wifi", 0xE701},
+    {"square.grid.2x2", 0xE71D},   {"volume", 0xE767},
+    {"wifi", 0xE701},              {"wifi.slash", 0xEB5E},
     {"wrench", 0xE90F},            {"xmark", 0xE711},
 };
 
