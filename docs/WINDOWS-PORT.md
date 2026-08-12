@@ -410,11 +410,15 @@ keep macOS-identical gradients — a plain UNORM RTV visibly changes them.
 Recreate the RTV after every `ResizeBuffers`. Alpha mode is orthogonal:
 premultiplied alpha goes through the same sRGB encode.
 
-**DComp DPI gotcha (found live, W4)**: a composition target on a DPI-aware
-window composes in DIPs — the swap-chain content displays scaled by
-`windowDpi/96` (2× on a 200% monitor) even though every buffer/viewport value
-is physical. Counter-scale the root visual with a `96/windowDpi` transform so
-the physical-pixel buffer maps 1:1 to device pixels.
+**DComp scaling (corrected after a live miss)**: a composition target composes
+in the WINDOW's coordinate space, which is physical pixels for a PerMonitorV2
+process — so a physical-pixel swap chain maps 1:1 with **no visual transform**.
+Do NOT add a `96/windowDpi` counter-scale: it halves the scene, producing a
+full-width window that paints only its left half. That failure is easy to
+misread, because glyphs rasterized at 2× and displayed at 0.5× still *look*
+correctly sized — only the geometry betrays it. Verify by sampling painted
+pixels at the far edge of the monitor, never by eyeballing text size.
+`YBAR_DCOMP_SCALE` overrides the factor for diagnosis.
 
 ### 7.2 Damage model & pacing (behavior contract)
 
