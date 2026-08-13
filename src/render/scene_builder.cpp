@@ -467,8 +467,15 @@ void emitItem(DisplayList& list, Item& item, const Rect& contentBox, double scal
     if (item.graph) {
         const bool rightToLeft = item.position == ybar::model::ItemPosition::Right ||
                                  item.position == ybar::model::ItemPosition::CenterLeft;
-        const Rect box{penX, adjusted.y + 1, static_cast<double>(item.graph->capacity),
-                       adjusted.height - 2};
+        // Reference box math (SceneBuilder.emitGraph): the graph fills the
+        // background PILL height, centered on the item's center line — not
+        // the full content box, which is bar-height and would hang the graph
+        // out of a shorter pill.
+        const double height = item.background.height > 0 ? item.background.height
+                                                         : adjusted.height - 2;
+        const double centerY = adjusted.y + adjusted.height / 2;
+        const Rect box{penX, centerY - height / 2,
+                       static_cast<double>(item.graph->capacity), height};
         emitGraph(list, *item.graph, box, rightToLeft, scale);
         penX += item.graph->capacity;
     }
