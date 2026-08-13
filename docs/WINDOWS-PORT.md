@@ -1076,11 +1076,13 @@ Divergences are cataloged in `examples/sketchybar-glass/PORTING-WIN.md`.
 3. Cutting the first `win-v0.1.0` tag (release workflow + manifests are
    ready and validated; the tag is the maintainer's call).
 4. Glass-theme polish: hover/reveal animations from the macOS item files
-   were not carried over by the first port pass. The wifi popup is now
-   exercised on screen (header + secured-network row + live netsh detail
-   rows + Settings footer, opened via `--set popup.drawing=on`); the media
-   popup still is not — with no GSMTC session there is nothing to anchor
-   it, so it needs a session playing during a live pass.
+   were not carried over by the first port pass. Both remaining popups are
+   now exercised on screen (opened via `--set popup.drawing=on`): the wifi
+   popup with header + secured-network row + live netsh detail rows +
+   Settings footer, and the media popup — against a live Chrome GSMTC
+   session — with centered title, prev/play/next transport row, source row,
+   and the volume slider; the pill's marquee visibly advanced between
+   captures on the compositor-clock pump.
 
 **Launcher-environment fixes** (found starting the daemon from a
 `Path`-cased parent, the way Explorer and pwsh launch it — every prior
