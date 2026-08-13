@@ -21,23 +21,28 @@ local grid_width = cell_w * 7   -- 7 columns
 local max_cells = 42
 
 local cal = sbar.add("item", "calendar", {
-  -- Regular weight throughout: the native menu bar clock is not bold.
+  -- Regular weight throughout: the native taskbar clock is not bold.
+  -- Date and time share ONE family and size (Segoe UI, like the Windows
+  -- clock): two faces at the same point size have different cap heights,
+  -- and em-box centering then splits the baseline — the old Cascadia time
+  -- needed a hand-tuned y_offset and still read misaligned.
   icon = {
     color = colors.white,
     padding_left = 8,
-    -- -1: the icon part is ink-centered, and including the "g" descender
-    -- in the centered box pushes the caps ABOVE the time's cap line
-    -- (measured: cap-tops 26 vs 30 device px at +1; equal at -1).
-    y_offset = -1,
     font = {
+      family = settings.font.text,
       style = settings.font.style_map["Regular"],
-      size = 13.0,   -- same size as the time label
+      size = 13.0,
     },
   },
   label = {
     color = colors.white,
     padding_right = 8,
-    font = { family = settings.font.numbers, style = settings.font.style_map["Regular"] },
+    font = {
+      family = settings.font.text,
+      style = settings.font.style_map["Regular"],
+      size = 13.0,
+    },
   },
   position = "right",
   update_freq = 30,

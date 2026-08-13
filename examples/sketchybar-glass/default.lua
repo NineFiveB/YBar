@@ -1,11 +1,10 @@
 local settings = require("settings")
 local colors = require("colors")
 
--- The port's defaults with the glass treatment: 20pt macOS-26 corners,
--- in-shader glass material (implies a blurred backdrop on every pill),
--- no hard borders — the specular rim replaces them. On Windows the pill
--- glass renders as the shader rim + translucent fill (spec 7.6); the
--- bar-level Acrylic backdrop supplies the blur behind everything.
+-- The port's defaults restyled Fluent-minimal for Windows: flat rounded
+-- pills (no glass rim, no Acrylic), subtle single-tone fills, no borders —
+-- the macOS tree keeps its Liquid Glass treatment; this divergence is the
+-- point (Windows' default design language is flat Fluent).
 sbar.default({
   updates = "when_shown",
   icon = {
@@ -30,17 +29,17 @@ sbar.default({
   },
   background = {
     height = 28,
-    corner_radius = 9,
+    corner_radius = 8, -- Fluent "overlay corner" radius
     border_width = 0,
-    glass = true,
+    glass = false,
   },
   popup = {
-    blur_radius = 30,
+    blur_radius = 0, -- no Acrylic behind popups: solid Fluent panels
     background = {
       border_width = 0,
-      corner_radius = 9,
+      corner_radius = 8,
       color = colors.popup.bg,
-      glass = true,
+      glass = false,
     },
   },
   -- Tight outer paddings: 4pt between adjacent pills (was 10).

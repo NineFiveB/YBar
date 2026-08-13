@@ -14,18 +14,17 @@ return {
   transparent = 0x00000000,
 
   bar = {
-    bg = 0xd9121214,         -- near-black over the glass strip
+    bg = 0xf20b0b0d,         -- Fluent minimal: dark near-opaque flat strip
     border = 0x00000000,
   },
   popup = {
-    bg = 0x212a2a2a,         -- same tint as the pills: one material everywhere
+    bg = 0xf51c1c20,         -- solid dark panel (no backdrop blur behind it)
     border = 0x2effffff,
   },
-  -- True glass is mostly backdrop: barely-there neutral tints, the blur and
-  -- the specular rim carry the material (on Windows the bar-level Acrylic
-  -- backdrop provides the blur; pills keep the shader rim + tint).
-  bg1 = 0x212a2a2a,          -- ~13%, luma-matched to the old blue-grey
-  bg2 = 0x2e383838,          -- ~18%
+  -- Fluent surfaces: subtle single-tone white fills over the dark strip —
+  -- no glass rim, no backdrop; brightness alone separates rest/selected.
+  bg1 = 0x17ffffff,          -- ~9% white: resting pill fill
+  bg2 = 0x24ffffff,          -- ~14% white: raised/selected surface
 
   with_alpha = function(color, alpha)
     if alpha > 1.0 or alpha < 0.0 then return color end

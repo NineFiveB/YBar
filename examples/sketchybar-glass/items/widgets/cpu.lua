@@ -2,14 +2,14 @@ local icons = require("icons")
 local colors = require("colors")
 local settings = require("settings")
 
--- YBAR PORT: system monitor popup in the Stats-app dashboard style:
--- arc gauges (YBar's gauge component) for CPU and memory, plus a disk
--- gauge and an uptime row — each tile a stack of centered rows.
--- WINDOWS: all live numbers come from the native `system_stats` event env
--- (CPU_USAGE, MEMORY_USAGE/MEMORY_FRACTION, DISK_FREE_GB/DISK_TOTAL_GB)
--- pushed every 2 s — helpers/system_stats_rich.sh is gone. Static facts
--- (CPU name, total RAM, uptime) come from one PowerShell exec on popup
--- open. Network throughput rows are dropped: no byte-counter helper here.
+-- YBAR PORT: system monitor popup in the Stats-app dashboard style —
+-- two arc gauges (YBar's gauge component): CPU and GPU. The memory/disk
+-- gauges and the uptime row of the earlier layout were removed by request.
+-- WINDOWS: CPU comes from the native `system_stats` event env (CPU_USAGE,
+-- pushed every 2 s). GPU has no push source — while the popup is open a
+-- 3 s PowerShell perf-counter poll sums the 3D-engine utilization (the
+-- same figure Task Manager shows). Chip/adapter names come from one WMI
+-- probe on popup open.
 
 local popup_width = 240
 local inset = 12
@@ -118,16 +118,9 @@ local cpu_gauge   = add_gauge()
 add_center("CPU LOAD")
 local cpu_chip    = add_center("…", { color = colors.grey, size = 11, style = "Regular" })
 add_separator()
-local mem_gauge   = add_gauge()
-add_center("MEMORY")
-local mem_detail  = add_center("…", { color = colors.grey, size = 11, style = "Regular" })
-add_separator()
-local disk_gauge  = add_gauge()
-add_center("DISK")
-local disk_detail = add_center("…", { color = colors.grey, size = 11, style = "Regular" })
-add_separator()
-add_center("UPTIME")
-local uptime_row  = add_center("…", { color = colors.grey, size = 11, style = "Regular" })
+local gpu_gauge   = add_gauge()
+add_center("GPU LOAD")
+local gpu_chip    = add_center("…", { color = colors.grey, size = 11, style = "Regular" })
 
 -- ── Helpers ───────────────────────────────────────────────────────────────
 local function cpu_color_for(load)
@@ -138,20 +131,9 @@ local function cpu_color_for(load)
   end
 end
 
-local function fmt_size(gb)
-  if not gb then return "—" end
-  if gb >= 1000 then return string.format("%.1f TB", gb / 1000) end
-  if gb >= 10 then return string.format("%.0f GB", gb) end
-  if gb >= 1 then return string.format("%.1f GB", gb) end
-  return string.format("%.0f MB", gb * 1000)
-end
-
 -- Last system_stats env, so a freshly opened popup paints immediately
 -- instead of waiting for the next 2 s tick.
 local last_stats = nil
--- Total RAM in GB, learned from the PowerShell probe on popup open; lets
--- mem_detail show "used of total" from MEMORY_FRACTION alone.
-local mem_total_gb = nil
 
 local function update_popup_from_stats(env)
   local load = tonumber(env.CPU_USAGE) or 0
@@ -159,66 +141,66 @@ local function update_popup_from_stats(env)
     gauge = { percentage = load, color = cpu_color_for(load) },
     label = load .. "%",
   })
-
-  local mem_pct = tonumber(env.MEMORY_USAGE) or 0
-  mem_gauge:set({
-    gauge = { percentage = mem_pct, color = cpu_color_for(mem_pct) },
-    label = mem_pct .. "%",
-  })
-  local frac = tonumber(env.MEMORY_FRACTION)
-  if frac and mem_total_gb then
-    mem_detail:set({
-      icon = { string = fmt_size(frac * mem_total_gb) .. " of " .. fmt_size(mem_total_gb) },
-    })
-  end
-
-  local free_gb = tonumber(env.DISK_FREE_GB)
-  local total_gb = tonumber(env.DISK_TOTAL_GB)
-  if free_gb and total_gb and total_gb > 0 then
-    local pct = math.floor((total_gb - free_gb) / total_gb * 100 + 0.5)
-    disk_gauge:set({
-      gauge = { percentage = pct, color = cpu_color_for(pct) },
-      label = pct .. "%",
-    })
-    disk_detail:set({
-      icon = { string = fmt_size(free_gb) .. " free of " .. fmt_size(total_gb) },
-    })
-  end
 end
 
+local gpu_gen = 0 -- bumping cancels the in-flight GPU poll loop
+
 local function hide_popup()
+  gpu_gen = gpu_gen + 1
   cpu_bracket:set({ popup = { drawing = false } })
 end
 
--- One PowerShell probe per popup open: CPU name, total RAM (GB), uptime.
--- Prints a single compact line "Name|GB|Xd Yh Zm" parsed with Lua patterns.
+-- One WMI probe per popup open: CPU name | GPU adapter name.
 local probe_cmd = "powershell.exe -NoProfile -Command '"
-  .. '$os=Get-CimInstance Win32_OperatingSystem; '
   .. '$cpu=((Get-CimInstance Win32_Processor).Name | Select-Object -First 1); '
-  .. '$up=(Get-Date)-$os.LastBootUpTime; '
-  .. '$mem=[math]::Round($os.TotalVisibleMemorySize/1048576,1); '
-  .. 'Write-Output ($cpu.Trim()+"|"+$mem+"|"+$up.Days+"d "+$up.Hours+"h "+$up.Minutes+"m")'
+  .. '$gpu=((Get-CimInstance Win32_VideoController).Name | Select-Object -First 1); '
+  .. 'Write-Output ($cpu.Trim()+"|"+$gpu.Trim())'
   .. "'"
+
+-- GPU utilization: sum of the 3D-engine perf counters — the figure Task
+-- Manager reports. Get-Counter samples for ~1 s, so it runs async and only
+-- while the popup is open (a generation counter cancels a stale loop).
+local gpu_cmd = "powershell.exe -NoProfile -Command '"
+  .. "$s=((Get-Counter \"\\GPU Engine(*engtype_3D)\\Utilization Percentage\" "
+  .. "-ErrorAction SilentlyContinue).CounterSamples "
+  .. "| Measure-Object CookedValue -Sum).Sum; "
+  .. 'Write-Output ([math]::Round([math]::Min(100, [double]$s)))'
+  .. "'"
+
+local function poll_gpu(gen)
+  if gen ~= gpu_gen then return end
+  sbar.exec(gpu_cmd, function(out)
+    if gen ~= gpu_gen then return end
+    local pct = tonumber((out or ""):match("(%d+)"))
+    if pct then
+      gpu_gauge:set({
+        gauge = { percentage = pct, color = cpu_color_for(pct) },
+        label = pct .. "%",
+      })
+    end
+    sbar.delay(3, function() poll_gpu(gen) end)
+  end)
+end
 
 local function refresh_popup()
   sbar.exec(probe_cmd, function(out)
-    local chip, total, up = (out or ""):match("^%s*(.-)%s*|%s*([%d%.]+)%s*|%s*(.-)%s*$")
+    local chip, gpu = (out or ""):match("^%s*(.-)%s*|%s*(.-)%s*$")
     if chip and chip ~= "" then cpu_chip:set({ icon = { string = chip } }) end
-    mem_total_gb = tonumber(total)
-    if up then uptime_row:set({ icon = { string = up } }) end
+    if gpu and gpu ~= "" then gpu_chip:set({ icon = { string = gpu } }) end
     if last_stats then update_popup_from_stats(last_stats) end
   end)
 end
 
--- YBAR PORT: no 3 s helper-script polling loop — the native system_stats
--- event repaints the open popup every 2 s; only the static probe runs on
--- open.
+-- The native system_stats event repaints the CPU gauge every 2 s while
+-- open; the GPU poll runs its own 3 s loop, ended by generation bump.
 local function toggle_popup()
   local should_draw = cpu_bracket:query().popup.drawing == "off"
   if should_draw then
     cpu_bracket:set({ popup = { drawing = true } })
     if last_stats then update_popup_from_stats(last_stats) end
     refresh_popup()
+    gpu_gen = gpu_gen + 1
+    poll_gpu(gpu_gen)
   else
     hide_popup()
   end
