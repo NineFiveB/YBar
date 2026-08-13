@@ -1,0 +1,297 @@
+local icons = require("icons")
+local colors = require("colors")
+local settings = require("settings")
+
+-- YBAR PORT: battery popup in the macOS style used across the other
+-- widgets: "Battery" header with the percentage on the right, then
+-- Power Source / Time Remaining / Condition / Max Capacity rows and a
+-- Settings footer. The pill shows only the icon (percentage lives in
+-- the popup). Maintenance, charge limit, low power mode, and current
+-- status are gone — and with them the `battery` CLI dependency.
+--
+-- WINDOWS PORT: the pill is driven by the native battery_change /
+-- power_source_change events (pmset is gone); the popup rows fill from
+-- a single `Get-CimInstance Win32_Battery` round trip on open. The
+-- slow update_freq is kept as a belt behind the events, and doubles as
+-- the sampler for the Battery Level graph — Windows has no pmset-style
+-- charge log to replay, so the graph fills from live samples while the
+-- bar runs (216 buckets x 400 s = a rolling 24 h window once full).
+
+local popup_width = 260
+local inset = 12
+
+local battery = sbar.add("item", "widgets.battery", {
+  position = "right",
+  icon = {
+    font = {
+      style = settings.font.style_map["Regular"],
+      size = 19.0,
+    },
+    padding_left = 8,
+    padding_right = 8,
+  },
+  label = { drawing = false },
+  update_freq = 400,   -- belt behind the native events + graph sample cadence
+  padding_left = 2,
+  padding_right = 2,
+})
+
+local battery_bracket = sbar.add("bracket", "widgets.battery.bracket", { battery.name }, {
+  background = { color = colors.bg1 },
+  popup = { align = "center", height = 30 }
+})
+
+local popup_pos = "popup." .. battery_bracket.name
+
+-- ── Header: "Battery" + percentage ─────────────────────────────────────────
+local header = sbar.add("item", {
+  position = popup_pos,
+  width = popup_width,
+  icon = {
+    align = "left",
+    string = "Battery",
+    font = { size = 14, style = settings.font.style_map["Bold"] },
+    width = popup_width / 2,
+    padding_left = inset,
+  },
+  label = {
+    align = "right",
+    string = "…",
+    font = { size = 14, style = settings.font.style_map["Bold"] },
+    color = colors.white,
+    width = popup_width / 2,
+    padding_right = inset,
+  },
+  background = { height = 2, color = colors.grey, y_offset = -15 },
+})
+
+local function add_detail(title)
+  return sbar.add("item", {
+    position = popup_pos,
+    width = popup_width,
+    icon = {
+      align = "left",
+      string = title,
+      color = colors.grey,
+      font = { size = 12.0 },
+      width = popup_width / 2,
+      padding_left = inset + 6,
+    },
+    label = {
+      align = "right",
+      string = "—",
+      color = colors.grey,
+      font = { size = 12.0, style = settings.font.style_map["Semibold"] },
+      width = popup_width / 2,
+      padding_right = inset,
+    },
+  })
+end
+
+local power_source   = add_detail("Power Source")
+local remaining_time = add_detail("Time Remaining")
+local condition      = add_detail("Condition")
+local max_capacity   = add_detail("Max Capacity")
+
+-- ── Battery Level graph (rolling 24 hours, sampled live) ───────────────────
+-- Windows keeps no queryable charge history (pmset's log has no cheap
+-- equivalent; powercfg /batteryreport is a heavyweight HTML export), so
+-- the python helper is gone and the graph accumulates one sample per
+-- routine tick instead. It starts empty and grows into the 24 h window.
+local history_buckets = 216   -- 24h at 400 s per sample; 1pt per sample
+
+sbar.add("item", {
+  position = popup_pos,
+  width = popup_width,
+  icon = { drawing = false },
+  label = { drawing = false },
+  background = { height = 2, color = colors.with_alpha(colors.grey, 0.3) },
+})
+
+sbar.add("item", {
+  position = popup_pos,
+  width = popup_width,
+  icon = {
+    align = "left",
+    string = "Battery Level",
+    color = colors.white,
+    font = { size = 13, style = settings.font.style_map["Bold"] },
+    width = popup_width / 2,
+    padding_left = inset,
+  },
+  label = {
+    align = "right",
+    string = "Last 24 Hours",
+    color = colors.grey,
+    font = { size = 11.0 },
+    width = popup_width / 2,
+    padding_right = inset,
+  },
+  padding_top = 6,
+})
+
+local history = sbar.add("graph", "widgets.battery.history", history_buckets, {
+  position = popup_pos,
+  graph = { color = colors.green },
+  background = {
+    height = 64,
+    color = { alpha = 0 },
+    border_color = { alpha = 0 },
+    drawing = true,
+  },
+  icon = { drawing = false },
+  label = { drawing = false },
+  padding_left = inset,
+  padding_right = inset,
+})
+
+local function push_history_sample(charge)
+  if charge then history:push({ charge / 100 }) end
+end
+
+sbar.add("item", {
+  position = popup_pos,
+  width = popup_width,
+  icon = { drawing = false },
+  label = { drawing = false },
+  background = { height = 2, color = colors.with_alpha(colors.grey, 0.3) },
+})
+
+local settings_row = sbar.add("item", {
+  position = popup_pos,
+  width = popup_width,
+  -- macOS put the gear glyph inline in the icon string; sf: names resolve
+  -- whole strings, so the glyph is an sf. image and the text stands alone.
+  image = { string = "sf.gearshape", size = 12, drawing = true, padding_left = inset },
+  icon = {
+    string = "Settings",
+    align = "left",
+    color = colors.white,
+    font = { size = 12.0 },
+    width = popup_width - 20 - inset,
+    padding_left = 4,
+  },
+  label = { drawing = false },
+})
+
+-- ── Updates ────────────────────────────────────────────────────────────────
+local function hide_details()
+  battery_bracket:set({ popup = { drawing = false } })
+end
+
+-- Last state pushed by the native events, so battery_change /
+-- power_source_change can restyle the pill without any child process.
+local last_charge = nil   -- 0-100
+local on_ac = nil         -- true | false | nil (unknown)
+
+local function apply_pill()
+  local charge = last_charge
+
+  local icon, color
+  if on_ac then
+    icon, color = icons.battery.charging, colors.green
+  elseif charge and charge > 80 then
+    icon, color = icons.battery._100, colors.green
+  elseif charge and charge > 60 then
+    icon, color = icons.battery._75, colors.green
+  elseif charge and charge > 40 then
+    icon, color = icons.battery._50, colors.green
+  elseif charge and charge > 20 then
+    icon, color = icons.battery._25, colors.orange
+  else
+    icon, color = icons.battery._0, colors.red
+  end
+
+  battery:set({ icon = { string = icon, color = color } })
+end
+
+-- One Win32_Battery round trip: prints "level|status|runtime" (runtime in
+-- minutes; empty, negative, or 71582788 = unknown). BatteryStatus 2/6/7/8/9
+-- mean the machine is on AC.
+local cim_cmd = "powershell.exe -NoProfile -Command '"
+  .. '$b = Get-CimInstance Win32_Battery | Select-Object -First 1; '
+  .. 'if ($b) { "$($b.EstimatedChargeRemaining)|$($b.BatteryStatus)|$($b.EstimatedRunTime)" }'
+  .. "'"
+
+local function refresh_from_cim(sample_history)
+  sbar.exec(cim_cmd, function(out)
+    local charge, status, runtime = out:match("(%d+)|(%d+)|(%-?%d*)")
+    charge  = tonumber(charge)
+    status  = tonumber(status)
+    runtime = tonumber(runtime)
+
+    if charge then last_charge = charge end
+    if status then
+      on_ac = status == 2 or status == 6 or status == 7
+        or status == 8 or status == 9
+    end
+
+    apply_pill()
+    if sample_history then push_history_sample(last_charge) end
+
+    if battery_bracket:query().popup.drawing == "on" then
+      header:set({ label = { string = charge and (charge .. "%") or "—" } })
+      power_source:set({ label = on_ac and "Power Adapter" or "Battery" })
+      local has_estimate = runtime and runtime > 0 and runtime < 71582788
+        and not on_ac
+      remaining_time:set({
+        label = has_estimate
+          and string.format("%d:%02d", runtime // 60, runtime % 60)
+          or "No estimate",
+      })
+    end
+  end)
+end
+
+local function update_main_icon(env)
+  local sender = env and env.SENDER
+  if sender == "battery_change" then
+    last_charge = tonumber(env.INFO) or last_charge
+    apply_pill()
+  elseif sender == "power_source_change" then
+    on_ac = env.INFO == "AC"
+    apply_pill()
+  else
+    -- routine / forced / system_woke: full round trip; the routine tick is
+    -- also the graph's sample clock.
+    refresh_from_cim(sender == "routine")
+  end
+end
+
+local function update_health()
+  -- Windows has no cheap counterpart to system_profiler's battery health
+  -- (Condition / Maximum Capacity need a powercfg /batteryreport export or
+  -- WMI classes that most firmware doesn't populate) — keep the rows, but
+  -- they stay em-dashed.
+  condition:set({ label = "—" })
+  max_capacity:set({ label = "—" })
+end
+
+local function toggle_details()
+  local should_draw = battery_bracket:query().popup.drawing == "off"
+  if should_draw then
+    battery_bracket:set({ popup = { drawing = true } })
+    refresh_from_cim(false)
+    update_health()
+    -- no update_history(): the graph already holds the live-sampled window
+  else
+    hide_details()
+  end
+end
+
+settings_row:subscribe("mouse.clicked", function()
+  sbar.exec('explorer.exe "ms-settings:batterysaver"')
+  hide_details()
+end)
+
+battery:subscribe("mouse.clicked", toggle_details)
+battery:subscribe("mouse.exited.global", hide_details)
+battery:subscribe(
+  { "routine", "battery_change", "power_source_change", "system_woke" },
+  update_main_icon
+)
+
+sbar.add("item", "widgets.battery.padding", {
+  position = "right",
+  width = settings.group_paddings
+})
