@@ -2,14 +2,15 @@ local icons = require("icons")
 local colors = require("colors")
 local settings = require("settings")
 
--- YBAR PORT: system monitor popup in the Stats-app dashboard style —
--- two arc gauges (YBar's gauge component): CPU and GPU. The memory/disk
--- gauges and the uptime row of the earlier layout were removed by request.
+-- YBAR PORT: system monitor popup in the Task Manager Performance style —
+-- per-request, the arc gauges became rolling area graphs: a "CPU | n%"
+-- header row, a bordered utilization graph, and the chip name under each.
 -- WINDOWS: CPU comes from the native `system_stats` event env (CPU_USAGE,
--- pushed every 2 s). GPU has no push source — while the popup is open a
--- 3 s PowerShell perf-counter poll sums the 3D-engine utilization (the
--- same figure Task Manager shows). Chip/adapter names come from one WMI
--- probe on popup open.
+-- pushed every 2 s) and its popup graph accumulates history even while
+-- closed, so it opens pre-filled. GPU has no push source — while the popup
+-- is open a 3 s PowerShell perf-counter poll sums the 3D-engine
+-- utilization (the same figure Task Manager shows), so its graph fills
+-- while open. Chip/adapter names come from one WMI probe on popup open.
 
 local popup_width = 240
 local inset = 12
@@ -46,7 +47,7 @@ local cpu_bracket = sbar.add("bracket", "widgets.cpu.bracket", { cpu.name }, {
   popup = { align = "center" }
 })
 
--- ── Popup: gauge dashboard ────────────────────────────────────────────────
+-- ── Popup: Task Manager-style graph dashboard ─────────────────────────────
 local popup_pos = "popup." .. cpu_bracket.name
 
 local header = sbar.add("item", "widgets.cpu.popup.header", {
@@ -60,25 +61,57 @@ local header = sbar.add("item", "widgets.cpu.popup.header", {
   label = { drawing = false },
 })
 
-local function add_gauge()
+-- Section header, Task Manager style: name left, live percentage right.
+local function add_section_title(name)
   return sbar.add("item", {
     position = popup_pos,
     width = popup_width,
-    align = "center",
-    icon = { drawing = false },
-    gauge = {
-      percentage = 0,
-      size = 84,
-      thickness = 8,
-      color = colors.blue,
-      track_color = colors.with_alpha(colors.grey, 0.25),
+    icon = {
+      string = name,
+      align = "left",
+      font = { size = 13, style = settings.font.style_map["Bold"] },
+      width = popup_width / 2,
+      padding_left = inset,
     },
     label = {
       string = "…",
-      font = { size = 19, style = settings.font.style_map["Semibold"] },
+      align = "right",
+      font = {
+        family = settings.font.numbers,
+        size = 13,
+        style = settings.font.style_map["Semibold"],
+      },
       color = colors.white,
+      width = popup_width / 2,
+      padding_right = inset,
     },
     padding_top = 6,
+  })
+end
+
+-- Rolling utilization graph in a bordered box: thin line over a soft area
+-- fill, one point per sample.
+local graph_points = popup_width - 2 * inset
+
+local function add_history_graph(name)
+  return sbar.add("graph", name, graph_points, {
+    position = popup_pos,
+    graph = {
+      color = colors.blue,
+      fill_color = colors.with_alpha(colors.blue, 0.18),
+      line_width = 1.5,
+    },
+    background = {
+      height = 64,
+      color = colors.with_alpha(colors.white, 0.03),
+      border_color = colors.with_alpha(colors.grey, 0.4),
+      border_width = 1,
+      drawing = true,
+    },
+    icon = { drawing = false },
+    label = { drawing = false },
+    padding_left = inset,
+    padding_right = inset,
   })
 end
 
@@ -114,13 +147,13 @@ end
 -- literal SF-Symbols character into the text; Windows `sf:` references must
 -- be the whole icon string, so they cannot be embedded mid-text).
 add_separator()
-local cpu_gauge   = add_gauge()
-add_center("CPU LOAD")
-local cpu_chip    = add_center("…", { color = colors.grey, size = 11, style = "Regular" })
+local cpu_title = add_section_title("CPU")
+local cpu_hist  = add_history_graph("widgets.cpu.hist")
+local cpu_chip  = add_center("…", { color = colors.grey, size = 11, style = "Regular" })
 add_separator()
-local gpu_gauge   = add_gauge()
-add_center("GPU LOAD")
-local gpu_chip    = add_center("…", { color = colors.grey, size = 11, style = "Regular" })
+local gpu_title = add_section_title("GPU")
+local gpu_hist  = add_history_graph("widgets.gpu.hist")
+local gpu_chip  = add_center("…", { color = colors.grey, size = 11, style = "Regular" })
 
 -- ── Helpers ───────────────────────────────────────────────────────────────
 local function cpu_color_for(load)
@@ -137,9 +170,8 @@ local last_stats = nil
 
 local function update_popup_from_stats(env)
   local load = tonumber(env.CPU_USAGE) or 0
-  cpu_gauge:set({
-    gauge = { percentage = load, color = cpu_color_for(load) },
-    label = load .. "%",
+  cpu_title:set({
+    label = { string = load .. "%", color = cpu_color_for(load) },
   })
 end
 
@@ -173,9 +205,9 @@ local function poll_gpu(gen)
     if gen ~= gpu_gen then return end
     local pct = tonumber((out or ""):match("(%d+)"))
     if pct then
-      gpu_gauge:set({
-        gauge = { percentage = pct, color = cpu_color_for(pct) },
-        label = pct .. "%",
+      gpu_hist:push({ pct / 100. })
+      gpu_title:set({
+        label = { string = pct .. "%", color = cpu_color_for(pct) },
       })
     end
     sbar.delay(3, function() poll_gpu(gen) end)
@@ -210,6 +242,9 @@ end
 cpu:subscribe("system_stats", function(env)  -- YBAR PORT: built-in provider
   local load = tonumber(env.CPU_USAGE) or 0
   cpu:push({ load / 100. })
+  -- The popup graph samples continuously (2 s cadence), so it opens with
+  -- history already on screen — Task Manager behavior.
+  cpu_hist:push({ load / 100. })
 
   local color = cpu_color_for(load)
 
