@@ -698,11 +698,20 @@ void DaemonState::rebuildSurfaces() {
 // Re-tried from the 1 s tick, so starting komorebi after ybar attaches on its
 // own instead of needing a daemon restart (spec 11.3).
 bool DaemonState::tryAttachKomorebi() {
-    if (komorebi || ytile) return false;
+    if (komorebi) return false;
     if (settings.reserve == ybar::model::ReserveMode::Off ||
         settings.reserve == ybar::model::ReserveMode::AppBar)
         return false;
     if (!ybar::providers::KomorebiProvider::detect()) return false;
+    // komorebi outranks ytile: if ytile got attached (komorebi was down at
+    // its boot check) and komorebi has since appeared, hand over — komorebi
+    // is the one actually tiling now.
+    if (ytile) {
+        ytile->stop();
+        ytile->clearWorkAreaOffset();
+        ytile.reset();
+        appliedOffsetPhysical = -1;
+    }
 
     komorebi = std::make_unique<ybar::providers::KomorebiProvider>();
     komorebi->onUpdate = [hwnd = messageWindow](const ybar::providers::KomorebiUpdate& update) {
@@ -1515,10 +1524,13 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
         state.attachMouseHandlers();
     }
 
-    // YTile: the sibling WM adapter — preferred when its pipe is present
-    // (the user runs one WM at a time; ytiled's presence is the signal).
+    // YTile: the sibling WM adapter. komorebi WINS when both answer — in
+    // practice ytiled can idle alongside (launched by whkd) while komorebi
+    // does the actual tiling, and picking ytile then starves the richer
+    // komorebi env (WORKSPACES). ytile attaches only when komorebi is absent.
     if (state.settings.reserve != ybar::model::ReserveMode::Off &&
         state.settings.reserve != ybar::model::ReserveMode::AppBar &&
+        !ybar::providers::KomorebiProvider::detect() &&
         ybar::providers::YTileProvider::detect()) {
         state.ytile = std::make_unique<ybar::providers::YTileProvider>();
         state.ytile->onUpdate = [hwnd = state.messageWindow](
