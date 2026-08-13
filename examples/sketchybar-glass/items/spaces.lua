@@ -25,6 +25,11 @@ local settings = require("settings")
 
 local MAX_SLOTS = 10
 
+-- Leading spacer: mirrors the right edge's group-padding item so space 1
+-- sits as far from the left monitor edge as the calendar pill sits from
+-- the right one (bar padding + group padding on both sides).
+sbar.add("item", "space.leading", { width = settings.group_paddings })
+
 local spaces = {}    -- slot -> space item
 local brackets = {}  -- slot -> bracket item
 
