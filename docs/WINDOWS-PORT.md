@@ -1065,6 +1065,19 @@ Divergences are cataloged in `examples/sketchybar-glass/PORTING-WIN.md`.
    were not carried over by the first port pass, and the media/wifi popups
    have not yet been exercised on screen.
 
+**YTile parity** (the sibling WM, docs/YTILE-IPC.md): the ytile adapter now
+carries the full komorebi-provider surface, live-verified against the real
+ytiled — WORKSPACES publishes the shown workspace numbers (non-empty OR
+active, the hiding the protocol doc itself recommends) with the strip
+rebinding as occupancy changes; `--komorebi` workspace messages translate
+onto YTile verbs (a pill click focused workspace 2 via the list-index
+mapping); the reserve re-asserts on every (re)subscribe per the `ready`
+contract (verified across a ytiled restart: fresh work area @0,80);
+app_launched/app_terminated come from full-snapshot window diffs, primed so
+the pre-existing world is never announced; ytile joins the 1 s late-attach
+re-detect, always outranked by komorebi. parseState is pure and pinned by
+contract tests against the protocol doc's state shape.
+
 Post-replication fixes, all found chasing a user report of the cpu graph
 rendering outside its pill and all live-verified: graphs now fill the
 background pill height centered (reference emitGraph math), popup rows take
