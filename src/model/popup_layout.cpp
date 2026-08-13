@@ -19,12 +19,23 @@ Measured measureMember(Item* item, const Measure& measure) {
     // layout, where invisible items get zero frames) — not even a separator.
     if (!item->drawing) return Measured{item, 0, 0, false, /*hidden=*/true};
     const auto m = measure(*item);
-    Measured result{item, contentLength(*item, m),
-                    std::max(item->icon.drawing ? m.icon.height : 0.0,
-                             item->label.drawing ? m.label.height : 0.0),
-                    false};
-    result.separator = !item->isVisibleInFlow() ||
-                       (result.length <= 0 && result.contentHeight <= 0);
+    // Row height sources match the reference (SceneBuilder popup rows):
+    // parts, the background plate, a gauge's full dial, a drawn image.
+    double contentHeight = std::max(item->icon.drawing ? m.icon.height : 0.0,
+                                    item->label.drawing ? m.label.height : 0.0);
+    contentHeight = std::max(contentHeight, item->background.height);
+    if (item->gauge) contentHeight = std::max(contentHeight, item->gauge->size);
+    if (item->image && item->image->drawing)
+        contentHeight = std::max(contentHeight, item->image->size);
+    Measured result{item, contentLength(*item, m), contentHeight, false};
+    // The reference's "bare" test: no parts, no components, no image — a
+    // background-only hairline stays a slim separator row (its plate height
+    // feeds contentHeight, so the row is max(h+8, 10)), while a gauge/image
+    // row is never a separator even with its parts hidden.
+    const bool bare = !item->icon.drawing && !item->label.drawing && !item->graph &&
+                      !item->slider && !item->gauge &&
+                      !(item->image && item->image->drawing);
+    result.separator = !item->isVisibleInFlow() || bare;
     return result;
 }
 

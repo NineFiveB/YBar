@@ -196,7 +196,10 @@ void emitSlider(DisplayList& list, const ybar::model::SliderState& slider, const
 void emitGauge(DisplayList& list, const ybar::model::Item& item, const Rect& box, double scale,
                FontCache& fonts, GlyphAtlas& atlas) {
     const auto& gauge = *item.gauge;
-    const double diameter = std::min(gauge.size, box.height);
+    // Full dial size, centered on the row's center line (reference math —
+    // the row is sized to the dial by popup layout; clamping here shrank
+    // dials wherever the box happened to be shorter).
+    const double diameter = gauge.size;
     const Rect dial{box.x + (box.width - diameter) / 2, box.midY() - diameter / 2, diameter,
                     diameter};
     QuadInstance quad;
