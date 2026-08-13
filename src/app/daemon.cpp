@@ -78,7 +78,6 @@ constexpr UINT kMsgNetwork = WM_APP + 10;
 constexpr UINT kMsgModifier = WM_APP + 11;
 constexpr UINT kMsgGlobalMouse = WM_APP + 12; // wParam: 1 entered, 0 exited
 constexpr UINT kMsgKomorebiApp = WM_APP + 13;
-constexpr UINT kMsgAnimationFrame = WM_APP + 14; // compositor-clock pump tick
 constexpr UINT_PTR kStatsTimer = 5;
 constexpr UINT_PTR kTooltipTimer = 6;
 constexpr UINT_PTR kAppsTimer = 7;
@@ -146,8 +145,12 @@ struct DaemonState {
     ybar::anim::AnimationScheduler scheduler;
     bool animationTimerLive = false;
     HANDLE animationPumpStop = nullptr;
+    // Auto-reset: the pump signals it each compositor tick and the message
+    // loop consumes it AFTER draining pending messages — a posted frame
+    // message would outrank hardware input in GetMessage and starve clicks
+    // whenever render time approaches the frame budget.
+    HANDLE frameDue = nullptr;
     std::thread animationPump;
-    std::atomic<bool> animationFramePending{false};
     int appliedOffsetPhysical = -1;
     int hoverItemId = -1; // targeted mouse.entered/exited tracking
 
@@ -274,10 +277,9 @@ struct DaemonState {
                     if (r != WAIT_OBJECT_0 + 1) { // clock unavailable: ~60 Hz fallback
                         Sleep(16);
                     }
-                    // One in-flight frame message at a time — a stalled UI
-                    // thread must not accumulate a queue of stale ticks.
-                    if (!animationFramePending.exchange(true))
-                        PostMessageW(messageWindow, kMsgAnimationFrame, 0, 0);
+                    // Auto-reset event: signaling while already signaled is a
+                    // no-op, so a stalled UI thread coalesces ticks for free.
+                    SetEvent(frameDue);
                 }
             });
             return;
@@ -324,8 +326,15 @@ struct DaemonState {
             animationPumpStop = nullptr;
         }
         KillTimer(messageWindow, kAnimationTimer); // no-op unless fallback armed
-        animationFramePending = false;
         frameWindowStart = 0; // don't average a later run across the idle gap
+    }
+
+    // One animation frame: consumed by the message loop when frameDue signals.
+    void runFrame() {
+        scheduler.tick(monotonicSeconds());
+        renderAll();
+        traceFrameRate();
+        syncAnimationTimer();
     }
 
     ~DaemonState() { stopAnimationPump(); }
@@ -438,15 +447,6 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             delete update;
             return 0;
         }
-        case kMsgAnimationFrame:
-            if (g_state) {
-                g_state->animationFramePending = false;
-                g_state->scheduler.tick(monotonicSeconds());
-                g_state->renderAll();
-                g_state->traceFrameRate();
-                g_state->syncAnimationTimer();
-            }
-            return 0;
         case WM_TIMER:
             if (wParam == kRoutineTimer && g_state) {
                 // Gate BEFORE incrementing (reference ordering): policy-off or
@@ -1867,20 +1867,47 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
         return future.get();
     });
 
+    // Must exist before the first render: a marquee on the boot frame starts
+    // the pump, which signals this event from its thread.
+    state.frameDue = CreateEventW(nullptr, FALSE, FALSE, nullptr); // auto-reset
+
     SetTimer(state.messageWindow, kRoutineTimer, 1000, nullptr);
     state.executeConfig();
     if (state.renderer) state.renderAll(); // first frame
 
+    // Input-priority loop: drain EVERY pending message (hardware input,
+    // posted work, timers) before consuming an animation frame. GetMessage
+    // ranks posted messages above input, so pumping frames through
+    // PostMessage starved clicks whenever render time approached the frame
+    // budget — with a marquee running, popup-opening clicks lagged visibly.
+    // Worst case here is one frame of input delay (MsgWait prefers handles),
+    // never starvation: the drain always runs before the next frame.
     MSG msg;
-    while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
+    bool running = true;
+    while (running) {
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_QUIT) {
+                running = false;
+                break;
+            }
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        if (!running) break;
+        const DWORD wait = MsgWaitForMultipleObjectsEx(1, &state.frameDue, INFINITE,
+                                                       QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        if (wait == WAIT_OBJECT_0) state.runFrame();
+        // WAIT_OBJECT_0 + 1: new messages arrived — loop back to the drain.
     }
 
     if (frontAppHook) UnhookWinEvent(frontAppHook);
     if (state.mouseHook) UnhookWindowsHookEx(static_cast<HHOOK>(state.mouseHook));
     if (state.keyboardHook) UnhookWindowsHookEx(static_cast<HHOOK>(state.keyboardHook));
     state.stopAnimationPump(); // join before the window (and state) go away
+    if (state.frameDue) {
+        CloseHandle(state.frameDue);
+        state.frameDue = nullptr;
+    }
     server.stop();
     DestroyWindow(state.messageWindow);
     g_state = nullptr;

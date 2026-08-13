@@ -905,9 +905,14 @@ providers, routine timer); W4 fully (subscription with reconnect,
 workspace-name events, `{top:H,bottom:H}` offset zeroed on exit,
 `--komorebi` verb); W5 partially (scheduler with retarget semantics on an
 on-demand compositor-clock frame pump — `DCompositionWaitForCompositorClock`
-on a worker posting one coalesced frame message per tick, so animations and
-marquees run at the display's real refresh rate (120 Hz verified) instead of
-the ~64 Hz a 16 ms WM_TIMER quantizes to; the scheduler and marquee are
+on a worker signaling an auto-reset frame event, consumed by an
+input-priority `PeekMessage`/`MsgWaitForMultipleObjectsEx` main loop that
+drains ALL pending messages before each frame. The event, not PostMessage,
+is load-bearing: posted messages outrank hardware input in GetMessage, so a
+posted 120 Hz frame stream starved clicks whenever render time approached
+the budget — popups visibly lagged their opening click. Animations and
+marquees run at the display's real refresh rate (120 Hz verified) instead
+of the ~64 Hz a 16 ms WM_TIMER quantizes to; the scheduler and marquee are
 time-based, so pace changes smoothness only — graphs/sliders(render)/gauges).
 
 **Also done since**: the embedded Lua runtime (vendored 5.4.8, byte-identical
