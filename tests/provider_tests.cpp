@@ -16,6 +16,7 @@
 #include "events/event_bus.h"
 #include "model/item.h"
 #include "providers/app_info.h"
+#include "providers/ytile.h"
 
 using ybar::events::EventBus;
 using ybar::model::BarSettings;
@@ -56,6 +57,48 @@ TEST_CASE("an invalid process id yields an empty name, never a crash") {
     // placeholder — a process can exit between the event and the lookup.
     REQUIRE(ybar::providers::appNameForProcess(0xFFFFFFFCu).empty());
     REQUIRE(ybar::providers::appNameForWindow(nullptr).empty());
+}
+
+TEST_CASE("ytile state parses to the WORKSPACES widget contract") {
+    // Shape from YTile docs/YTILE-IPC.md: 9 workspaces per monitor, shown =
+    // non-empty OR active, focused = active+1 as a number string.
+    const char* state = R"({
+      "monitors": [{
+        "device": "\\\\.\\DISPLAY1", "primary": true, "active": 2,
+        "workspaces": [
+          {"layout":"bsp","focused":0,"windows":[{"hwnd":11,"exe":"a.exe","title":"A"}],"floating":[]},
+          {"layout":"bsp","focused":0,"windows":[],"floating":[]},
+          {"layout":"bsp","focused":0,"windows":[],"floating":[]},
+          {"layout":"bsp","focused":0,"windows":[],"floating":[{"hwnd":44,"exe":"d.exe","title":"D"}]},
+          {"layout":"bsp","focused":0,"windows":[],"floating":[]},
+          {"layout":"bsp","focused":0,"windows":[],"floating":[]},
+          {"layout":"bsp","focused":0,"windows":[],"floating":[]},
+          {"layout":"bsp","focused":0,"windows":[],"floating":[]},
+          {"layout":"bsp","focused":0,"windows":[],"floating":[]}
+        ]
+      }]
+    })";
+    const auto update = ybar::providers::YTileProvider::parseState(state);
+    REQUIRE(update.has_value());
+    // Shown: 1 (windows), 3 (active though empty), 4 (floating) — ascending.
+    CHECK(update->workspaceNames == "1\n3\n4");
+    CHECK(update->focusedWorkspace == "3");
+    CHECK(update->focusedIndex == 2); // position within the shown list
+    CHECK(update->focusedMonitorIndex == 0);
+}
+
+TEST_CASE("ytile parse survives schema drift") {
+    CHECK_FALSE(ybar::providers::YTileProvider::parseState("not json").has_value());
+    CHECK_FALSE(ybar::providers::YTileProvider::parseState("{}").has_value());
+    CHECK_FALSE(
+        ybar::providers::YTileProvider::parseState(R"({"monitors":[]})").has_value());
+    // A monitor without a workspaces array still yields the active number.
+    const auto bare =
+        ybar::providers::YTileProvider::parseState(R"({"monitors":[{"active":4}]})");
+    REQUIRE(bare.has_value());
+    CHECK(bare->focusedWorkspace == "5");
+    CHECK(bare->workspaceNames == "5");
+    CHECK(bare->focusedIndex == 1);
 }
 
 TEST_CASE("wifi_ssid_prompt=on fires the permission hook exactly once per set") {

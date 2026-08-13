@@ -18,6 +18,8 @@
 #include <unordered_map>
 #include <utility>
 
+#include <nlohmann/json.hpp>
+
 #include "anim/scheduler.h"
 #include "app/config.h"
 #include "app/jsonc_config.h"
@@ -204,6 +206,7 @@ struct DaemonState {
     void executeConfig();
     void rebuildSurfaces();
     bool tryAttachKomorebi();
+    bool tryAttachYTile();
     void detachKomorebiIfReserveChanged();
     void updateFullscreenElevation();
     void armAudio();
@@ -346,6 +349,11 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                     {"PREV_WORKSPACE", update->previousWorkspace},
                     {"FOCUSED_MONITOR_INDEX",
                      std::to_string(update->focusedMonitorIndex + 1)},
+                    // Same widget contract as the komorebi env: the shown
+                    // workspace numbers (non-empty OR active) and the
+                    // focused one's position in that list.
+                    {"WORKSPACES", update->workspaceNames},
+                    {"FOCUSED_WORKSPACE_INDEX", std::to_string(update->focusedIndex)},
                 };
                 // komorebi_workspace_change fires too so existing configs and
                 // themes keep working unchanged, whichever WM is running.
@@ -378,8 +386,9 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                 }
                 // Per-second upkeep: none of these have a message to hang off.
                 g_state->updateFullscreenElevation();
-                g_state->detachKomorebiIfReserveChanged(); // reserve left komorebi mode
+                g_state->detachKomorebiIfReserveChanged(); // reserve left WM mode
                 g_state->tryAttachKomorebi(); // komorebi may have just started
+                g_state->tryAttachYTile();    // ytile likewise (komorebi absent)
                 if (g_state->settings.sticky) {
                     for (const auto& surface : g_state->surfaces) surface->followCurrentDesktop();
                 }
@@ -746,18 +755,69 @@ bool DaemonState::tryAttachKomorebi() {
     return true;
 }
 
+// YTile attach (boot + the 1 s re-detect): only when komorebi is absent —
+// komorebi outranks. A late-starting ytiled attaches the same way a late
+// komorebi does, with an immediate state replay.
+bool DaemonState::tryAttachYTile() {
+    if (komorebi || ytile) return false;
+    if (settings.reserve == ybar::model::ReserveMode::Off ||
+        settings.reserve == ybar::model::ReserveMode::AppBar)
+        return false;
+    if (ybar::providers::KomorebiProvider::detect()) return false;
+    if (!ybar::providers::YTileProvider::detect()) return false;
+
+    ytile = std::make_unique<ybar::providers::YTileProvider>();
+    ytile->onUpdate = [hwnd = messageWindow](const ybar::providers::YTileUpdate& update) {
+        auto* copy = new ybar::providers::YTileUpdate(update);
+        if (!PostMessageW(hwnd, kMsgYTile, 0, reinterpret_cast<LPARAM>(copy))) delete copy;
+    };
+    // Window lifecycle from state diffs rides the same resolution path as
+    // komorebi's Show/Destroy (hwnd 0: unmanage windows are already gone,
+    // the exe basename resolves deterministically).
+    ytile->onAppEvent = [hwnd = messageWindow](const std::string& event,
+                                               const std::string& exe) {
+        auto* payload = new KomorebiAppEvent{event, exe, 0};
+        if (!PostMessageW(hwnd, kMsgKomorebiApp, 0, reinterpret_cast<LPARAM>(payload)))
+            delete payload;
+    };
+    bus.addEvent("ytile_workspace_change");
+    bus.addEvent("komorebi_workspace_change"); // config compatibility
+    if (!ytile->start()) {
+        std::fprintf(stderr, "[ybar] ytile subscription failed\n");
+        ytile.reset();
+        return false;
+    }
+    trace("ytile: subscribed");
+    // The reader pulls initial state itself right after subscribing, so no
+    // explicit refresh is needed here; retire the app poller like komorebi.
+    if (appLifecycleArmed) {
+        KillTimer(messageWindow, kAppsTimer);
+        appLifecycleArmed = false;
+    }
+    appliedOffsetPhysical = -1; // run the work-area handshake
+    renderAll();
+    return true;
+}
+
 // `--bar reserve=` can change at runtime (spec 6.1): leaving komorebi mode
 // must release both the subscription and the reserved strip, or the offset
 // double-stacks with the appbar / persists under reserve=off.
 void DaemonState::detachKomorebiIfReserveChanged() {
     const bool komorebiMode = settings.reserve != ybar::model::ReserveMode::Off &&
                               settings.reserve != ybar::model::ReserveMode::AppBar;
-    if (komorebiMode || !komorebi) return;
+    if (komorebiMode || (!komorebi && !ytile)) return;
     // stop() FIRST: it joins the reader thread, whose reconnect path would
     // otherwise re-apply the old offset right after our zeros land.
-    komorebi->stop();
-    komorebi->clearWorkAreaOffset();
-    komorebi.reset();
+    if (komorebi) {
+        komorebi->stop();
+        komorebi->clearWorkAreaOffset();
+        komorebi.reset();
+    }
+    if (ytile) {
+        ytile->stop();
+        ytile->clearWorkAreaOffset();
+        ytile.reset();
+    }
     appliedOffsetPhysical = -1;
     // The WM-less fallback poller resumes if anything still subscribes.
     const auto anySubscriber = [this](const char* name) {
@@ -1526,28 +1586,9 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
 
     // YTile: the sibling WM adapter. komorebi WINS when both answer — in
     // practice ytiled can idle alongside (launched by whkd) while komorebi
-    // does the actual tiling, and picking ytile then starves the richer
-    // komorebi env (WORKSPACES). ytile attaches only when komorebi is absent.
-    if (state.settings.reserve != ybar::model::ReserveMode::Off &&
-        state.settings.reserve != ybar::model::ReserveMode::AppBar &&
-        !ybar::providers::KomorebiProvider::detect() &&
-        ybar::providers::YTileProvider::detect()) {
-        state.ytile = std::make_unique<ybar::providers::YTileProvider>();
-        state.ytile->onUpdate = [hwnd = state.messageWindow](
-                                    const ybar::providers::YTileUpdate& update) {
-            auto* copy = new ybar::providers::YTileUpdate(update);
-            if (!PostMessageW(hwnd, kMsgYTile, 0, reinterpret_cast<LPARAM>(copy)))
-                delete copy;
-        };
-        state.bus.addEvent("ytile_workspace_change");
-        state.bus.addEvent("komorebi_workspace_change"); // config compatibility
-        if (!state.ytile->start()) {
-            std::fprintf(stderr, "[ybar] ytile subscription failed\n");
-            state.ytile.reset();
-        } else {
-            trace("ytile: subscribed");
-        }
-    }
+    // does the actual tiling. ytile attaches only when komorebi is absent,
+    // here at boot and from the 1 s re-detect tick.
+    state.tryAttachYTile();
 
     // komorebi (spec 11): subscription + work-area handshake, gated by reserve.
     state.tryAttachKomorebi();
@@ -1604,9 +1645,27 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     hooks.requestSsidPermission = [] {
         ybar::providers::NetworkProvider::openLocationPrivacySettings();
     };
-    hooks.komorebiMessage = [](const std::string& jsonText) {
-        return ybar::providers::KomorebiProvider::detect() &&
-               ybar::providers::KomorebiProvider::sendMessage(jsonText);
+    hooks.komorebiMessage = [&state](const std::string& jsonText) {
+        if (ybar::providers::KomorebiProvider::detect())
+            return ybar::providers::KomorebiProvider::sendMessage(jsonText);
+        // YTile compatibility: with komorebi absent, translate the workspace
+        // SocketMessage types themes actually send onto YTile verbs, so the
+        // same click_script drives either WM unchanged.
+        if (state.ytile) {
+            try {
+                const auto message = nlohmann::json::parse(jsonText);
+                const auto type = message.value("type", std::string{});
+                if (type == "FocusWorkspaceNumber")
+                    return state.ytile->focusListIndex(message.value("content", 0));
+                if (type == "FocusNamedWorkspace")
+                    return state.ytile->focusNamed(message.value("content", std::string{}));
+                if (type == "CycleFocusWorkspace")
+                    return state.ytile->cycleWorkspace(
+                        message.value("content", std::string{"Next"}) != "Previous");
+            } catch (const nlohmann::json::exception&) {
+            }
+        }
+        return false;
     };
     hooks.reload = [&state](const std::string& explicitPath) {
         // --reload [path] re-points the config before the teardown re-run —

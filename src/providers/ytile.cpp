@@ -6,6 +6,7 @@
 #include <windows.h>
 // clang-format on
 
+#include <algorithm>
 #include <string>
 
 #include <nlohmann/json.hpp>
@@ -17,6 +18,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kPipePath = "\\\\.\\pipe\\ytile";
+constexpr int kWorkspacesPerMonitor = 9; // fixed by the YTile protocol
 
 // Opens a client connection; retries briefly when all instances are busy.
 HANDLE openPipe() {
@@ -54,6 +56,28 @@ bool readLine(HANDLE pipe, std::string& buffer, std::string& line) {
     }
 }
 
+// hwnd -> exe over every window (tiled + floating) of every workspace of
+// every monitor — the app-lifecycle diff base. Hwnds may exceed 2^31
+// (protocol note): parse as 64-bit.
+std::vector<std::pair<long long, std::string>> collectWindows(const json& state) {
+    std::vector<std::pair<long long, std::string>> windows;
+    for (const auto& monitor : state.at("monitors")) {
+        if (!monitor.contains("workspaces")) continue;
+        for (const auto& workspace : monitor.at("workspaces")) {
+            for (const auto* key : {"windows", "floating"}) {
+                if (!workspace.contains(key)) continue;
+                for (const auto& window : workspace.at(key)) {
+                    if (!window.is_object() || !window.contains("hwnd")) continue;
+                    windows.emplace_back(window.at("hwnd").get<long long>(),
+                                         window.value("exe", std::string{}));
+                }
+            }
+        }
+    }
+    std::sort(windows.begin(), windows.end());
+    return windows;
+}
+
 } // namespace
 
 bool YTileProvider::detect() {
@@ -78,6 +102,59 @@ bool YTileProvider::sendCommand(const std::string& cmd, const std::string& arg,
     }
     CloseHandle(pipe);
     return ok;
+}
+
+namespace {
+
+// Primary-monitor parse (YTile state has no global focused-monitor field —
+// documented limitation, mirrored from the previous adapter). WORKSPACES
+// shows non-empty OR active, ascending — the hiding behavior the protocol's
+// own widget note recommends and the macOS AeroSpace adapter shipped.
+std::optional<YTileUpdate> parseStateJson(const json& state) {
+    try {
+        const auto& monitors = state.at("monitors");
+        if (monitors.empty()) return std::nullopt;
+        const auto& monitor = monitors.at(0);
+        const int active = monitor.value("active", 0);
+
+        YTileUpdate update;
+        update.focusedMonitorIndex = 0;
+        update.focusedWorkspace = std::to_string(active + 1);
+        if (monitor.contains("workspaces")) {
+            const auto& workspaces = monitor.at("workspaces");
+            for (int i = 0; i < static_cast<int>(workspaces.size()); ++i) {
+                const auto& workspace = workspaces.at(i);
+                const bool occupied =
+                    (workspace.contains("windows") && !workspace.at("windows").empty()) ||
+                    (workspace.contains("floating") && !workspace.at("floating").empty());
+                if (!occupied && i != active) continue;
+                if (!update.workspaceNames.empty()) update.workspaceNames += '\n';
+                update.workspaceNames += std::to_string(i + 1);
+                if (i == active)
+                    update.focusedIndex =
+                        1 + static_cast<int>(std::count(update.workspaceNames.begin(),
+                                                        update.workspaceNames.end(), '\n'));
+            }
+        }
+        if (update.workspaceNames.empty()) { // schema said no workspaces
+            update.workspaceNames = update.focusedWorkspace;
+            update.focusedIndex = 1;
+        }
+        update.workspacesChanged = true;
+        return update;
+    } catch (const json::exception&) {
+        return std::nullopt;
+    }
+}
+
+} // namespace
+
+std::optional<YTileUpdate> YTileProvider::parseState(const std::string& stateJson) {
+    try {
+        return parseStateJson(json::parse(stateJson));
+    } catch (const json::exception&) {
+        return std::nullopt;
+    }
 }
 
 bool YTileProvider::start() {
@@ -108,9 +185,21 @@ void YTileProvider::readerLoop() {
                           readLine(pipe, buffer, line); // ack: {"ok":true,...}
 
         if (subscribed) {
+            // The protocol's `ready` contract: reservations do not survive a
+            // ytiled restart, and every (re)subscribe is the cue to
+            // re-assert. Idempotent by design.
+            const int offset = appliedOffset_.load();
+            if (offset > 0) applyWorkAreaOffset(offset);
+
             // The stream only pushes on changes — pull the initial state so
             // the workspaces widget populates at boot (mirrors the
-            // forced-query idiom, spec 11.3).
+            // forced-query idiom, spec 11.3). Clear the dedupe first: after
+            // a reconnect the state may be identical but subscribers just
+            // lost their pipe-side continuity.
+            {
+                std::lock_guard<std::mutex> lock(stateMutex_);
+                lastKey_.clear();
+            }
             std::string stateReply;
             if (sendCommand("state", "", &stateReply)) {
                 try {
@@ -139,27 +228,65 @@ void YTileProvider::readerLoop() {
 }
 
 void YTileProvider::handleState(const std::string& stateJson) {
+    json state;
     try {
-        const auto state = json::parse(stateJson);
-        const auto& monitors = state.at("monitors");
-        if (monitors.empty()) return;
-        monitorCount_ = static_cast<int>(monitors.size());
+        state = json::parse(stateJson);
+    } catch (const json::exception&) {
+        return;
+    }
+    auto update = parseStateJson(state);
+    if (!update) return;
+    if (state.contains("monitors"))
+        monitorCount_ = std::max(1, static_cast<int>(state.at("monitors").size()));
 
-        // YTile state carries no focused-monitor field yet; report the
-        // primary (index 0) monitor's active workspace.
-        const auto& monitor = monitors.at(0);
-        const int active = monitor.value("active", 0);
-
-        YTileUpdate update;
-        update.focusedMonitorIndex = 0;
-        update.focusedWorkspace = std::to_string(active + 1);
-        update.workspacesChanged = true;
-        if (update.focusedWorkspace == lastFocused_) return; // dedupe
-        update.previousWorkspace = lastFocused_;
-        lastFocused_ = update.focusedWorkspace;
-        if (onUpdate) onUpdate(update);
+    // App lifecycle from window diffs (window-scoped, komorebi parity):
+    // every notification is a full snapshot, so appeared/vanished hwnds are
+    // exactly manage/unmanage.
+    std::vector<std::pair<long long, std::string>> current;
+    try {
+        current = collectWindows(state);
     } catch (const json::exception&) {
     }
+    std::vector<std::pair<std::string, std::string>> appEvents;
+    {
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        if (onAppEvent && windowsPrimed_) {
+            for (const auto& [hwnd, exe] : current) {
+                const bool existed = std::binary_search(
+                    knownWindows_.begin(), knownWindows_.end(), std::make_pair(hwnd, exe));
+                if (!existed && !exe.empty()) appEvents.emplace_back("app_launched", exe);
+            }
+            for (const auto& [hwnd, exe] : knownWindows_) {
+                const bool remains = std::binary_search(current.begin(), current.end(),
+                                                        std::make_pair(hwnd, exe));
+                if (!remains && !exe.empty()) appEvents.emplace_back("app_terminated", exe);
+            }
+        }
+        knownWindows_ = std::move(current);
+        windowsPrimed_ = true; // never announce the pre-existing world
+
+        // Dedupe on focused + shown list: occupancy changes must repaint the
+        // pill strip even when focus did not move.
+        const std::string key = update->focusedWorkspace + "\x1f" + update->workspaceNames;
+        update->previousWorkspace = lastFocusedName_;
+        const bool duplicate = (key == lastKey_);
+        lastKey_ = key;
+        lastFocusedName_ = update->focusedWorkspace;
+        lastActive_ = std::max(0, std::stoi(update->focusedWorkspace) - 1);
+        shownNumbers_.clear();
+        for (size_t start = 0, end = 0; end != std::string::npos; start = end + 1) {
+            end = update->workspaceNames.find('\n', start);
+            const std::string token = update->workspaceNames.substr(
+                start, end == std::string::npos ? std::string::npos : end - start);
+            if (!token.empty()) shownNumbers_.push_back(std::stoi(token));
+        }
+        if (duplicate) {
+            update.reset();
+        }
+    }
+    for (const auto& [event, exe] : appEvents)
+        if (onAppEvent) onAppEvent(event, exe);
+    if (update && onUpdate) onUpdate(*update);
 }
 
 bool YTileProvider::refresh() {
@@ -168,7 +295,10 @@ bool YTileProvider::refresh() {
     try {
         const auto parsed = json::parse(reply);
         if (!parsed.contains("state")) return false;
-        lastFocused_.clear(); // forced re-query always republishes
+        {
+            std::lock_guard<std::mutex> lock(stateMutex_);
+            lastKey_.clear(); // forced re-query always republishes
+        }
         handleState(parsed.at("state").dump());
         return true;
     } catch (const json::exception&) {
@@ -176,7 +306,39 @@ bool YTileProvider::refresh() {
     }
 }
 
+bool YTileProvider::focusListIndex(int zeroBasedListIndex) {
+    int number = 0;
+    {
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        if (zeroBasedListIndex < 0 ||
+            zeroBasedListIndex >= static_cast<int>(shownNumbers_.size()))
+            return false;
+        number = shownNumbers_[static_cast<std::size_t>(zeroBasedListIndex)];
+    }
+    return sendCommand("workspace", std::to_string(number));
+}
+
+bool YTileProvider::focusNamed(const std::string& name) {
+    // YTile workspaces have no names; the published "names" ARE the numbers.
+    if (name.empty() || name.find_first_not_of("0123456789") != std::string::npos)
+        return false;
+    return sendCommand("workspace", name);
+}
+
+bool YTileProvider::cycleWorkspace(bool next) {
+    int target = 0;
+    {
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        const int delta = next ? 1 : -1;
+        target = ((lastActive_ + delta) % kWorkspacesPerMonitor + kWorkspacesPerMonitor) %
+                     kWorkspacesPerMonitor +
+                 1;
+    }
+    return sendCommand("workspace", std::to_string(target));
+}
+
 void YTileProvider::applyWorkAreaOffset(int barHeightPhysical) {
+    appliedOffset_ = barHeightPhysical; // replayed after every reconnect
     for (int i = 0; i < monitorCount_; ++i) {
         sendCommand("reserve",
                     std::to_string(i) + " 0 " + std::to_string(barHeightPhysical) + " 0 0");
@@ -184,6 +346,7 @@ void YTileProvider::applyWorkAreaOffset(int barHeightPhysical) {
 }
 
 void YTileProvider::clearWorkAreaOffset() {
+    appliedOffset_ = 0;
     for (int i = 0; i < monitorCount_; ++i) {
         sendCommand("reserve", std::to_string(i) + " 0 0 0 0");
     }
