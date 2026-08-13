@@ -722,6 +722,10 @@ bool DaemonState::tryAttachKomorebi() {
         return false;
     }
     trace("komorebi: subscribed");
+    // Late attach publishes nothing until komorebi's next event — replay
+    // current state now so a workspaces widget populates immediately
+    // (delivery is marshaled through the normal onUpdate path).
+    komorebi->refresh();
     // komorebi's Show/Destroy now feed app_launched/app_terminated — retire
     // the snapshot poller or every launch fires twice with different names.
     if (appLifecycleArmed) {
