@@ -21,6 +21,11 @@ namespace ybar::providers {
 struct KomorebiUpdate {
     std::string focusedWorkspace; // name when set, else 1-based index string
     std::string previousWorkspace;
+    // Newline-separated display names of the focused monitor's workspaces,
+    // in komorebi order — what a workspaces widget builds its pills from
+    // (published as WORKSPACES; spec 11.3 allows enriching the env).
+    std::string workspaceNames;
+    int focusedIndex = 0;        // 1-based position within workspaceNames
     int focusedMonitorIndex = 0; // komorebi's monitor index
     bool workspacesChanged = false;
 };
@@ -73,8 +78,9 @@ private:
     std::atomic<bool> running_{false};
     // publishState runs on the reader thread AND (via refresh) the UI
     // thread; the dedupe string needs a real lock, the scalars get atomics.
-    std::mutex stateMutex_; // guards lastFocused_
-    std::string lastFocused_;
+    std::mutex stateMutex_; // guards lastFocused_ / lastFocusedName_
+    std::string lastFocused_;     // composite dedupe key
+    std::string lastFocusedName_; // plain name, for PREV_WORKSPACE
     std::atomic<int> monitorCount_{1};
     std::atomic<bool> monitorCountKnown_{false};
     std::atomic<int> appliedOffset_{0};

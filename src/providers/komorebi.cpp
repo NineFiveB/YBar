@@ -42,12 +42,17 @@ KomorebiUpdate extractUpdate(const json& state) {
     const auto focusedWs = workspaces.value("focused", 0);
     const auto& wsElements = workspaces.at("elements");
     if (focusedWs >= wsElements.size()) return update;
-    const auto& workspace = wsElements.at(focusedWs);
-    if (workspace.contains("name") && workspace.at("name").is_string()) {
-        update.focusedWorkspace = workspace.at("name").get<std::string>();
-    } else {
-        update.focusedWorkspace = std::to_string(focusedWs + 1);
+    for (std::size_t i = 0; i < wsElements.size(); ++i) {
+        const auto& workspace = wsElements.at(i);
+        std::string name;
+        if (workspace.contains("name") && workspace.at("name").is_string())
+            name = workspace.at("name").get<std::string>();
+        if (name.empty()) name = std::to_string(i + 1);
+        if (i == static_cast<std::size_t>(focusedWs)) update.focusedWorkspace = name;
+        if (!update.workspaceNames.empty()) update.workspaceNames += '\n';
+        update.workspaceNames += name;
     }
+    update.focusedIndex = static_cast<int>(focusedWs) + 1;
     update.workspacesChanged = true;
     return update;
 }
@@ -217,14 +222,19 @@ void KomorebiProvider::publishState(const std::string& payload) {
             // The reader thread and a UI-thread refresh() can publish
             // concurrently — the dedupe string must not be written by both.
             std::lock_guard<std::mutex> lock(stateMutex_);
-            update.previousWorkspace = lastFocused_;
-            // Dedupe on monitor+workspace: two monitors can focus workspaces
-            // with the same display string (spec 11.3 fires on monitor OR
-            // workspace).
-            const std::string key =
-                std::to_string(update.focusedMonitorIndex) + "\x1f" + update.focusedWorkspace;
+            // PREV_WORKSPACE carries the plain display name — the dedupe key
+            // is a composite and must never leak into the env.
+            update.previousWorkspace = lastFocusedName_;
+            // Dedupe on monitor+workspace+list: two monitors can focus
+            // workspaces with the same display string (spec 11.3 fires on
+            // monitor OR workspace), and a created/renamed workspace must
+            // republish even when focus did not move — widgets rebuild
+            // their pill set from WORKSPACES.
+            const std::string key = std::to_string(update.focusedMonitorIndex) + "\x1f" +
+                                    update.focusedWorkspace + "\x1f" + update.workspaceNames;
             if (key == lastFocused_) return;
             lastFocused_ = key;
+            lastFocusedName_ = update.focusedWorkspace;
         }
         if (onUpdate) onUpdate(update);
     } catch (const json::exception&) {

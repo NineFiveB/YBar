@@ -324,6 +324,12 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                     {"PREV_WORKSPACE", update->previousWorkspace},
                     {"FOCUSED_MONITOR_INDEX",
                      std::to_string(update->focusedMonitorIndex + 1)},
+                    // Workspaces-widget contract: the focused monitor's
+                    // workspace names, newline-separated, in komorebi order,
+                    // plus the focused one's 1-based position — so a pill
+                    // strip rebuilds without shelling out to komorebic.
+                    {"WORKSPACES", update->workspaceNames},
+                    {"FOCUSED_WORKSPACE_INDEX", std::to_string(update->focusedIndex)},
                 };
                 g_state->bus.trigger("komorebi_workspace_change", update->focusedWorkspace,
                                      env);
