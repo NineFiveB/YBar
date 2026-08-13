@@ -26,11 +26,18 @@ local max_devices = 6
 -- One probe, compact output parsed in Lua:
 --   radio|1        (a non-BTHENUM Status-OK node = the physical radio)
 --   dev|<name>     (one line per paired device node)
+-- No backslashes anywhere in the regexes: the MSYS sh -> powershell.exe
+-- spawn halves `\\` to `\`, which silently turned BTHENUM\\DEV_ into the
+-- never-matching \D (non-digit) class — the device list came back empty.
+-- `.` matches the literal backslash and survives every quoting layer.
+-- UTF-8 output encoding keeps non-ASCII device names (curly apostrophes)
+-- intact through the exec pipe.
 local pnp_cmd = "powershell.exe -NoProfile -Command '"
+  .. '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; '
   .. '$d = Get-PnpDevice -Class Bluetooth; '
   .. 'if ($d | Where-Object { $_.InstanceId -notmatch "^BTH" -and $_.Status -eq "OK" }) '
   .. '{ "radio|1" } else { "radio|0" }; '
-  .. '$d | Where-Object { $_.InstanceId -match "^BTHENUM\\\\DEV_|^BTHLE\\\\DEV_" -and $_.FriendlyName } '
+  .. '$d | Where-Object { $_.InstanceId -match "^BTHENUM.DEV_|^BTHLE.DEV_" -and $_.FriendlyName } '
   .. '| ForEach-Object { "dev|$($_.FriendlyName)" }'
   .. "'"
 
