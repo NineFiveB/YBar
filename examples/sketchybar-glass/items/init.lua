@@ -6,8 +6,10 @@
 -- komorebi answers, with no probing at config load.
 --
 -- items/menus.lua (the macOS app-menu swap) has no Windows concept and is
--- not ported.
-require("items.apple")
+-- not ported. The system-menu pill (items/apple.lua) is not loaded either:
+-- a launcher like Raycast covers everything it offered — uncomment the
+-- require to bring it back.
+-- require("items.apple")
 require("items.spaces")
 require("items.front_app")
 require("items.calendar")

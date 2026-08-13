@@ -88,10 +88,10 @@ local function add_detail(title)
   })
 end
 
-local power_source   = add_detail("Power Source")
-local remaining_time = add_detail("Time Remaining")
-local condition      = add_detail("Condition")
-local max_capacity   = add_detail("Max Capacity")
+-- Time Remaining, Condition and Max Capacity removed by request — the
+-- estimate was mostly "No estimate" and the health rows have no cheap
+-- Windows source (they were permanently em-dashed).
+local power_source = add_detail("Power Source")
 
 -- ── Battery Level graph (rolling 24 hours, sampled live) ───────────────────
 -- Windows keeps no queryable charge history (pmset's log has no cheap
@@ -232,13 +232,6 @@ local function refresh_from_cim(sample_history)
     if battery_bracket:query().popup.drawing == "on" then
       header:set({ label = { string = charge and (charge .. "%") or "—" } })
       power_source:set({ label = on_ac and "Power Adapter" or "Battery" })
-      local has_estimate = runtime and runtime > 0 and runtime < 71582788
-        and not on_ac
-      remaining_time:set({
-        label = has_estimate
-          and string.format("%d:%02d", runtime // 60, runtime % 60)
-          or "No estimate",
-      })
     end
   end)
 end
@@ -258,21 +251,11 @@ local function update_main_icon(env)
   end
 end
 
-local function update_health()
-  -- Windows has no cheap counterpart to system_profiler's battery health
-  -- (Condition / Maximum Capacity need a powercfg /batteryreport export or
-  -- WMI classes that most firmware doesn't populate) — keep the rows, but
-  -- they stay em-dashed.
-  condition:set({ label = "—" })
-  max_capacity:set({ label = "—" })
-end
-
 local function toggle_details()
   local should_draw = battery_bracket:query().popup.drawing == "off"
   if should_draw then
     battery_bracket:set({ popup = { drawing = true } })
     refresh_from_cim(false)
-    update_health()
     -- no update_history(): the graph already holds the live-sampled window
   else
     hide_details()
