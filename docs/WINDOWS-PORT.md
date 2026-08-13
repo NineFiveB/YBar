@@ -1041,12 +1041,29 @@ build whenever a second desktop exists) with the foreground trick as
 fallback; the retest shows the bar full-width on a fresh desktop within one
 follow tick.
 
+**Flagship replication** (the goal the port was aimed at): the default macOS
+setup — `examples/sketchybar-glass`, the Liquid Glass restyle over the full
+sketchybar port, ~2,500 lines of Lua — runs on ybar-win, live-verified
+against a real komorebi session. The compat shim and glass overlay ported
+with zero runtime changes (the 2,300-line config loaded with an empty error
+log on the first attempt); icons.lua re-targets every SF-Symbols literal to
+`sf:` names; the workspace strip is a new event-driven komorebi adapter fed
+by the enriched env (`WORKSPACES` + `FOCUSED_WORKSPACE_INDEX`, added §11.3)
+with a fixed pill-slot set — killing the AeroSpace boot race the macOS tree
+documents — and index-based focus clicks. Verified on screen: seven pills
+bound to live workspace names, click-to-focus round trip with the highlight
+following, the system-menu popup, and the battery popup's WMI-fed rows.
+Divergences are cataloged in `examples/sketchybar-glass/PORTING-WIN.md`.
+
 **Remaining to macOS parity**:
 1. `WM_DPICHANGED` live — needs a real per-monitor scaling change; the
    handler and the popup-rebuild-on-scale-mismatch are unit-covered only.
 2. Signing — the binary is unsigned, so SmartScreen warns on first run.
 3. Cutting the first `win-v0.1.0` tag (release workflow + manifests are
    ready and validated; the tag is the maintainer's call).
+4. Glass-theme polish: hover/reveal animations from the macOS item files
+   were not carried over by the first port pass, and the media/wifi popups
+   have not yet been exercised on screen.
 
 Deliberate divergences (never 1:1): alias items (§10.6), per-item glass
 pills (§7.6), distributed-notification bindings (§9), THERMAL_STATE
