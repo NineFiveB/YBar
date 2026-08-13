@@ -1065,6 +1065,19 @@ Divergences are cataloged in `examples/sketchybar-glass/PORTING-WIN.md`.
    were not carried over by the first port pass, and the media/wifi popups
    have not yet been exercised on screen.
 
+Post-replication fixes, all found chasing a user report of the cpu graph
+rendering outside its pill and all live-verified: graphs now fill the
+background pill height centered (reference emitGraph math), popup rows take
+their height from plates/gauges/images like the reference (the cpu gauge
+dashboard renders full-size dials), fixed-width items clip text to their
+content box (the width-animation reveal rule; a part's zero-width slot
+clipping to nothing MATCHES the reference — the mac "cpu ??%" overlay label
+is invisible there too), a late komorebi attach replays state so the
+workspace strip populates immediately, and the WM preference now ranks
+komorebi over ytile with a live handover — on the reference machine
+`komorebic start` brings up whkd, which relaunches ytiled, so both WMs
+answer and "ytiled's presence is the signal" chose the idle one.
+
 Deliberate divergences (never 1:1): alias items (§10.6), per-item glass
 pills (§7.6), distributed-notification bindings (§9), THERMAL_STATE
 (§10), single topmost z-band (§16).
