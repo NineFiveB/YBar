@@ -20,7 +20,7 @@ installed via `ybar theme use` must be self-contained.
 |---|---|
 | SF Pro / SF Mono | Segoe UI / Cascadia Mono (Heavy/Black → Bold) |
 | SF-Symbols glyph literals (icons.lua) | `sf:<name>` strings resolved against Segoe Fluent Icons |
-| sketchybar-app-font app glyphs | dropped; front_app shows the real shell icon via `image = "app.<Name>"` |
+| sketchybar-app-font app glyphs | dropped; front_app is label-only by owner preference (the engine can show the real shell icon via `image = "app.<Name>"` if wanted) |
 | AeroSpace CLI workspace discovery | komorebi event env (`WORKSPACES`, `FOCUSED_WORKSPACE_INDEX`) — no CLI probing, no boot race |
 | `aerospace workspace <ws>` clicks | `ybar --komorebi '{"type":"FocusNamedWorkspace",...}'` |
 | pmset / battery CLI | native `battery_change`/`power_source_change` events + one `Win32_Battery` WMI query for popup details |

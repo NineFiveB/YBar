@@ -8,13 +8,17 @@
 #include <shobjidl.h> // SetCurrentProcessExplicitAppUserModelID
 // clang-format on
 
+#include <dcomp.h>
+
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <future>
 #include <memory>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 
@@ -74,6 +78,7 @@ constexpr UINT kMsgNetwork = WM_APP + 10;
 constexpr UINT kMsgModifier = WM_APP + 11;
 constexpr UINT kMsgGlobalMouse = WM_APP + 12; // wParam: 1 entered, 0 exited
 constexpr UINT kMsgKomorebiApp = WM_APP + 13;
+constexpr UINT kMsgAnimationFrame = WM_APP + 14; // compositor-clock pump tick
 constexpr UINT_PTR kStatsTimer = 5;
 constexpr UINT_PTR kTooltipTimer = 6;
 constexpr UINT_PTR kAppsTimer = 7;
@@ -140,6 +145,9 @@ struct DaemonState {
     bool appLifecycleArmed = false;
     ybar::anim::AnimationScheduler scheduler;
     bool animationTimerLive = false;
+    HANDLE animationPumpStop = nullptr;
+    std::thread animationPump;
+    std::atomic<bool> animationFramePending{false};
     int appliedOffsetPhysical = -1;
     int hoverItemId = -1; // targeted mouse.entered/exited tracking
 
@@ -241,21 +249,60 @@ struct DaemonState {
     }
 
     // On-demand frame clock: runs while animations exist OR a marquee is on
-    // screen (continuousDemand, spec 7.2) — never otherwise.
+    // screen (continuousDemand, spec 7.2) — never otherwise. Frames are paced
+    // by the compositor clock (DCompositionWaitForCompositorClock), which
+    // ticks at the display's actual refresh rate — a WM_TIMER quantizes to
+    // ~15.6 ms and caps animation at ~64 Hz on a 120 Hz panel. Everything
+    // downstream is time-based (scheduler ticks and the marquee offset take
+    // monotonic seconds), so the clock source changes smoothness only.
     bool marqueeOnScreen = false;
     void syncAnimationTimer() {
         const bool wanted = scheduler.active() || marqueeOnScreen;
         if (wanted && !animationTimerLive) {
-            SetTimer(messageWindow, kAnimationTimer, 16, nullptr);
             animationTimerLive = true;
+            animationPumpStop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            if (!animationPumpStop) {
+                SetTimer(messageWindow, kAnimationTimer, 16, nullptr); // fallback
+                return;
+            }
+            animationPump = std::thread([this] {
+                for (;;) {
+                    const DWORD r =
+                        DCompositionWaitForCompositorClock(1, &animationPumpStop, 100);
+                    if (r == WAIT_OBJECT_0) return; // stop event
+                    if (r == WAIT_TIMEOUT) continue; // compositor idle: no frame due
+                    if (r != WAIT_OBJECT_0 + 1) { // clock unavailable: ~60 Hz fallback
+                        Sleep(16);
+                    }
+                    // One in-flight frame message at a time — a stalled UI
+                    // thread must not accumulate a queue of stale ticks.
+                    if (!animationFramePending.exchange(true))
+                        PostMessageW(messageWindow, kMsgAnimationFrame, 0, 0);
+                }
+            });
             return;
         }
         if (!wanted && animationTimerLive) {
-            KillTimer(messageWindow, kAnimationTimer);
+            stopAnimationPump();
             animationTimerLive = false;
             return;
         }
     }
+
+    void stopAnimationPump() {
+        if (animationPump.joinable()) {
+            SetEvent(animationPumpStop);
+            animationPump.join();
+        }
+        if (animationPumpStop) {
+            CloseHandle(animationPumpStop);
+            animationPumpStop = nullptr;
+        }
+        KillTimer(messageWindow, kAnimationTimer); // no-op unless fallback armed
+        animationFramePending = false;
+    }
+
+    ~DaemonState() { stopAnimationPump(); }
 
     ybar::render::GlyphAtlas* atlasFor(double scale) {
         const int key = static_cast<int>(scale * 100 + 0.5);
@@ -365,6 +412,14 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             delete update;
             return 0;
         }
+        case kMsgAnimationFrame:
+            if (g_state) {
+                g_state->animationFramePending = false;
+                g_state->scheduler.tick(monotonicSeconds());
+                g_state->renderAll();
+                g_state->syncAnimationTimer();
+            }
+            return 0;
         case WM_TIMER:
             if (wParam == kRoutineTimer && g_state) {
                 // Gate BEFORE incrementing (reference ordering): policy-off or
@@ -1798,6 +1853,7 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     if (frontAppHook) UnhookWinEvent(frontAppHook);
     if (state.mouseHook) UnhookWindowsHookEx(static_cast<HHOOK>(state.mouseHook));
     if (state.keyboardHook) UnhookWindowsHookEx(static_cast<HHOOK>(state.keyboardHook));
+    state.stopAnimationPump(); // join before the window (and state) go away
     server.stop();
     DestroyWindow(state.messageWindow);
     g_state = nullptr;

@@ -903,8 +903,12 @@ widths, no icon mapping yet); W3 mostly (EventBus, ScriptRunner, mouse +
 click_script, config exec/JSONC/hotload/--reload, power/stats/front-app
 providers, routine timer); W4 fully (subscription with reconnect,
 workspace-name events, `{top:H,bottom:H}` offset zeroed on exit,
-`--komorebi` verb); W5 partially (scheduler with retarget semantics on a
-16 ms on-demand timer, graphs/sliders(render)/gauges).
+`--komorebi` verb); W5 partially (scheduler with retarget semantics on an
+on-demand compositor-clock frame pump — `DCompositionWaitForCompositorClock`
+on a worker posting one coalesced frame message per tick, so animations and
+marquees run at the display's real refresh rate (120 Hz verified) instead of
+the ~64 Hz a 16 ms WM_TIMER quantizes to; the scheduler and marquee are
+time-based, so pace changes smoothness only — graphs/sliders(render)/gauges).
 
 **Also done since**: the embedded Lua runtime (vendored 5.4.8, byte-identical
 prelude, single-funnel trampolines, generation-guarded exec/delay, Lua-first
