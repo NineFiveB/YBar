@@ -14,8 +14,18 @@ using ybar::model::TextPart;
 
 namespace {
 
+// Authored color bytes are sRGB; the swap chain's sRGB RTV re-encodes on
+// store, so shader inputs must be LINEAR or every color comes out
+// gamma-brightened (0x06 painted as ~0x2b — caught live when the bar went
+// dark). Exact sRGB EOTF, matching the reference's YColor.toLinear; alpha
+// is coverage, not color, and stays untouched.
+float srgbToLinear(float c) {
+    return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
+}
+
 Float4 colorOf(Color color) {
-    return {color.r(), color.g(), color.b(), color.a()};
+    return {srgbToLinear(color.r()), srgbToLinear(color.g()), srgbToLinear(color.b()),
+            color.a()};
 }
 
 double snap(double value, double scale) { return std::round(value * scale); }
