@@ -1,5 +1,7 @@
 // Script execution (spec section 10.1). Resolution order for the interpreter:
-// %YBAR_SHELL% -> sh.exe on PATH (Git Bash) -> powershell.exe -NoProfile.
+// %YBAR_SHELL% -> sh.exe on PATH -> Git for Windows sh.exe located via the
+// GitForWindows registry key (Git never adds it to PATH) -> powershell.exe
+// -NoProfile.
 // Always `<shell> -c <script>` semantics, fire-and-forget, PATH prepended
 // with the ybar.exe directory.
 

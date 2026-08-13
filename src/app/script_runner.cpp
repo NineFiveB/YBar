@@ -53,6 +53,24 @@ std::wstring findOnPath(const wchar_t* name) {
     return {};
 }
 
+// Git for Windows does not put its sh.exe on the Windows PATH, yet themes
+// (the flagship included) write sh-style commands — single-quote quoting
+// and tr/awk pipelines — that the powershell fallback cannot parse. The
+// MSYS runtime prepends its own /usr/bin when sh runs, so locating sh.exe
+// is sufficient for the coreutils those pipelines call.
+std::wstring gitShFromRegistry() {
+    for (const HKEY root : {HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE}) {
+        wchar_t buffer[MAX_PATH];
+        DWORD size = sizeof(buffer);
+        if (RegGetValueW(root, L"SOFTWARE\\GitForWindows", L"InstallPath", RRF_RT_REG_SZ,
+                         nullptr, buffer, &size) != ERROR_SUCCESS)
+            continue;
+        const std::wstring candidate = std::wstring(buffer) + L"\\usr\\bin\\sh.exe";
+        if (GetFileAttributesW(candidate.c_str()) != INVALID_FILE_ATTRIBUTES) return candidate;
+    }
+    return {};
+}
+
 std::wstring exeDirectory() {
     wchar_t buffer[MAX_PATH];
     const DWORD n = GetModuleFileNameW(nullptr, buffer, MAX_PATH);
@@ -72,6 +90,11 @@ ScriptRunner::ScriptRunner() {
         return;
     }
     if (auto sh = findOnPath(L"sh.exe"); !sh.empty()) {
+        shell_ = std::move(sh);
+        posix_ = true;
+        return;
+    }
+    if (auto sh = gitShFromRegistry(); !sh.empty()) {
         shell_ = std::move(sh);
         posix_ = true;
         return;

@@ -590,7 +590,12 @@ measurement anyway (Windows scales are commonly 1.0/1.25/1.5).
 ### 10.1 ScriptRunner
 
 Resolution order for the interpreter of `script`/`click_script`/`ybar.exec`
-strings: `%YBAR_SHELL%` if set → `sh.exe` on PATH (Git Bash) → bundled
+strings: `%YBAR_SHELL%` if set → `sh.exe` on PATH (Git Bash) → Git for
+Windows `usr\bin\sh.exe` located via the `GitForWindows` registry
+`InstallPath` (HKCU then HKLM — Git's installer never adds sh to PATH, and
+an Explorer-launched daemon otherwise fell back to PowerShell, where every
+sh-quoted theme command breaks; the MSYS runtime prepends its own
+`/usr/bin`, so tr/awk pipelines work without PATH surgery) → bundled
 `busybox64.exe sh` → `powershell.exe -NoProfile -Command` (last resort, with a
 one-time stderr warning that POSIX configs will break). Always
 `<shell> -c <script>` semantics, cwd = config dir, 60 s kill
