@@ -108,11 +108,29 @@ void ScriptRunner::runFile(const std::string& path,
     spawn(commandLine, env);
 }
 
+namespace {
+
+// Environment variable names are case-insensitive on Windows, and the
+// parent's spelling varies by launcher (Explorer/pwsh pass `Path`, MSYS
+// shells pass `PATH`). A case-sensitive merge would duplicate the key —
+// and the PATH prepend below would then miss the real entry, leaving
+// children with PATH=<exe dir> only. CreateProcessW also requires the
+// block sorted case-insensitively, which this comparator provides.
+struct EnvKeyLess {
+    bool operator()(const std::wstring& a, const std::wstring& b) const {
+        return CompareStringOrdinal(a.c_str(), static_cast<int>(a.size()), b.c_str(),
+                                    static_cast<int>(b.size()),
+                                    TRUE) == CSTR_LESS_THAN;
+    }
+};
+
+} // namespace
+
 std::vector<wchar_t> ScriptRunner::environmentBlock(
     const std::map<std::string, std::string>& env) const {
     // Parent env overlaid with base + event vars; PATH gets the ybar.exe
     // directory prepended so scripts can call `ybar` back.
-    std::map<std::wstring, std::wstring> merged;
+    std::map<std::wstring, std::wstring, EnvKeyLess> merged;
     if (LPWCH parent = GetEnvironmentStringsW()) {
         for (LPWCH cursor = parent; *cursor;) {
             const std::wstring entry(cursor);

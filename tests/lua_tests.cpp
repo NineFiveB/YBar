@@ -3,7 +3,9 @@
 // (docs/WINDOWS-PORT.md sections 3.7, 12).
 
 #include <cstdio>
+#include <cwctype>
 #include <string>
+#include <vector>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -170,6 +172,32 @@ TEST_CASE("custom events flow from Lua registration to Lua handlers") {
     // The handler stored PAYLOAD into a Lua global; no crash + dispatch is the
     // assertion here (globals are checked implicitly by pcall success).
     SUCCEED();
+}
+
+TEST_CASE("environmentBlock merges variable names case-insensitively") {
+    // Windows env names are case-insensitive, and the launcher decides the
+    // spelling: Explorer/pwsh pass `Path`, MSYS shells pass `PATH`. A
+    // case-sensitive merge duplicated the key, and the PATH prepend then
+    // created a second PATH entry holding only the exe directory — children
+    // resolved against it and lost powershell.exe/netsh/everything.
+    app::ScriptRunner scripts;
+    const auto block = scripts.environmentBlock({{"pAtH", "C:\\ybar-test-marker"}});
+
+    std::vector<std::wstring> pathEntries;
+    for (const wchar_t* cursor = block.data(); *cursor;) {
+        std::wstring entry(cursor);
+        cursor += entry.size() + 1;
+        const auto eq = entry.find(L'=');
+        if (eq == std::wstring::npos) continue;
+        std::wstring key = entry.substr(0, eq);
+        for (auto& c : key) c = static_cast<wchar_t>(towlower(c));
+        if (key == L"path") pathEntries.push_back(entry.substr(eq + 1));
+    }
+
+    REQUIRE(pathEntries.size() == 1);
+    // The overlay value survived AND got the exe-directory prepend.
+    CHECK(pathEntries[0].find(L"C:\\ybar-test-marker") != std::wstring::npos);
+    CHECK(pathEntries[0].find(L';') != std::wstring::npos);
 }
 
 TEST_CASE("config reload drops old-state subscriptions") {
