@@ -1,6 +1,7 @@
 #include "render/scene_builder.h"
 
 #include <cmath>
+#include <optional>
 
 namespace ybar::render {
 
@@ -245,9 +246,20 @@ void emitImage(DisplayList& list, const ybar::model::ImageState& image, double& 
 }
 
 // One text part inside the item's content box. penX advances past the part.
+// Intersection for stacked clips (part slot ∩ item box); nullopt = empty.
+std::optional<Rect> intersectRects(const Rect& a, const Rect& b) {
+    const double x0 = std::max(a.x, b.x);
+    const double y0 = std::max(a.y, b.y);
+    const double x1 = std::min(a.maxX(), b.maxX());
+    const double y1 = std::min(a.maxY(), b.maxY());
+    if (x1 <= x0 || y1 <= y0) return std::nullopt;
+    return Rect{x0, y0, x1 - x0, y1 - y0};
+}
+
 void emitPart(DisplayList& list, const TextPart& part, double& penX, const Rect& contentBox,
               double scale, FontCache& fonts, GlyphAtlas& atlas, bool isIcon = false,
-              bool scrollTexts = false, double clock = 0, bool* wantsMarquee = nullptr) {
+              bool scrollTexts = false, double clock = 0, bool* wantsMarquee = nullptr,
+              const Rect* itemClip = nullptr) {
     if (!part.drawing) return;
     const auto& line = fonts.shape(part.displayString(), part.font);
 
@@ -280,9 +292,19 @@ void emitPart(DisplayList& list, const TextPart& part, double& penX, const Rect&
     }
 
     // Fixed-width slots clip their content; an overflowing one with
-    // scroll_texts becomes a marquee (spec 3.9).
+    // scroll_texts becomes a marquee (spec 3.9). A fixed-width ITEM clips
+    // everything to its content box on top (the width-animation reveal) —
+    // the two clips stack by intersection, matching the reference emitText.
     const bool overflows = part.customWidth >= 0 && natural > part.customWidth;
-    const Rect slotClip{penX, contentBox.y, slotWidth, contentBox.height};
+    std::optional<Rect> effectiveClip;
+    if (part.customWidth >= 0) {
+        const Rect slot{penX, contentBox.y, slotWidth, contentBox.height};
+        effectiveClip = itemClip ? intersectRects(slot, *itemClip) : slot;
+        if (!effectiveClip) return; // empty slot ∩ box: nothing can draw
+    } else if (itemClip) {
+        effectiveClip = *itemClip;
+    }
+    const Rect* clipPtr = effectiveClip ? &*effectiveClip : nullptr;
     const Color inkColor = part.highlight ? part.highlightColor : part.color;
 
     if (overflows && scrollTexts && line.inkWidth > 0) {
@@ -292,12 +314,12 @@ void emitPart(DisplayList& list, const TextPart& part, double& penX, const Rect&
         const double seconds = std::max(part.scrollDuration, 1) / 60.0;
         const double offset = std::fmod(clock * (cycle / seconds), cycle);
         const double start = penX + part.paddingLeft - offset;
-        emitText(list, line, start - line.inkMinX, baselineY, inkColor, scale, atlas, &slotClip);
+        emitText(list, line, start - line.inkMinX, baselineY, inkColor, scale, atlas, clipPtr);
         emitText(list, line, start + cycle - line.inkMinX, baselineY, inkColor, scale, atlas,
-                 &slotClip);
+                 clipPtr);
         if (wantsMarquee) *wantsMarquee = true;
     } else {
-        const Rect* clip = part.customWidth >= 0 ? &slotClip : nullptr;
+        const Rect* clip = clipPtr;
         // Text shadow: the same line drawn offset underneath, in the shadow
         // color (hard offset, no blur — spec 3.9).
         if (part.shadow.drawing) {
@@ -460,12 +482,15 @@ void emitItem(DisplayList& list, Item& item, const Rect& contentBox, double scal
         if (item.align == 'c') penX += slack / 2;
         else if (item.align == 'r') penX += slack;
     }
+    // A fixed-width ITEM clips its text to the content box: width animations
+    // must be a clipped reveal, never overprint neighbors (reference rule).
+    const Rect* itemClip = item.customWidth >= 0 ? &contentBox : nullptr;
     // Paint order: image (unless align=r) -> icon -> components -> label ->
     // image (align=r), per spec 3.9.
     const bool imageTrails = item.image && item.image->align == 'r';
     if (item.image && !imageTrails) emitImage(list, *item.image, penX, adjusted, scale, atlas);
     emitPart(list, item.icon, penX, adjusted, scale, fonts, atlas, /*isIcon=*/true,
-             item.scrollTexts, clock, &list.hasMarquee);
+             item.scrollTexts, clock, &list.hasMarquee, itemClip);
 
     if (item.graph) {
         const bool rightToLeft = item.position == ybar::model::ItemPosition::Right ||
@@ -495,7 +520,7 @@ void emitItem(DisplayList& list, Item& item, const Rect& contentBox, double scal
     }
     if (!item.gauge)
         emitPart(list, item.label, penX, adjusted, scale, fonts, atlas, /*isIcon=*/false,
-                 item.scrollTexts, clock, &list.hasMarquee);
+                 item.scrollTexts, clock, &list.hasMarquee, itemClip);
     if (imageTrails) emitImage(list, *item.image, penX, adjusted, scale, atlas);
 }
 
