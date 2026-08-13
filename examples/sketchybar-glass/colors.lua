@@ -14,7 +14,7 @@ return {
   transparent = 0x00000000,
 
   bar = {
-    bg = 0xfa060607,         -- Fluent minimal: near-black, ~98% opaque strip
+    bg = 0xfa29292c,         -- Fluent minimal: dark gray, ~98% opaque strip
     border = 0x00000000,
   },
   popup = {
