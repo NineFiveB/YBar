@@ -1078,6 +1078,17 @@ the pre-existing world is never announced; ytile joins the 1 s late-attach
 re-detect, always outranked by komorebi. parseState is pure and pinned by
 contract tests against the protocol doc's state shape.
 
+**Gamma correctness** (found when the theme's bar went near-black): color
+bytes were sent to the GPU un-decoded, and the sRGB RTV's encode-on-store
+then gamma-brightened every color ever rendered (authored `0x060607` painted
+as ~`0x2b2b2f`; the original glass strip `0x1e1e2e` sampled `R96 G96 B117`).
+`colorOf` now applies the exact sRGB EOTF — the reference's
+`YColor.toLinear` — so the framebuffer encode round-trips to the authored
+value and blending stays in linear light. Live-verified: authored
+`0xfa060607` samples `R7 G7 B8`. NOTE: every pixel VALUE quoted in the
+verification notes above predates this fix and is self-consistently
+gamma-shifted; the geometry conclusions they supported are unaffected.
+
 Post-replication fixes, all found chasing a user report of the cpu graph
 rendering outside its pill and all live-verified: graphs now fill the
 background pill height centered (reference emitGraph math), popup rows take
