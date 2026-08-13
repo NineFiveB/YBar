@@ -289,6 +289,31 @@ struct DaemonState {
         }
     }
 
+    // YBAR_DEBUG: measured animation frame rate, logged every ~2 s while the
+    // pump runs. Counts full renderAll+Present passes, so it reads the
+    // sustained end-to-end rate — coalescing drops it below the compositor
+    // rate if a frame ever overruns its budget.
+    int frameCount = 0;
+    double frameWindowStart = 0;
+    void traceFrameRate() {
+        static const bool enabled = std::getenv("YBAR_DEBUG") != nullptr;
+        if (!enabled) return;
+        const double now = monotonicSeconds();
+        if (frameWindowStart <= 0) {
+            frameWindowStart = now;
+            frameCount = 0;
+            return;
+        }
+        ++frameCount;
+        if (now - frameWindowStart >= 2.0) {
+            std::fprintf(stderr, "[ybar:frames] %.1f fps sustained (animation clock)\n",
+                         frameCount / (now - frameWindowStart));
+            std::fflush(stderr);
+            frameWindowStart = now;
+            frameCount = 0;
+        }
+    }
+
     void stopAnimationPump() {
         if (animationPump.joinable()) {
             SetEvent(animationPumpStop);
@@ -300,6 +325,7 @@ struct DaemonState {
         }
         KillTimer(messageWindow, kAnimationTimer); // no-op unless fallback armed
         animationFramePending = false;
+        frameWindowStart = 0; // don't average a later run across the idle gap
     }
 
     ~DaemonState() { stopAnimationPump(); }
@@ -417,6 +443,7 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                 g_state->animationFramePending = false;
                 g_state->scheduler.tick(monotonicSeconds());
                 g_state->renderAll();
+                g_state->traceFrameRate();
                 g_state->syncAnimationTimer();
             }
             return 0;
