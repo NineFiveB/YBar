@@ -911,9 +911,12 @@ drains ALL pending messages before each frame. The event, not PostMessage,
 is load-bearing: posted messages outrank hardware input in GetMessage, so a
 posted 120 Hz frame stream starved clicks whenever render time approached
 the budget — popups visibly lagged their opening click. Animations and
-marquees run at the display's real refresh rate (120 Hz verified) instead
-of the ~64 Hz a 16 ms WM_TIMER quantizes to; the scheduler and marquee are
-time-based, so pace changes smoothness only — graphs/sliders(render)/gauges).
+marquees run at the display's real refresh rate instead of the ~64 Hz a
+16 ms WM_TIMER quantizes to — live-verified end to end: with the media
+marquee on screen, the YBAR_DEBUG frame trace reads 119.5 fps sustained
+through full re-encode + Present on the 120 Hz reference panel; the
+scheduler and marquee are time-based, so pace changes smoothness only —
+graphs/sliders(render)/gauges).
 
 **Also done since**: the embedded Lua runtime (vendored 5.4.8, byte-identical
 prelude, single-funnel trampolines, generation-guarded exec/delay, Lua-first
