@@ -594,14 +594,16 @@ strings: `%YBAR_SHELL%` if set → `sh.exe` on PATH (Git Bash) → Git for
 Windows `usr\bin\sh.exe` located via the `GitForWindows` registry
 `InstallPath` (HKCU then HKLM — Git's installer never adds sh to PATH, and
 an Explorer-launched daemon otherwise fell back to PowerShell, where every
-sh-quoted theme command breaks; the MSYS runtime prepends its own
-`/usr/bin`, so tr/awk pipelines work without PATH surgery) → bundled
+sh-quoted theme command breaks; Git's sh does NOT self-prepend `/usr/bin`
+for `sh -c`, so the shell's directory joins the exe dir in the child PATH
+prepend — that is where tr/awk/coreutils live) → bundled
 `busybox64.exe sh` → `powershell.exe -NoProfile -Command` (last resort, with a
 one-time stderr warning that POSIX configs will break). Always
 `<shell> -c <script>` semantics, cwd = config dir, 60 s kill
 (`TerminateProcess` — note: child *trees* aren't killed on macOS either; a Job
 Object here would actually fix that latent bug, do it), fire-and-forget, PATH
-prepended with the `ybar.exe` directory (`;` separator). The exec pipe is
+prepended with the `ybar.exe` directory and the resolved shell's directory
+(`;` separator). The exec pipe is
 drained concurrently with the child (same >64 KB deadlock exists with
 anonymous pipes). Config scripts: no chmod (no exec bit), dispatch by
 extension — `.lua`/`.jsonc` in-process, anything else through the resolved
@@ -1061,14 +1063,38 @@ following, the system-menu popup, and the battery popup's WMI-fed rows.
 Divergences are cataloged in `examples/sketchybar-glass/PORTING-WIN.md`.
 
 **Remaining to macOS parity**:
-1. `WM_DPICHANGED` live — needs a real per-monitor scaling change; the
-   handler and the popup-rebuild-on-scale-mismatch are unit-covered only.
+1. ~~`WM_DPICHANGED` live~~ — DONE: a real scaling round trip on the
+   reference machine (200% → 175% → 200% via `SPI_SETLOGICALDPIOVERRIDE`)
+   showed the bar re-rendering at exactly 40 DIP × scale (80 → 70 → 80
+   physical px, pixel-sampled) with full-width layout, crisp glyphs, and an
+   empty stderr across both transitions.
 2. Signing — the binary is unsigned, so SmartScreen warns on first run.
 3. Cutting the first `win-v0.1.0` tag (release workflow + manifests are
    ready and validated; the tag is the maintainer's call).
 4. Glass-theme polish: hover/reveal animations from the macOS item files
-   were not carried over by the first port pass, and the media/wifi popups
-   have not yet been exercised on screen.
+   were not carried over by the first port pass. The wifi popup is now
+   exercised on screen (header + secured-network row + live netsh detail
+   rows + Settings footer, opened via `--set popup.drawing=on`); the media
+   popup still is not — with no GSMTC session there is nothing to anchor
+   it, so it needs a session playing during a live pass.
+
+**Launcher-environment fixes** (found starting the daemon from a
+`Path`-cased parent, the way Explorer and pwsh launch it — every prior
+live pass had used an MSYS parent, which masked both):
+1. `environmentBlock` merged the parent environment into a case-SENSITIVE
+   map, so under a parent that spells the variable `Path` the exe-dir
+   prepend missed it and appended a second `PATH=<exe dir>` entry; children
+   resolved against that one and lost every system tool (powershell.exe,
+   netsh, …). The merge now uses case-insensitive ordinal compare — which
+   is also the sort order CreateProcessW documents for the block — and a
+   regression test pins one merged path entry carrying both the overlay
+   value and the prepend.
+2. Git for Windows never puts `sh.exe` on PATH, so those same launches fell
+   through to the PowerShell shell, where sh-quoted theme commands break.
+   ScriptRunner now resolves sh via the `GitForWindows` registry key, and
+   the child PATH prepend carries the shell's directory too — Git's sh does
+   not self-prepend `/usr/bin` for `sh -c`, so without it the theme's
+   tr/awk pipelines had no coreutils (§10.1).
 
 **YTile parity** (the sibling WM, docs/YTILE-IPC.md): the ytile adapter now
 carries the full komorebi-provider surface, live-verified against the real

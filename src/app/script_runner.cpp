@@ -55,9 +55,10 @@ std::wstring findOnPath(const wchar_t* name) {
 
 // Git for Windows does not put its sh.exe on the Windows PATH, yet themes
 // (the flagship included) write sh-style commands — single-quote quoting
-// and tr/awk pipelines — that the powershell fallback cannot parse. The
-// MSYS runtime prepends its own /usr/bin when sh runs, so locating sh.exe
-// is sufficient for the coreutils those pipelines call.
+// and tr/awk pipelines — that the powershell fallback cannot parse. Git's
+// sh does NOT add its own /usr/bin to PATH for `sh -c` (that only happens
+// in login shells), so environmentBlock also prepends the shell's
+// directory — usr\bin, where the coreutils those pipelines call live.
 std::wstring gitShFromRegistry() {
     for (const HKEY root : {HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE}) {
         wchar_t buffer[MAX_PATH];
@@ -166,10 +167,16 @@ std::vector<wchar_t> ScriptRunner::environmentBlock(
     }
     for (const auto& [key, value] : baseEnvironment) merged[widen(key)] = widen(value);
     for (const auto& [key, value] : env) merged[widen(key)] = widen(value);
+    // Scripts call `ybar` back, and Git-sh scripts call coreutils that live
+    // beside a registry-resolved sh.exe — neither directory is on a normal
+    // parent PATH.
+    std::wstring prefix = exeDirectory();
+    if (const auto slash = shell_.find_last_of(L"\\/"); slash != std::wstring::npos)
+        prefix += L";" + shell_.substr(0, slash);
     if (auto it = merged.find(L"PATH"); it != merged.end())
-        it->second = exeDirectory() + L";" + it->second;
+        it->second = prefix + L";" + it->second;
     else
-        merged[L"PATH"] = exeDirectory();
+        merged[L"PATH"] = prefix;
 
     std::vector<wchar_t> block;
     for (const auto& [key, value] : merged) {

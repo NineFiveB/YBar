@@ -3,7 +3,8 @@
 // GitForWindows registry key (Git never adds it to PATH) -> powershell.exe
 // -NoProfile.
 // Always `<shell> -c <script>` semantics, fire-and-forget, PATH prepended
-// with the ybar.exe directory.
+// with the ybar.exe directory and the shell's own directory (a
+// registry-resolved Git sh needs its neighboring coreutils).
 
 #pragma once
 
@@ -30,7 +31,8 @@ public:
     std::wstring commandLineFor(const std::string& script) const;
 
     // CreateProcessW environment block (parent env + base env + extras, with
-    // the exe directory prepended to PATH) — shared with ybar.exec.
+    // the exe and shell directories prepended to PATH) — shared with
+    // ybar.exec.
     std::vector<wchar_t> environmentBlock(const std::map<std::string, std::string>& env) const;
 
     // CONFIG_DIR/BAR_NAME base env + script cwd (the config directory).
