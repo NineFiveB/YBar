@@ -2,35 +2,31 @@ local icons = require("icons")
 local colors = require("colors")
 local settings = require("settings")
 
--- YBAR PORT: Wi-Fi popup mimicking the Settings > Wi-Fi pane: header with
--- the radio state on the right, the connected network with a green status
--- dot, a details section, and a Settings footer.
+-- WINDOWS PORT, second pass: the popup now mirrors the Windows 11 Fluent
+-- Wi-Fi flyout (per request) instead of the Settings details pane:
 --
--- WINDOWS PORT: the pill is driven by the native wifi_change event
--- (INFO = ssid | "connected" | "" offline) — ipconfig/networksetup are
--- gone. The popup fills from a single `netsh wlan show interfaces` round
--- trip on open (SSID, signal, receive/transmit rate, channel, radio type).
--- Dropped relative to macOS, each for lack of a Windows surface:
---   - Known/Other network scan + join rows: the scan came from
---     system_profiler + a python helper and joins from networksetup;
---     `netsh wlan show networks` needs location consent on Win11 24H2+ and
---     joining arbitrary (unsaved) networks has no non-interactive CLI, so
---     the sections are gone and the popup shows connection details instead.
---   - The header power toggle: flipping the radio needs an elevated netsh
---     or the WinRT Radio API — no non-admin CLI. The header shows On/Off
---     (from netsh's "Software Off" radio status) and clicking it opens the
---     Wi-Fi settings page.
---   - The ProtonVPN row: it was driven by scutil --nc (a macOS system VPN
---     profile); the ProtonVPN Windows app exposes no CLI for status or
---     connect, so the row is dropped.
---   - The Nerd Font right-edge glyphs: replaced with sf: references
---     (lock / wifi) resolved against Segoe Fluent Icons.
--- NOTE: netsh output is localized; the parse below assumes an English
--- Windows. The macOS file samples no throughput, so there are no
--- upload/download speed rows to port.
+--   Wi-Fi                              [toggle]
+--   <connected ssid>                     lock
+--    • Connected
+--   <scanned network rows>
+--   ──────────────────────────────
+--   More Wi-Fi settings
+--
+-- The pill is still driven by the native wifi_change event (INFO = ssid |
+-- "connected" | "" offline). State comes from one `netsh wlan show
+-- interfaces` round trip; the network list from `netsh wlan show networks`
+-- (live-verified here — on Win11 24H2+ the scan can need location consent,
+-- in which case the list simply stays empty and the flyout shows just the
+-- connected block). Clicking a row connects when the network is a SAVED
+-- profile (`netsh wlan connect` has no non-interactive join for unsaved
+-- ones — Settings covers those via the footer). The header toggle and the
+-- footer both deep-link to ms-settings:network-wifi: flipping the radio
+-- needs an elevated netsh or the WinRT Radio API, no non-admin CLI.
+-- NOTE: netsh output is localized; the parses assume an English Windows.
 
 local popup_width = 300
 local inset = 12
+local MAX_NETS = 8
 
 -- ── Bar pill ────────────────────────────────────────────────────────────────
 local wifi = sbar.add("item", "widgets.wifi.padding", {
@@ -52,7 +48,7 @@ local wifi_bracket = sbar.add("bracket", "widgets.wifi.bracket", {
 
 local popup_pos = "popup." .. wifi_bracket.name
 
--- ── Header: "Wi-Fi" + radio state (click opens the Wi-Fi settings page) ────
+-- ── Header: "Wi-Fi" + radio toggle (click opens the Wi-Fi settings page) ───
 local header = sbar.add("item", {
   position = popup_pos,
   width = popup_width,
@@ -65,8 +61,8 @@ local header = sbar.add("item", {
   },
   label = {
     align = "right",
-    string = "On",
-    font = { size = 13, style = settings.font.style_map["Bold"] },
+    string = icons.switch.on,
+    font = { size = 18 },
     color = colors.white,
     width = popup_width / 2,
     padding_right = inset,
@@ -87,9 +83,8 @@ local current_name = sbar.add("item", {
     width = popup_width - 70,
     padding_left = inset,
   },
-  -- The engine resolves `sf:` references only when they are the entire
-  -- string, so the right edge carries one glyph (lock when secured, wifi
-  -- otherwise) instead of macOS's concatenated lock+wifi pair.
+  -- One right-edge glyph (lock when secured, wifi otherwise): `sf:` refs
+  -- resolve only as whole strings, so no concatenated pairs.
   label = {
     align = "right",
     string = "",
@@ -121,58 +116,33 @@ local current_status = sbar.add("item", {
   },
 })
 
--- ── Section: Details (spinner lives in the header while netsh runs) ────────
-local function add_section_header(title)
-  return sbar.add("item", {
+-- ── Network list: fixed row pool bound per scan (flyout body) ──────────────
+local net_rows = {}
+for i = 1, MAX_NETS do
+  net_rows[i] = sbar.add("item", "widgets.wifi.net." .. i, {
     position = popup_pos,
+    drawing = false,
     width = popup_width,
+    align = "left",
     icon = {
-      align = "left",
-      string = title,
+      string = icons.wifi.connected,
       color = colors.white,
-      font = { size = 13, style = settings.font.style_map["Bold"] },
+      font = { size = 14 },
+      width = 40,
+      align = "center",
       padding_left = inset,
     },
-    -- No label slot: the scan spinner (image, align=r) trails the title
-    -- directly; a fixed half-width label would push it past the row edge.
-    label = { drawing = false },
-    -- Content is title+spinner only; anchor it left like Settings.
-    align = "left",
-    padding_top = 6,
-  })
-end
-
-local function add_detail_row(title)
-  return sbar.add("item", {
-    position = popup_pos,
-    width = popup_width,
-    icon = {
-      align = "left",
-      string = title,
-      color = colors.grey,
-      font = { size = 12.0 },
-      width = (popup_width / 2) - 6,
-      padding_left = inset + 6,
-    },
     label = {
-      align = "right",
-      string = "—",
-      color = colors.grey,
-      font = { size = 12.0, style = settings.font.style_map["Semibold"] },
-      width = popup_width / 2,
-      padding_right = inset,
+      string = "",
+      color = colors.white,
+      font = { size = 13 },
+      width = popup_width - 40 - inset - 40,
+      align = "left",
     },
   })
 end
 
-local details_header = add_section_header("Details")
-local signal_row  = add_detail_row("Signal")
-local channel_row = add_detail_row("Channel")
-local radio_row   = add_detail_row("Radio Type")
-local rx_row      = add_detail_row("Receive Rate")
-local tx_row      = add_detail_row("Transmit Rate")
-
--- ── Footer: Settings ───────────────────────────────────────────────────────
+-- ── Footer: More Wi-Fi settings ────────────────────────────────────────────
 sbar.add("item", {
   position = popup_pos,
   width = popup_width,
@@ -181,93 +151,90 @@ sbar.add("item", {
   background = { height = 2, color = colors.with_alpha(colors.grey, 0.3) },
 })
 
--- Glyph and text sit in separate slots: the engine resolves `sf:` refs
--- only as whole strings, so macOS's `icons.gear .. "  Settings"` concat
--- would shape as a single unresolvable icon name.
 local settings_row = sbar.add("item", {
   position = popup_pos,
   width = popup_width,
   icon = {
-    string = icons.gear,
+    string = "More Wi-Fi settings",
     align = "left",
     color = colors.white,
     font = { size = 12.0 },
-    width = 24,
+    width = popup_width - inset,
     padding_left = inset,
   },
-  label = {
-    string = "Settings",
-    align = "left",
-    color = colors.white,
-    font = { size = 12.0 },
-    width = popup_width - 24 - inset,
-  },
+  label = { drawing = false },
 })
 
 -- ── State ──────────────────────────────────────────────────────────────────
 local wifi_power = true
 local is_connected = false
 local details_running = false
-local details = nil   -- last parsed netsh snapshot
+local scanning = false
+local details = nil     -- last parsed `show interfaces` snapshot
+local net_cache = {}    -- { ssid, secured } rows from the last scan
 
--- Spinner beside "Details" while the netsh round trip runs.
-local spinner = require("helpers.spinner").attach(details_header)
+-- Spinner beside "Wi-Fi" while the netsh round trips run.
+local spinner = require("helpers.spinner").attach(header)
 
 local function right_glyph(secured)
   return secured and "sf:lock" or "sf:wifi"
 end
 
--- netsh reports quality as a percentage: quality = 2 * (dBm + 100),
--- clamped — so the macOS thresholds (-60 / -75 dBm) map to 80% / 50%.
-local function signal_color(pct)
-  if not pct then return colors.grey end
-  if pct >= 80 then return colors.white end
-  if pct >= 50 then return colors.blue end
-  return colors.grey
-end
-
+-- ── Populate ───────────────────────────────────────────────────────────────
 local function populate_rows()
+  header:set({
+    label = {
+      string = wifi_power and icons.switch.on or icons.switch.off,
+      color = wifi_power and colors.white or colors.grey,
+    },
+  })
+
   local d = details or {}
-
-  header:set({ label = { string = wifi_power and "On" or "Off" } })
-
   local show_current = wifi_power and is_connected and d.ssid and d.ssid ~= ""
   current_name:set({
     drawing = show_current or false,
     icon = { string = d.ssid or "" },
-    label = { string = right_glyph(d.secured), color = signal_color(d.signal) },
+    label = { string = right_glyph(d.secured) },
   })
   current_status:set({ drawing = (show_current and is_connected) or false })
 
-  local have = wifi_power and is_connected
-  signal_row:set({
-    label = {
-      string = (have and d.signal) and (d.signal .. "%") or "—",
-      color = have and signal_color(d.signal) or colors.grey,
-    },
-  })
-  channel_row:set({ label = { string = (have and d.channel) or "—" } })
-  radio_row:set({ label = { string = (have and d.radio) or "—" } })
-  rx_row:set({ label = { string = (have and d.rx) and (d.rx .. " Mbps") or "—" } })
-  tx_row:set({ label = { string = (have and d.tx) and (d.tx .. " Mbps") or "—" } })
+  -- Scanned rows, connected network excluded (it owns the block above).
+  local row = 0
+  if wifi_power then
+    for _, net in ipairs(net_cache) do
+      if net.ssid ~= (d.ssid or "") and row < MAX_NETS then
+        row = row + 1
+        net_rows[row]:set({
+          drawing = true,
+          icon = { string = icons.wifi.connected },
+          label = { string = net.ssid },
+        })
+      end
+    end
+  end
+  for i = row + 1, MAX_NETS do
+    net_rows[i]:set({ drawing = false })
+  end
 end
 
 -- ── Data refresh ───────────────────────────────────────────────────────────
--- One netsh round trip, collapsed by awk into a single "|"-separated line:
--- state|ssid|signal|rx|tx|radio|channel|auth|power. `^ *SSID` does not
--- match the BSSID line; "Software Off" is the radio-off continuation line.
-local netsh_cmd = "netsh wlan show interfaces | tr -d '\\r' | awk -F' : ' '"
+-- Connection state: one `show interfaces` round trip collapsed by awk into
+-- "state|ssid|auth|power" ("Software Off" is the radio-off continuation
+-- line; `^ *SSID` does not match the BSSID line).
+local iface_cmd = "netsh wlan show interfaces | tr -d '\\r' | awk -F' : ' '"
   .. 'BEGIN{pwr="on"} '
   .. '/^ *State/{st=$2} '
   .. '/^ *SSID/{ssid=$2} '
-  .. '/^ *Signal/{sig=$2} '
-  .. '/^ *Receive rate/{rx=$2} '
-  .. '/^ *Transmit rate/{tx=$2} '
-  .. '/^ *Radio type/{rt=$2} '
-  .. '/^ *Channel/{ch=$2} '
   .. '/^ *Authentication/{auth=$2} '
   .. '/Software Off/{pwr="off"} '
-  .. 'END{printf "%s|%s|%s|%s|%s|%s|%s|%s|%s", st, ssid, sig, rx, tx, rt, ch, auth, pwr}'
+  .. 'END{printf "%s|%s|%s|%s", st, ssid, auth, pwr}'
+  .. "'"
+
+-- Network scan: "net|<ssid>|<secured>" per visible network.
+local scan_cmd = "netsh wlan show networks | tr -d '\\r' | awk -F' : ' '"
+  .. '/^SSID/{ssid=$2} '
+  .. '/^ *Authentication/{ if (ssid != "") { '
+  .. 'sec = ($2 ~ /Open/) ? 0 : 1; printf "net|%s|%d\\n", ssid, sec; ssid="" } }'
   .. "'"
 
 local function apply_pill()
@@ -279,30 +246,42 @@ local function apply_pill()
   })
 end
 
-local function refresh_details()
+local function refresh_state()
   if details_running then return end
   details_running = true
   spinner.start()
-  sbar.exec(netsh_cmd, function(out)
+  sbar.exec(iface_cmd, function(out)
     details_running = false
     spinner.stop()
-    local st, ssid, sig, rx, tx, rt, ch, auth, pwr =
-      out:match("^(.-)|(.-)|(.-)|(.-)|(.-)|(.-)|(.-)|(.-)|(.-)%s*$")
+    local st, ssid, auth, pwr = out:match("^(.-)|(.-)|(.-)|(.-)%s*$")
     if st then
       details = {
         ssid = ssid ~= "" and ssid or nil,
-        signal = tonumber((sig or ""):match("(%d+)")),
-        rx = rx ~= "" and rx or nil,
-        tx = tx ~= "" and tx or nil,
-        radio = rt ~= "" and rt or nil,
-        channel = ch ~= "" and ch or nil,
         secured = auth ~= "" and not auth:match("^Open"),
       }
       wifi_power = pwr ~= "off"
-      -- Belt behind the wifi_change event: the same round trip also
-      -- refreshes the pill (covers boot, before any event fires).
+      -- Belt behind the wifi_change event (covers boot, before any event).
       is_connected = st == "connected"
       apply_pill()
+    end
+    populate_rows()
+  end)
+end
+
+local function scan_networks()
+  if scanning then return end
+  scanning = true
+  spinner.start()
+  sbar.exec(scan_cmd, function(out)
+    scanning = false
+    spinner.stop()
+    net_cache = {}
+    local seen = {}
+    for ssid, sec in (out or ""):gmatch("net|([^|\n]+)|([01])") do
+      if not seen[ssid] and #net_cache < MAX_NETS then
+        seen[ssid] = true
+        net_cache[#net_cache + 1] = { ssid = ssid, secured = sec == "1" }
+      end
     end
     populate_rows()
   end)
@@ -313,24 +292,46 @@ local function hide_details()
   wifi_bracket:set({ popup = { drawing = false } })
 end
 
--- macOS flipped the radio here (networksetup -setairportpower); Windows has
--- no non-admin CLI for that, so the header hands off to the settings page.
-header:subscribe("mouse.clicked", function()
+local function open_wifi_settings()
   sbar.exec('explorer.exe "ms-settings:network-wifi"')
   hide_details()
-end)
+end
 
-settings_row:subscribe("mouse.clicked", function()
-  sbar.exec('explorer.exe "ms-settings:network-wifi"')
-  hide_details()
-end)
+-- No non-admin CLI flips the radio — the toggle hands off to Settings.
+header:subscribe("mouse.clicked", open_wifi_settings)
+settings_row:subscribe("mouse.clicked", open_wifi_settings)
+
+-- Row click: connect if the profile is saved (unsaved networks have no
+-- non-interactive join — netsh just errors and the state refresh shrugs).
+for i = 1, MAX_NETS do
+  net_rows[i]:subscribe("mouse.clicked", function()
+    -- populate_rows skips the connected ssid, so recover the row's binding
+    -- the same way it was laid down.
+    local d = details or {}
+    local row = 0
+    for _, net in ipairs(net_cache) do
+      if net.ssid ~= (d.ssid or "") then
+        row = row + 1
+        if row == i then
+          sbar.exec('netsh wlan connect name="' .. net.ssid:gsub('"', "") .. '"')
+          sbar.delay(4, function()
+            refresh_state()
+            scan_networks()
+          end)
+          return
+        end
+      end
+    end
+  end)
+end
 
 local function toggle_details()
   local should_draw = wifi_bracket:query().popup.drawing == "off"
   if should_draw then
     wifi_bracket:set({ popup = { drawing = true } })
-    populate_rows()       -- last snapshot first, then the fresh round trip
-    refresh_details()
+    populate_rows()      -- last snapshot first, then the fresh round trips
+    refresh_state()
+    scan_networks()
   else
     hide_details()
   end
@@ -356,4 +357,5 @@ sbar.add("item", { position = "right", width = settings.group_paddings })
 
 -- Warm caches at load so the first popup opens populated (also styles the
 -- pill before the first wifi_change fires).
-refresh_details()
+refresh_state()
+scan_networks()
