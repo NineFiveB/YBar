@@ -107,7 +107,9 @@ local header = sbar.add("item", "widgets.bluetooth.popup.header", {
   label = {
     string = icons.switch.on,
     align = "right",
-    font = { size = 18 },
+    -- Literal Segoe Fluent toggle glyph — needs the explicit family (only
+    -- sf: strings auto-select the icon font).
+    font = { family = icons.switch.font, size = 18 },
     color = colors.white,
     width = popup_width / 2,
     padding_right = inset,

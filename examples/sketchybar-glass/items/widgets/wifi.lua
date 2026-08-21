@@ -62,7 +62,9 @@ local header = sbar.add("item", {
   label = {
     align = "right",
     string = icons.switch.on,
-    font = { size = 18 },
+    -- Literal Segoe Fluent toggle glyph — needs the explicit family (only
+    -- sf: strings auto-select the icon font).
+    font = { family = icons.switch.font, size = 18 },
     color = colors.white,
     width = popup_width / 2,
     padding_right = inset,

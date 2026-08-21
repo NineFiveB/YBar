@@ -12,7 +12,10 @@ local settings = require("settings")
 --   gpu        -> sf:display          (no discrete GPU glyph mapped)
 --   disk       -> sf:folder           (no hard-drive glyph mapped)
 --   clipboard  -> sf:doc              (no clipboard glyph mapped)
---   switch     -> sf:power / sf:xmark (no toggle-switch glyphs mapped)
+--   switch     -> literal Segoe Fluent ToggleFilled/ToggleBorder chars
+--                 (U+EC11/U+EC12 exist in the font but not in the engine
+--                 map; consumers must set font.family = icons.switch.font,
+--                 since only sf: strings auto-select the icon font)
 --   volume._10 -> sf:volume           (no bare wave-less speaker mapped)
 --   charging   -> sf:bolt             (no combined battery+bolt glyph)
 --   play_pause -> sf:play.fill        (no combined play/pause glyph)
@@ -29,8 +32,9 @@ local icons = {
     clipboard = "sf:doc",
 
     switch = {
-      on = "sf:power",
-      off = "sf:xmark",
+      on = "\238\176\145",   -- U+EC11 ToggleFilled
+      off = "\238\176\146",  -- U+EC12 ToggleBorder
+      font = "Segoe Fluent Icons",
     },
     volume = {
       _100="sf:speaker.wave.3.fill",
@@ -78,8 +82,9 @@ local icons = {
     clipboard = "sf:doc",
 
     switch = {
-      on = "sf:power",
-      off = "sf:xmark",
+      on = "\238\176\145",   -- U+EC11 ToggleFilled
+      off = "\238\176\146",  -- U+EC12 ToggleBorder
+      font = "Segoe Fluent Icons",
     },
     volume = {
       _100="sf:speaker.wave.3.fill",
