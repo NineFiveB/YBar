@@ -923,7 +923,8 @@ prelude, single-funnel trampolines, generation-guarded exec/delay, Lua-first
 dispatch) — live-verified with in-process closures driving the komorebi
 workspace pill and the CPU gauge. An in-tree **YTile provider** extension
 mirrors the komorebi update flow (fires `komorebi_workspace_change` for
-config compatibility); its spec entry is pending. **Popups + tooltips**
+config compatibility); its wire contract is `docs/YTILE-IPC.md` in the
+sibling YTile repo (see the YTile parity paragraph below). **Popups + tooltips**
 (§3.9): vertical/horizontal/wrap layouts, per-host panels, WH_MOUSE_LL
 outside-click auto-close, press-on-bar-closes-others, 600 ms tooltip dwell —
 live-verified (panel screenshot, auto-close state flip, tooltip window
@@ -1080,17 +1081,24 @@ Divergences are cataloged in `examples/sketchybar-glass/PORTING-WIN.md`.
    showed the bar re-rendering at exactly 40 DIP × scale (80 → 70 → 80
    physical px, pixel-sampled) with full-width layout, crisp glyphs, and an
    empty stderr across both transitions.
-2. Signing — the binary is unsigned, so SmartScreen warns on first run.
+2. Signing — the binary is unsigned: SmartScreen warns on first run, and
+   Smart App Control (enforcing on the reference machine since 2026-08-28)
+   blocks fresh unsigned builds outright, so a stock Win11 install cannot
+   run a CI zip at all. Azure Trusted Signing or an EV cert is the fix —
+   load-bearing now, not "optional later" (§13).
 3. Cutting the first `win-v0.1.0` tag (release workflow + manifests are
    ready and validated; the tag is the maintainer's call).
-4. Glass-theme polish: hover/reveal animations from the macOS item files
-   were not carried over by the first port pass. Both remaining popups are
-   now exercised on screen (opened via `--set popup.drawing=on`): the wifi
-   popup with header + secured-network row + live netsh detail rows +
-   Settings footer, and the media popup — against a live Chrome GSMTC
-   session — with centered title, prev/play/next transport row, source row,
-   and the volume slider; the pill's marquee visibly advanced between
-   captures on the compositor-clock pump.
+4. ~~Glass-theme polish~~ — RESOLVED as a deliberate restyle, not a port
+   gap: the wifi/bluetooth/system-monitor popups are Win11 Fluent flyouts
+   (quick-settings headers with toggle glyphs, single-line rows, plain-text
+   Settings footers; Task Manager-style graphs), battery/media keep the
+   shared macOS-derived layout, and the macOS hover/reveal animations are
+   not carried over — the hover sites belong to the dropped menus swap and
+   pill slots snap by owner preference under the flat restyle (cataloged
+   in `PORTING-WIN.md`, "Deliberate restyles"). The earlier on-screen
+   evidence stands: wifi popup with live netsh rows, and the media popup
+   against a live Chrome GSMTC session with the marquee advancing on the
+   compositor-clock pump (both opened via `--set popup.drawing=on`).
 
 **Launcher-environment fixes** (found starting the daemon from a
 `Path`-cased parent, the way Explorer and pwsh launch it — every prior
@@ -1146,6 +1154,41 @@ workspace strip populates immediately, and the WM preference now ranks
 komorebi over ytile with a live handover — on the reference machine
 `komorebic start` brings up whkd, which relaunches ytiled, so both WMs
 answer and "ytiled's presence is the signal" chose the idle one.
+
+**Punch-list close-out (2026-08-28)**: the §14 komorebi gate is closed —
+State + three notifications recorded from a live komorebi v0.1.41 over the
+real socket subscription (`AddSubscriberSocketWithOptions` + state filter,
+window title sanitized), three synthetic fixtures pin the shapes a quiet
+session cannot produce (FocusChange tuple, bare-string VirtualDesktop
+event, unknown-field tolerance), the provider's parsing now flows through
+a pure `parseNotification` seam sharing the runtime path's core (eight
+contract tests over the fixtures), and a `komorebi-canary` CI job —
+independent of build, `workflow_dispatch` for quiet spells — dumps
+`notification-schema`/`socket-schema` from the LATEST komorebi release and
+asserts every load-bearing path (developed against the real v0.1.41
+output; verified to trip on deliberate drift). One schema surprise worth
+recording: `Window`'s title/exe/class/rect quintet is custom-serialized
+and schemars-invisible — the canary pins `hwnd` plus an
+exactly-one-property invariant, while the recorded fixtures pin the wire
+quintet. The §14 glyph-clip UV-remap bullet finally got its suite (dyadic
+fixtures so expected floats are exact under `==`; `clipGlyph` gained
+external linkage). Theme: the bluetooth popup joined wifi in the Fluent
+flyout style with its toggle reading real radio POWER over
+`Windows.Devices.Radios` (PS 5.1 AsTask reflection surviving the
+sh→powershell quoting layers; the timeout gates the `Result` read so a
+hung WinRT call reports Unknown instead of wedging the probe), and wifi
+rows carry per-network signal arcs (netsh `mode=bssid`, per-SSID max) plus
+the secured lock in the reserved right-edge slot (`sf:lock`,
+engine-mapped). Probe and scan pipelines live-verified through the exact
+quoting layers (curly-apostrophe device name intact; open network flagged
+0; signal maxima per SSID). CI green first try: 180 tests, canary
+included. NOT yet re-verified on screen: the reworked popups and the
+8036862 toggle glyphs — **Smart App Control began enforcing on the
+reference machine** (first block observed 2026-08-28; every earlier live
+pass predates the evaluation→enforce flip) and it refuses fresh unsigned
+CI binaries outright, so on-screen verification waits on the signing
+decision (item 2 below), which SAC upgrades from SmartScreen-nicety to
+load-bearing for stock Windows 11 installs.
 
 Deliberate divergences (never 1:1): alias items (§10.6), per-item glass
 pills (§7.6), distributed-notification bindings (§9), THERMAL_STATE
