@@ -1,0 +1,22 @@
+{
+  "event": { "type": "TogglePause", "future_event_field": null },
+  "future_top_level_field": { "nested": [1, 2, 3] },
+  "state": {
+    "future_state_field": "ignored",
+    "monitors": {
+      "elements": [
+        {
+          "future_monitor_field": 42,
+          "workspaces": {
+            "elements": [
+              { "name": null, "future_workspace_field": true },
+              {},
+              { "name": "chat" }
+            ]
+          }
+        }
+      ]
+    },
+    "is_paused": false
+  }
+}

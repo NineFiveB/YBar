@@ -12,6 +12,7 @@
 #include <mutex>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -65,6 +66,13 @@ public:
     // Re-queries komorebi and publishes an update (forced-query path for
     // `ybar --trigger komorebi_workspace_change`, spec 11.3).
     bool refresh();
+
+    // Pure notification/State JSON -> update parse (focused monitor),
+    // exposed for the contract tests. Accepts a full {event, state}
+    // notification or a bare State reply; nullopt on schema mismatch.
+    // workspacesChanged=false marks a snapshot whose focused indices are
+    // out of range — publishState drops those without publishing.
+    static std::optional<KomorebiUpdate> parseNotification(const std::string& payload);
 
 private:
     void readerLoop();

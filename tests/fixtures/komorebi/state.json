@@ -1,0 +1,339 @@
+{
+  "monitors": {
+    "elements": [
+      {
+        "id": 65537,
+        "name": "DISPLAY6",
+        "device": "SDC419C",
+        "device_id": "SDC419C-5&292e6c21&0&UID4353",
+        "serial_number_id": "0",
+        "size": {
+          "left": 0,
+          "top": 0,
+          "right": 2880,
+          "bottom": 1800
+        },
+        "work_area_size": {
+          "left": 0,
+          "top": 0,
+          "right": 2880,
+          "bottom": 1704
+        },
+        "work_area_offset": null,
+        "window_based_work_area_offset": null,
+        "window_based_work_area_offset_limit": 1,
+        "workspaces": {
+          "elements": [
+            {
+              "name": "I",
+              "containers": {
+                "elements": [
+                  {
+                    "id": "nL7AI3R0N3r1gxQe-NCAH",
+                    "locked": false,
+                    "windows": {
+                      "elements": [
+                        {
+                          "hwnd": 328260,
+                          "title": "GitHub - Google Chrome",
+                          "exe": "chrome.exe",
+                          "class": "Chrome_WidgetWin_1",
+                          "rect": {
+                            "left": 11,
+                            "top": 11,
+                            "right": 2858,
+                            "bottom": 1682
+                          }
+                        }
+                      ],
+                      "focused": 0
+                    }
+                  }
+                ],
+                "focused": 0
+              },
+              "monocle_container": null,
+              "maximized_window": null,
+              "floating_windows": {
+                "elements": [],
+                "focused": 0
+              },
+              "layout": {
+                "Default": "BSP"
+              },
+              "layout_options": null,
+              "layout_rules": [],
+              "layout_options_rules": [],
+              "work_area_offset_rules": [],
+              "layout_flip": null,
+              "workspace_padding": null,
+              "container_padding": null,
+              "latest_layout": [
+                {
+                  "left": 11,
+                  "top": 11,
+                  "right": 2858,
+                  "bottom": 1682
+                }
+              ],
+              "resize_dimensions": [
+                null
+              ],
+              "tile": true,
+              "work_area_offset": null,
+              "apply_window_based_work_area_offset": true,
+              "window_container_behaviour": null,
+              "window_container_behaviour_rules": null,
+              "float_override": null,
+              "layer": "Tiling",
+              "floating_layer_behaviour": null,
+              "wallpaper": null
+            },
+            {
+              "name": "II",
+              "containers": {
+                "elements": [],
+                "focused": 0
+              },
+              "monocle_container": null,
+              "maximized_window": null,
+              "floating_windows": {
+                "elements": [],
+                "focused": 0
+              },
+              "layout": {
+                "Default": "VerticalStack"
+              },
+              "layout_options": null,
+              "layout_rules": [],
+              "layout_options_rules": [],
+              "work_area_offset_rules": [],
+              "layout_flip": null,
+              "workspace_padding": null,
+              "container_padding": null,
+              "latest_layout": [],
+              "resize_dimensions": [],
+              "tile": true,
+              "work_area_offset": null,
+              "apply_window_based_work_area_offset": true,
+              "window_container_behaviour": null,
+              "window_container_behaviour_rules": null,
+              "float_override": null,
+              "layer": "Tiling",
+              "floating_layer_behaviour": null,
+              "wallpaper": null
+            },
+            {
+              "name": "III",
+              "containers": {
+                "elements": [],
+                "focused": 0
+              },
+              "monocle_container": null,
+              "maximized_window": null,
+              "floating_windows": {
+                "elements": [],
+                "focused": 0
+              },
+              "layout": {
+                "Default": "HorizontalStack"
+              },
+              "layout_options": null,
+              "layout_rules": [],
+              "layout_options_rules": [],
+              "work_area_offset_rules": [],
+              "layout_flip": null,
+              "workspace_padding": null,
+              "container_padding": null,
+              "latest_layout": [],
+              "resize_dimensions": [],
+              "tile": true,
+              "work_area_offset": null,
+              "apply_window_based_work_area_offset": true,
+              "window_container_behaviour": null,
+              "window_container_behaviour_rules": null,
+              "float_override": null,
+              "layer": "Tiling",
+              "floating_layer_behaviour": null,
+              "wallpaper": null
+            },
+            {
+              "name": "IV",
+              "containers": {
+                "elements": [],
+                "focused": 0
+              },
+              "monocle_container": null,
+              "maximized_window": null,
+              "floating_windows": {
+                "elements": [],
+                "focused": 0
+              },
+              "layout": {
+                "Default": "UltrawideVerticalStack"
+              },
+              "layout_options": null,
+              "layout_rules": [],
+              "layout_options_rules": [],
+              "work_area_offset_rules": [],
+              "layout_flip": null,
+              "workspace_padding": null,
+              "container_padding": null,
+              "latest_layout": [],
+              "resize_dimensions": [],
+              "tile": true,
+              "work_area_offset": null,
+              "apply_window_based_work_area_offset": true,
+              "window_container_behaviour": null,
+              "window_container_behaviour_rules": null,
+              "float_override": null,
+              "layer": "Tiling",
+              "floating_layer_behaviour": null,
+              "wallpaper": null
+            },
+            {
+              "name": "V",
+              "containers": {
+                "elements": [],
+                "focused": 0
+              },
+              "monocle_container": null,
+              "maximized_window": null,
+              "floating_windows": {
+                "elements": [],
+                "focused": 0
+              },
+              "layout": {
+                "Default": "Rows"
+              },
+              "layout_options": null,
+              "layout_rules": [],
+              "layout_options_rules": [],
+              "work_area_offset_rules": [],
+              "layout_flip": null,
+              "workspace_padding": null,
+              "container_padding": null,
+              "latest_layout": [],
+              "resize_dimensions": [],
+              "tile": true,
+              "work_area_offset": null,
+              "apply_window_based_work_area_offset": true,
+              "window_container_behaviour": null,
+              "window_container_behaviour_rules": null,
+              "float_override": null,
+              "layer": "Tiling",
+              "floating_layer_behaviour": null,
+              "wallpaper": null
+            },
+            {
+              "name": "VI",
+              "containers": {
+                "elements": [],
+                "focused": 0
+              },
+              "monocle_container": null,
+              "maximized_window": null,
+              "floating_windows": {
+                "elements": [],
+                "focused": 0
+              },
+              "layout": {
+                "Default": "Grid"
+              },
+              "layout_options": null,
+              "layout_rules": [],
+              "layout_options_rules": [],
+              "work_area_offset_rules": [],
+              "layout_flip": null,
+              "workspace_padding": null,
+              "container_padding": null,
+              "latest_layout": [],
+              "resize_dimensions": [],
+              "tile": true,
+              "work_area_offset": null,
+              "apply_window_based_work_area_offset": true,
+              "window_container_behaviour": null,
+              "window_container_behaviour_rules": null,
+              "float_override": null,
+              "layer": "Tiling",
+              "floating_layer_behaviour": null,
+              "wallpaper": null
+            },
+            {
+              "name": "VII",
+              "containers": {
+                "elements": [],
+                "focused": 0
+              },
+              "monocle_container": null,
+              "maximized_window": null,
+              "floating_windows": {
+                "elements": [],
+                "focused": 0
+              },
+              "layout": {
+                "Default": "RightMainVerticalStack"
+              },
+              "layout_options": null,
+              "layout_rules": [],
+              "layout_options_rules": [],
+              "work_area_offset_rules": [],
+              "layout_flip": null,
+              "workspace_padding": null,
+              "container_padding": null,
+              "latest_layout": [],
+              "resize_dimensions": [],
+              "tile": true,
+              "work_area_offset": null,
+              "apply_window_based_work_area_offset": true,
+              "window_container_behaviour": null,
+              "window_container_behaviour_rules": null,
+              "float_override": null,
+              "layer": "Tiling",
+              "floating_layer_behaviour": null,
+              "wallpaper": null
+            }
+          ],
+          "focused": 0
+        },
+        "workspace_names": {},
+        "container_padding": null,
+        "workspace_padding": null,
+        "wallpaper": null,
+        "floating_layer_behaviour": null
+      }
+    ],
+    "focused": 0
+  },
+  "monitor_usr_idx_map": {
+    "0": 0
+  },
+  "is_paused": false,
+  "resize_delta": 50,
+  "new_window_behaviour": "Create",
+  "float_override": false,
+  "cross_monitor_move_behaviour": "Insert",
+  "unmanaged_window_operation_behaviour": "Op",
+  "work_area_offset": null,
+  "focus_follows_mouse": null,
+  "mouse_follows_focus": true,
+  "has_pending_raise_op": false,
+  "virtual_desktop_id": [
+    250,
+    108,
+    68,
+    23,
+    165,
+    170,
+    9,
+    78,
+    129,
+    45,
+    44,
+    91,
+    129,
+    123,
+    137,
+    204
+  ]
+}

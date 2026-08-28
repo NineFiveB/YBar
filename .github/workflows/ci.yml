@@ -5,6 +5,10 @@ on:
     branches: [windows]
   pull_request:
     branches: [windows]
+  # Manual runs exist for the komorebi-canary job: a komorebi release during
+  # a quiet spell is only caught by the next push otherwise. (A cron would
+  # not fire here — GitHub schedules run only from the default branch.)
+  workflow_dispatch:
 
 jobs:
   build:
@@ -70,3 +74,193 @@ jobs:
         with:
           name: ybar-win
           path: dist/
+
+  # Schema-drift canary (spec 14): the parser and the recorded fixtures in
+  # tests/fixtures/komorebi are pinned to komorebi v0.1.41; this job asks
+  # the LATEST release for its schemas and fails when a load-bearing path
+  # moved. No `needs` — an upstream komorebi release must never block the
+  # build job.
+  komorebi-canary:
+    runs-on: windows-latest
+    steps:
+      - name: Download the latest komorebi release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download --repo LGUG2Z/komorebi --pattern "komorebi-*-x86_64-pc-windows-msvc.zip" --output komorebi.zip
+          Expand-Archive komorebi.zip -DestinationPath komorebi
+
+      - name: Dump protocol schemas
+        run: |
+          $komorebic = (Get-ChildItem komorebi -Recurse -Filter komorebic.exe | Select-Object -First 1).FullName
+          & $komorebic --version
+          & $komorebic notification-schema | Set-Content notification-schema.json
+          & $komorebic socket-schema | Set-Content socket-schema.json
+
+      - name: Assert the load-bearing schema paths
+        run: |
+          # Paths src/providers/komorebi.cpp depends on. schemars has moved
+          # shapes across drafts (definitions vs $defs, enum vs const tags,
+          # items vs prefixItems), so nothing below hardcodes a nesting depth.
+          $notification = Get-Content notification-schema.json -Raw | ConvertFrom-Json -AsHashtable
+          $socket = Get-Content socket-schema.json -Raw | ConvertFrom-Json -AsHashtable
+          $failures = [System.Collections.Generic.List[string]]::new()
+
+          function Get-DefTables($node, $out) {
+            if ($node -is [string]) { return }
+            if ($node -is [System.Collections.IDictionary]) {
+              foreach ($key in @('definitions', '$defs')) {
+                if ($node[$key] -is [System.Collections.IDictionary]) { [void]$out.Add($node[$key]) }
+              }
+              foreach ($value in @($node.Values)) { Get-DefTables $value $out }
+            } elseif ($node -is [System.Collections.IEnumerable]) {
+              foreach ($value in $node) { Get-DefTables $value $out }
+            }
+          }
+
+          function Find-Def($schema, [string]$name) {
+            $tables = [System.Collections.ArrayList]::new()
+            Get-DefTables $schema $tables
+            foreach ($table in $tables) { if ($table.Contains($name)) { return $table[$name] } }
+            return $null
+          }
+
+          function Resolve-Ref($schema, $node) {
+            if ($node -is [System.Collections.IDictionary] -and $node['$ref'] -is [string]) {
+              $def = Find-Def $schema (($node['$ref'] -split '/')[-1])
+              if ($def) { return $def }
+            }
+            return $node
+          }
+
+          # Adjacently tagged enum -> @{tag = variant schema}.
+          function Get-VariantMap($schema, $node) {
+            $map = [ordered]@{}
+            if ($null -eq $node) { return $map }
+            $list = $node['oneOf']; if (-not $list) { $list = $node['anyOf'] }
+            foreach ($entry in @($list)) {
+              $variant = Resolve-Ref $schema $entry
+              if ($variant -isnot [System.Collections.IDictionary]) { continue }
+              $props = $variant['properties']
+              if ($props -isnot [System.Collections.IDictionary] -or
+                  $props['type'] -isnot [System.Collections.IDictionary]) { continue }
+              $tag = $props['type']['const']
+              if ($null -eq $tag -and $props['type']['enum']) { $tag = @($props['type']['enum'])[0] }
+              if ($tag -is [string] -and -not $map.Contains($tag)) { $map[$tag] = $variant }
+            }
+            return $map
+          }
+
+          function Get-TupleItems($variant) {
+            $content = $variant['properties']['content']
+            if ($content -isnot [System.Collections.IDictionary]) { return $null }
+            $tuple = $content['prefixItems']; if (-not $tuple) { $tuple = $content['items'] }
+            return $tuple
+          }
+
+          function Assert([bool]$condition, [string]$what) {
+            if ($condition) { Write-Host "ok: $what" }
+            else { $failures.Add($what); Write-Host "FAIL: $what" }
+          }
+
+          function Assert-Props($schema, [string]$name, [string[]]$props) {
+            $def = Find-Def $schema $name
+            $p = if ($def -is [System.Collections.IDictionary]) { $def['properties'] } else { $null }
+            if ($p -isnot [System.Collections.IDictionary]) { Assert $false "$name definition"; return }
+            foreach ($prop in $props) { Assert ($p.Contains($prop)) "$name.$prop" }
+          }
+
+          # --- SocketMessage (what we SEND: registration, State query,
+          # work-area offsets, click commands)
+          $socketMessage = if ($socket['oneOf'] -or $socket['anyOf']) { $socket }
+                           else { Find-Def $socket 'SocketMessage' }
+          $sent = Get-VariantMap $socket $socketMessage
+          $state = $sent['State']
+          Assert ($null -ne $state) 'SocketMessage variant State'
+          if ($state) {
+            Assert (($state['required'] -contains 'type') -and -not ($state['required'] -contains 'content')) `
+              'State stays a unit variant ({"type":"State"}, no content)'
+          }
+          foreach ($name in 'AddSubscriberSocketWithOptions', 'MonitorWorkAreaOffset', 'FocusWorkspaceNumber') {
+            $variant = $sent[$name]
+            Assert ($null -ne $variant) "SocketMessage variant $name"
+            if ($variant) {
+              Assert (($variant['required'] -contains 'type') -and ($variant['required'] -contains 'content')) `
+                "$name adjacent tagging (type + content)"
+            }
+          }
+          if ($sent['AddSubscriberSocketWithOptions']) {
+            $tuple = Get-TupleItems $sent['AddSubscriberSocketWithOptions']
+            $options = if (@($tuple).Count -ge 2) { Resolve-Ref $socket @($tuple)[1] } else { $null }
+            Assert ($options -and $options['properties'] -and $options['properties'].Contains('filter_state_changes')) `
+              'AddSubscriberSocketWithOptions options.filter_state_changes'
+          }
+          if ($sent['MonitorWorkAreaOffset']) {
+            $tuple = Get-TupleItems $sent['MonitorWorkAreaOffset']
+            $rect = if (@($tuple).Count -ge 2) { Resolve-Ref $socket @($tuple)[1] } else { $null }
+            $rectProps = if ($rect) { $rect['properties'] } else { $null }
+            foreach ($edge in 'left', 'top', 'right', 'bottom') {
+              Assert ($rectProps -and $rectProps.Contains($edge)) "MonitorWorkAreaOffset rect.$edge"
+            }
+          }
+
+          # --- Notification (what we RECEIVE on the subscriber socket)
+          $root = if ($notification['properties']) { $notification } else { Find-Def $notification 'Notification' }
+          $rootProps = if ($root) { $root['properties'] } else { $null }
+          Assert ($rootProps -and $rootProps.Contains('event') -and $rootProps.Contains('state')) `
+            'Notification carries event + state'
+
+          # The outer enum is untagged (the wrapper names never reach the
+          # wire), and the VirtualDesktop arm serializes as bare strings —
+          # the parser accepts a plain-string `event` because of this.
+          $notifEvent = Find-Def $notification 'NotificationEvent'
+          Assert ($notifEvent -and ($notifEvent['anyOf'] -or $notifEvent['oneOf']) -and -not $notifEvent['properties']) `
+            'NotificationEvent stays untagged'
+          $virtualDesktop = Find-Def $notification 'VirtualDesktopNotification'
+          Assert ($virtualDesktop -and $virtualDesktop['type'] -eq 'string') `
+            'VirtualDesktopNotification serializes as bare strings'
+
+          Assert-Props $notification 'State' @('monitors', 'is_paused')
+          Assert-Props $notification 'Monitor' @('device_id', 'workspaces')
+          Assert-Props $notification 'Workspace' @('name', 'containers', 'monocle_container', 'maximized_window', 'floating_windows')
+          Assert-Props $notification 'Rect' @('left', 'top', 'right', 'bottom')
+          # Window's wire quintet (hwnd/title/exe/class/rect) comes from a
+          # custom Serialize impl schemars cannot see; hwnd is the only
+          # schema-visible field in the v0.1.41 baseline. Extra fields
+          # appearing here would mean the custom impl changed — re-verify
+          # the wire format either way.
+          $window = Find-Def $notification 'Window'
+          $windowProps = if ($window) { $window['properties'] } else { $null }
+          Assert ($windowProps -and $windowProps.Contains('hwnd')) 'Window.hwnd'
+          if ($windowProps) {
+            Assert (@($windowProps.Keys).Count -eq 1) 'Window schema still hides the custom-serialized quintet'
+          }
+
+          # Ring plumbing the focused-workspace walk depends on.
+          $stateDef = Find-Def $notification 'State'
+          if ($stateDef -and $stateDef['properties']) {
+            $ring = Resolve-Ref $notification $stateDef['properties']['monitors']
+            Assert ($ring['properties'] -and $ring['properties'].Contains('elements') -and $ring['properties'].Contains('focused')) `
+              'State.monitors is a Ring {elements, focused}'
+          }
+          $monitorDef = Find-Def $notification 'Monitor'
+          if ($monitorDef -and $monitorDef['properties']) {
+            $ring = Resolve-Ref $notification $monitorDef['properties']['workspaces']
+            Assert ($ring['properties'] -and $ring['properties'].Contains('elements') -and $ring['properties'].Contains('focused')) `
+              'Monitor.workspaces is a Ring {elements, focused}'
+          }
+
+          # Show/Destroy feed app_launched/app_terminated; FocusChange feeds
+          # front_app_switched. All carry a (WinEvent, Window) tuple content.
+          $wmEvents = Get-VariantMap $notification (Find-Def $notification 'WindowManagerEvent')
+          foreach ($name in 'FocusChange', 'Show', 'Destroy') {
+            $variant = $wmEvents[$name]
+            Assert ($null -ne $variant -and ($variant['required'] -contains 'content')) `
+              "WindowManagerEvent variant $name (type + content)"
+          }
+
+          if ($failures.Count -gt 0) {
+            Write-Host "`n$($failures.Count) load-bearing path(s) moved - re-verify src/providers/komorebi.cpp and re-record tests/fixtures/komorebi."
+            exit 1
+          }
+          Write-Host "`nAll load-bearing schema paths present."

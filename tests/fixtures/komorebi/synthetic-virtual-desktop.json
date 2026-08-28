@@ -1,0 +1,29 @@
+{
+  "event": "EnteredAssociatedVirtualDesktop",
+  "state": {
+    "monitors": {
+      "elements": [
+        {
+          "id": 65537,
+          "name": "DISPLAY1",
+          "device": "SYN0001",
+          "device_id": "SYN0001-0&00000000&0&UID0000",
+          "workspaces": {
+            "elements": [
+              {
+                "name": "I",
+                "containers": { "elements": [], "focused": 0 },
+                "monocle_container": null,
+                "maximized_window": null,
+                "floating_windows": { "elements": [], "focused": 0 }
+              }
+            ],
+            "focused": 0
+          }
+        }
+      ],
+      "focused": 0
+    },
+    "is_paused": false
+  }
+}

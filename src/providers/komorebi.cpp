@@ -57,7 +57,24 @@ KomorebiUpdate extractUpdate(const json& state) {
     return update;
 }
 
+// A notification wraps the snapshot in {event, state}; a State query reply
+// is the bare snapshot (spec 11.2).
+const json& unwrapState(const json& parsed) {
+    return parsed.contains("state") ? parsed.at("state") : parsed;
+}
+
 } // namespace
+
+std::optional<KomorebiUpdate> KomorebiProvider::parseNotification(const std::string& payload) {
+    try {
+        const auto parsed = json::parse(payload);
+        const auto& state = unwrapState(parsed);
+        if (!state.contains("monitors")) return std::nullopt;
+        return extractUpdate(state);
+    } catch (const json::exception&) {
+        return std::nullopt;
+    }
+}
 
 bool KomorebiProvider::detect() {
     return GetFileAttributesA(komorebiSocket().c_str()) != INVALID_FILE_ATTRIBUTES;
@@ -212,7 +229,7 @@ void KomorebiProvider::publishState(const std::string& payload) {
     try {
         const auto parsed = json::parse(payload);
         publishAppEvent(parsed, onAppEvent);
-        const auto& state = parsed.contains("state") ? parsed.at("state") : parsed;
+        const auto& state = unwrapState(parsed);
         if (!state.contains("monitors")) return;
         monitorCount_ = static_cast<int>(state.at("monitors").at("elements").size());
         monitorCountKnown_ = true;
