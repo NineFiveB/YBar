@@ -65,6 +65,7 @@ local icons = {
         _2 = "\238\161\179",  -- U+E873 Wifi2
         _3 = "\238\161\180",  -- U+E874 Wifi3
         _4 = "\238\156\129",  -- U+E701 Wifi (full)
+        lock = "\238\156\174", -- U+E72E Lock (composited after an arc)
         font = "Segoe Fluent Icons",
       },
     },
@@ -124,6 +125,7 @@ local icons = {
         _2 = "\238\161\179",  -- U+E873 Wifi2
         _3 = "\238\161\180",  -- U+E874 Wifi3
         _4 = "\238\156\129",  -- U+E701 Wifi (full)
+        lock = "\238\156\174", -- U+E72E Lock (composited after an arc)
         font = "Segoe Fluent Icons",
       },
     },

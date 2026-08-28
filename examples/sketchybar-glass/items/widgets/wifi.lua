@@ -121,12 +121,13 @@ local current_status = sbar.add("item", {
 })
 
 -- ── Network list: fixed row pool bound per scan (flyout body) ──────────────
--- Items carry exactly two text parts, so each row packs "<signal glyph>
--- <ssid>" into the icon and keeps the label as the reserved 40px right-edge
--- lock slot. The ssid's characters are not in Segoe Fluent Icons, so
--- DirectWrite's system fallback shapes them in the UI text face; every
--- signal glyph advances one em, so the ssid column stays aligned across
--- rows.
+-- Items carry exactly two text parts, and the engine shapes each part in
+-- ONE family — there is no system-font fallback, so a slot must never mix
+-- PUA glyphs with ssid text (the ssid's Latin characters land on Segoe
+-- Fluent's .notdef boxes; seen on screen). Both PUA glyphs — the signal
+-- arc plus the lock badge when secured — share the fixed-width icon run,
+-- like Win11's lock-badged network glyph, and the ssid keeps the UI text
+-- face in the label. The fixed icon width keeps the ssid column aligned.
 local net_rows = {}
 for i = 1, MAX_NETS do
   net_rows[i] = sbar.add("item", "widgets.wifi.net." .. i, {
@@ -138,19 +139,16 @@ for i = 1, MAX_NETS do
       string = "",
       color = colors.white,
       font = { family = icons.wifi.signal.font, size = 13 },
-      width = popup_width - 40 - inset,
+      width = 56,
       align = "left",
       padding_left = inset,
     },
-    -- Right-edge slot ends at popup_width - inset, so a right-aligned lock
-    -- lines up with the connected block's. sf:lock auto-selects the resolved
-    -- icon family (and its fallback chain), so no family override here.
     label = {
       string = "",
-      color = colors.grey,
-      font = { size = 12 },
-      width = 40,
-      align = "right",
+      color = colors.white,
+      font = { size = 13 },
+      width = popup_width - 56 - inset,
+      align = "left",
     },
   })
 end
@@ -230,8 +228,9 @@ local function populate_rows()
         row = row + 1
         net_rows[row]:set({
           drawing = true,
-          icon = { string = signal_glyph(net.signal or 0) .. "  " .. net.ssid },
-          label = { string = net.secured and "sf:lock" or "" },
+          icon = { string = signal_glyph(net.signal or 0)
+            .. (net.secured and (" " .. icons.wifi.signal.lock) or "") },
+          label = { string = net.ssid },
         })
       end
     end
