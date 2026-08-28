@@ -3,6 +3,7 @@
 // (docs/WINDOWS-PORT.md sections 3.7, 12).
 
 #include <cstdio>
+#include <cstdlib>
 #include <cwctype>
 #include <string>
 #include <vector>
@@ -198,6 +199,32 @@ TEST_CASE("environmentBlock merges variable names case-insensitively") {
     // The overlay value survived AND got the exe-directory prepend.
     CHECK(pathEntries[0].find(L"C:\\ybar-test-marker") != std::wstring::npos);
     CHECK(pathEntries[0].find(L';') != std::wstring::npos);
+}
+
+TEST_CASE("YBAR_SHELL is classified by basename, case-insensitively") {
+    // Regression: a case-sensitive whole-path substring match sent
+    // ...\PowerShell.exe down the PowerShell branch only by luck of casing,
+    // and mistook a POSIX shell nested under a "...cmder..." tree (the path
+    // contains "cmd") for cmd.exe. Classify on the lowercased basename.
+    const auto probe = [](const wchar_t* shell) {
+        _wputenv_s(L"YBAR_SHELL", shell);
+        app::ScriptRunner s;
+        _wputenv_s(L"YBAR_SHELL", L""); // don't leak to other tests
+        return s.commandLineFor("echo hi");
+    };
+
+    // Mixed-case PowerShell → `-Command`, never `-c`/`/c`.
+    CHECK(probe(L"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\PowerShell.exe")
+              .find(L"-Command") != std::wstring::npos);
+    // POSIX sh under a cmder tree ("cmd" in the path) → `-c`, not `/c`.
+    const auto cmder =
+        probe(L"C:\\tools\\cmder\\vendor\\git-for-windows\\usr\\bin\\sh.exe");
+    CHECK(cmder.find(L" -c ") != std::wstring::npos);
+    CHECK(cmder.find(L" /c ") == std::wstring::npos);
+    // cmd.exe → `/c`, not the PowerShell flags.
+    const auto cmd = probe(L"C:\\Windows\\System32\\cmd.exe");
+    CHECK(cmd.find(L" /c ") != std::wstring::npos);
+    CHECK(cmd.find(L"-Command") == std::wstring::npos);
 }
 
 TEST_CASE("config reload drops old-state subscriptions") {

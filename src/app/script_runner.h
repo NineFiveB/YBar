@@ -46,7 +46,8 @@ private:
     void spawn(const std::wstring& commandLine, const std::map<std::string, std::string>& env);
 
     std::wstring shell_;
-    bool posix_ = false;
+    bool posix_ = false; // sh-family: `-c <script>`
+    bool cmd_ = false;   // cmd.exe: `/c <script>` (neither posix_ nor cmd_ = PowerShell)
 };
 
 } // namespace ybar::app

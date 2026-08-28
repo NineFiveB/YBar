@@ -80,14 +80,35 @@ std::wstring exeDirectory() {
     return slash == std::wstring::npos ? L"." : path.substr(0, slash);
 }
 
+// Lowercased basename of a shell path (…\PowerShell.exe -> "powershell.exe").
+// Classify on the basename, not the whole path: a POSIX shell nested under a
+// directory that happens to contain "cmd" (e.g. cmder's bundled Git sh) must
+// not be mistaken for cmd.exe, and the match must be case-insensitive.
+std::wstring shellStem(const std::wstring& path) {
+    const auto slash = path.find_last_of(L"\\/");
+    std::wstring stem = slash == std::wstring::npos ? path : path.substr(slash + 1);
+    for (auto& c : stem)
+        if (c >= L'A' && c <= L'Z') c = static_cast<wchar_t>(c + 32);
+    return stem;
+}
+
 } // namespace
 
 ScriptRunner::ScriptRunner() {
-    if (const char* custom = std::getenv("YBAR_SHELL")) {
-        shell_ = widen(custom);
-        posix_ = shell_.find(L"powershell") == std::wstring::npos &&
-                 shell_.find(L"pwsh") == std::wstring::npos &&
-                 shell_.find(L"cmd") == std::wstring::npos;
+    // _wgetenv, not getenv+widen: the value is native UTF-16, so decoding the
+    // ACP bytes getenv returns as if they were UTF-8 mangles any non-ASCII
+    // shell path and the spawn silently fails.
+    if (const wchar_t* custom = _wgetenv(L"YBAR_SHELL")) {
+        shell_ = custom;
+        const std::wstring stem = shellStem(shell_);
+        if (stem.find(L"powershell") != std::wstring::npos ||
+            stem.find(L"pwsh") != std::wstring::npos) {
+            posix_ = false; // PowerShell
+        } else if (stem == L"cmd" || stem == L"cmd.exe") {
+            cmd_ = true; // real /c dispatch, not the PowerShell flags
+        } else {
+            posix_ = true; // sh/bash/dash/busybox/…
+        }
         return;
     }
     if (auto sh = findOnPath(L"sh.exe"); !sh.empty()) {
@@ -109,6 +130,8 @@ std::wstring ScriptRunner::commandLineFor(const std::string& script) const {
     std::wstring commandLine = quoteArg(shell_);
     if (posix_) {
         commandLine += L" -c " + quoteArg(widen(script));
+    } else if (cmd_) {
+        commandLine += L" /c " + quoteArg(widen(script));
     } else {
         commandLine += L" -NoProfile -Command " + quoteArg(widen(script));
     }
@@ -126,6 +149,8 @@ void ScriptRunner::runFile(const std::string& path,
     if (posix_) {
         // exec-"$0" trick: the path travels as an argv word, immune to quoting.
         commandLine += L" -c " + quoteArg(L"exec \"$0\"") + L" " + quoteArg(widen(path));
+    } else if (cmd_) {
+        commandLine += L" /c " + quoteArg(widen(path));
     } else {
         commandLine += L" -NoProfile -Command " + quoteArg(L"& \"" + widen(path) + L"\"");
     }

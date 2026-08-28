@@ -604,14 +604,18 @@ Windows `usr\bin\sh.exe` located via the `GitForWindows` registry
 an Explorer-launched daemon otherwise fell back to PowerShell, where every
 sh-quoted theme command breaks; Git's sh does NOT self-prepend `/usr/bin`
 for `sh -c`, so the shell's directory joins the exe dir in the child PATH
-prepend — that is where tr/awk/coreutils live) → bundled
-`busybox64.exe sh` → `powershell.exe -NoProfile -Command` (last resort, with a
-one-time stderr warning that POSIX configs will break). Always
-`<shell> -c <script>` semantics, cwd = config dir, 60 s kill
-(`TerminateProcess` — note: child *trees* aren't killed on macOS either; a Job
-Object here would actually fix that latent bug, do it), fire-and-forget, PATH
-prepended with the `ybar.exe` directory and the resolved shell's directory
-(`;` separator). The exec pipe is
+prepend — that is where tr/awk/coreutils live) →
+`powershell.exe -NoProfile -Command` (last resort). `%YBAR_SHELL%` is
+classified by lowercased **basename** (not the whole path, so a POSIX shell
+nested under a `…\cmder\…` tree isn't mistaken for cmd): `powershell`/`pwsh`
+→ PowerShell, `cmd`/`cmd.exe` → `cmd /c`, anything else → POSIX `sh -c`; the
+value is read with `_wgetenv` so non-ASCII shell paths survive. Dispatch is
+`sh -c <script>` / `cmd /c <script>` / `powershell -NoProfile -Command
+<script>` by kind, cwd = config dir, 60 s watchdog that closes a
+**`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`** Job Object (kills the whole child
+*tree* — the latent "children of the shell survive" gap macOS shares is
+fixed here), fire-and-forget, PATH prepended with the `ybar.exe` directory
+and the resolved shell's directory (`;` separator). The exec pipe is
 drained concurrently with the child (same >64 KB deadlock exists with
 anonymous pipes). Config scripts: no chmod (no exec bit), dispatch by
 extension — `.lua`/`.jsonc` in-process, anything else through the resolved
@@ -933,8 +937,9 @@ workspace pill and the CPU gauge. An in-tree **YTile provider** extension
 mirrors the komorebi update flow (fires `komorebi_workspace_change` for
 config compatibility); its wire contract is `docs/YTILE-IPC.md` in the
 sibling YTile repo (see the YTile parity paragraph below). **Popups + tooltips**
-(§3.9): vertical/horizontal/wrap layouts, per-host panels, WH_MOUSE_LL
-outside-click auto-close, press-on-bar-closes-others, 600 ms tooltip dwell —
+(layouts §3.9; panel lifecycle + ordering §6): vertical/horizontal/wrap
+layouts, per-host panels, WH_MOUSE_LL outside-click auto-close,
+press-on-bar-closes-others, 600 ms tooltip dwell —
 live-verified (panel screenshot, auto-close state flip, tooltip window
 enumeration).
 

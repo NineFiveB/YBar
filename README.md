@@ -147,8 +147,8 @@ changes:
 | per-item `glass` pills | rendered as the shader's glass rim and translucent fill only |
 
 Scripts run under `sh` — `%YBAR_SHELL%` if set, else `sh.exe` on `PATH` (Git
-Bash), else a bundled busybox, else `powershell.exe` with a one-time warning.
-Write `$INFO`, not `$env:INFO`.
+Bash), else Git for Windows' `sh.exe` found via the registry, else
+`powershell.exe -NoProfile`. Write `$INFO`, not `$env:INFO`.
 
 ## Building
 
