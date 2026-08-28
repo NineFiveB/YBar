@@ -42,6 +42,19 @@ installed via `ybar theme use` must be self-contained.
   an Open Calendar row.
 - Per-device Bluetooth battery — no public API without pairing-level access.
 
+## Deliberate restyles (not gaps)
+
+- The wifi, bluetooth, and system-monitor popups left the macOS Settings
+  layouts on purpose: they are Win11 Fluent flyouts (quick-settings header
+  with a toggle glyph, single-line rows, plain-text Settings footer;
+  Task Manager-style graphs in the monitor popup). The battery and media
+  popups keep the shared macOS-derived layout.
+- The macOS items' hover/reveal animations are not carried over: the
+  spaces-indicator hover fade belongs to the dropped menus swap, and the
+  emptied-workspace pill collapse/reveal slide is moot under the fixed
+  komorebi slot set — pills snap by owner preference under the flat
+  Fluent restyle.
+
 ## Glass rendering
 
 The bar's `glass = true` gets a real Acrylic backdrop (DWM). Item-level
