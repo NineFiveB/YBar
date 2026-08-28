@@ -14,14 +14,16 @@ local settings = require("settings")
 --
 -- The pill is still driven by the native wifi_change event (INFO = ssid |
 -- "connected" | "" offline). State comes from one `netsh wlan show
--- interfaces` round trip; the network list from `netsh wlan show networks`
--- (live-verified here — on Win11 24H2+ the scan can need location consent,
--- in which case the list simply stays empty and the flyout shows just the
--- connected block). Clicking a row connects when the network is a SAVED
--- profile (`netsh wlan connect` has no non-interactive join for unsaved
--- ones — Settings covers those via the footer). The header toggle and the
--- footer both deep-link to ms-settings:network-wifi: flipping the radio
--- needs an elevated netsh or the WinRT Radio API, no non-admin CLI.
+-- interfaces` round trip; the network list from `netsh wlan show networks
+-- mode=bssid` (live-verified here — plain mode emits no Signal lines, so
+-- per-network strength needs the per-BSSID listing; on Win11 24H2+ the scan
+-- can need location consent, in which case the list simply stays empty and
+-- the flyout shows just the connected block). Clicking a row connects when
+-- the network is a SAVED profile (`netsh wlan connect` has no
+-- non-interactive join for unsaved ones — Settings covers those via the
+-- footer). The header toggle and the footer both deep-link to
+-- ms-settings:network-wifi: flipping the radio needs an elevated netsh or
+-- the WinRT Radio API, no non-admin CLI.
 -- NOTE: netsh output is localized; the parses assume an English Windows.
 
 local popup_width = 300
@@ -65,7 +67,7 @@ local header = sbar.add("item", {
     -- Literal Segoe Fluent toggle glyph — needs the explicit family (only
     -- sf: strings auto-select the icon font).
     font = { family = icons.switch.font, size = 18 },
-    color = colors.white,
+    color = colors.blue,
     width = popup_width / 2,
     padding_right = inset,
   },
@@ -119,6 +121,12 @@ local current_status = sbar.add("item", {
 })
 
 -- ── Network list: fixed row pool bound per scan (flyout body) ──────────────
+-- Items carry exactly two text parts, so each row packs "<signal glyph>
+-- <ssid>" into the icon and keeps the label as the reserved 40px right-edge
+-- lock slot. The ssid's characters are not in Segoe Fluent Icons, so
+-- DirectWrite's system fallback shapes them in the UI text face; every
+-- signal glyph advances one em, so the ssid column stays aligned across
+-- rows.
 local net_rows = {}
 for i = 1, MAX_NETS do
   net_rows[i] = sbar.add("item", "widgets.wifi.net." .. i, {
@@ -127,19 +135,22 @@ for i = 1, MAX_NETS do
     width = popup_width,
     align = "left",
     icon = {
-      string = icons.wifi.connected,
-      color = colors.white,
-      font = { size = 14 },
-      width = 40,
-      align = "center",
-      padding_left = inset,
-    },
-    label = {
       string = "",
       color = colors.white,
-      font = { size = 13 },
-      width = popup_width - 40 - inset - 40,
+      font = { family = icons.wifi.signal.font, size = 13 },
+      width = popup_width - 40 - inset,
       align = "left",
+      padding_left = inset,
+    },
+    -- Right-edge slot ends at popup_width - inset, so a right-aligned lock
+    -- lines up with the connected block's. sf:lock auto-selects the resolved
+    -- icon family (and its fallback chain), so no family override here.
+    label = {
+      string = "",
+      color = colors.grey,
+      font = { size = 12 },
+      width = 40,
+      align = "right",
     },
   })
 end
@@ -173,7 +184,7 @@ local is_connected = false
 local details_running = false
 local scanning = false
 local details = nil     -- last parsed `show interfaces` snapshot
-local net_cache = {}    -- { ssid, secured } rows from the last scan
+local net_cache = {}    -- { ssid, secured, signal } rows from the last scan
 
 -- Spinner beside "Wi-Fi" while the netsh round trips run.
 local spinner = require("helpers.spinner").attach(header)
@@ -182,12 +193,23 @@ local function right_glyph(secured)
   return secured and "sf:lock" or "sf:wifi"
 end
 
+-- Quartile breakpoints over netsh's 0-100 Signal percent; no Signal line
+-- (hidden/stale entry) parses as 0 and lands on the weakest arc.
+local function signal_glyph(pct)
+  local s = icons.wifi.signal
+  if pct < 25 then return s._1
+  elseif pct < 50 then return s._2
+  elseif pct < 75 then return s._3
+  end
+  return s._4
+end
+
 -- ── Populate ───────────────────────────────────────────────────────────────
 local function populate_rows()
   header:set({
     label = {
       string = wifi_power and icons.switch.on or icons.switch.off,
-      color = wifi_power and colors.white or colors.grey,
+      color = wifi_power and colors.blue or colors.grey,
     },
   })
 
@@ -208,8 +230,8 @@ local function populate_rows()
         row = row + 1
         net_rows[row]:set({
           drawing = true,
-          icon = { string = icons.wifi.connected },
-          label = { string = net.ssid },
+          icon = { string = signal_glyph(net.signal or 0) .. "  " .. net.ssid },
+          label = { string = net.secured and "sf:lock" or "" },
         })
       end
     end
@@ -232,11 +254,16 @@ local iface_cmd = "netsh wlan show interfaces | tr -d '\\r' | awk -F' : ' '"
   .. 'END{printf "%s|%s|%s|%s", st, ssid, auth, pwr}'
   .. "'"
 
--- Network scan: "net|<ssid>|<secured>" per visible network.
-local scan_cmd = "netsh wlan show networks | tr -d '\\r' | awk -F' : ' '"
-  .. '/^SSID/{ssid=$2} '
-  .. '/^ *Authentication/{ if (ssid != "") { '
-  .. 'sec = ($2 ~ /Open/) ? 0 : 1; printf "net|%s|%d\\n", ssid, sec; ssid="" } }'
+-- Network scan: "net|<ssid>|<secured>|<signal>" per visible network. Only
+-- mode=bssid emits Signal lines (one per BSSID — the strongest wins), so
+-- emission waits for the next SSID header / END to let a network's BSSID
+-- lines accumulate; a network with no Signal line reports 0.
+local scan_cmd = "netsh wlan show networks mode=bssid | tr -d '\\r' | awk -F' : ' '"
+  .. '/^SSID/{ if (ssid != "") printf "net|%s|%d|%d\\n", ssid, sec, sig; '
+  .. 'ssid=$2; sec=1; sig=0 } '
+  .. '/^ *Authentication/{ sec = ($2 ~ /Open/) ? 0 : 1 } '
+  .. '/^ *Signal/{ pct=$2; sub(/%/, "", pct); if (pct+0 > sig) sig=pct+0 } '
+  .. 'END{ if (ssid != "") printf "net|%s|%d|%d\\n", ssid, sec, sig }'
   .. "'"
 
 local function apply_pill()
@@ -279,10 +306,11 @@ local function scan_networks()
     spinner.stop()
     net_cache = {}
     local seen = {}
-    for ssid, sec in (out or ""):gmatch("net|([^|\n]+)|([01])") do
+    for ssid, sec, sig in (out or ""):gmatch("net|([^|\n]+)|([01])|(%d+)") do
       if not seen[ssid] and #net_cache < MAX_NETS then
         seen[ssid] = true
-        net_cache[#net_cache + 1] = { ssid = ssid, secured = sec == "1" }
+        net_cache[#net_cache + 1] =
+          { ssid = ssid, secured = sec == "1", signal = tonumber(sig) }
       end
     end
     populate_rows()

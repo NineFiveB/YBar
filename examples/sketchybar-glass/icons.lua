@@ -58,6 +58,15 @@ local icons = {
       connected = "sf:wifi",
       disconnected = "sf:wifi.slash",
       router = "sf:network",
+      -- Literal Segoe Fluent chars (not in the engine map); consumers must
+      -- set font.family = ....font, same as switch.
+      signal = {
+        _1 = "\238\161\178",  -- U+E872 Wifi1 (weakest, one arc)
+        _2 = "\238\161\179",  -- U+E873 Wifi2
+        _3 = "\238\161\180",  -- U+E874 Wifi3
+        _4 = "\238\156\129",  -- U+E701 Wifi (full)
+        font = "Segoe Fluent Icons",
+      },
     },
     media = {
       back = "sf:backward.fill",
@@ -108,6 +117,15 @@ local icons = {
       connected = "sf:wifi",
       disconnected = "sf:wifi.slash",
       router = "sf:network",
+      -- Literal Segoe Fluent chars (not in the engine map); consumers must
+      -- set font.family = ....font, same as switch.
+      signal = {
+        _1 = "\238\161\178",  -- U+E872 Wifi1 (weakest, one arc)
+        _2 = "\238\161\179",  -- U+E873 Wifi2
+        _3 = "\238\161\180",  -- U+E874 Wifi3
+        _4 = "\238\156\129",  -- U+E701 Wifi (full)
+        font = "Segoe Fluent Icons",
+      },
     },
     media = {
       back = "sf:backward.fill",
