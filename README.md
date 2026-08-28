@@ -1,6 +1,6 @@
 # YBar
 
-**Top bar for macOS** — a GPU-rendered, scriptable status bar. Metal renders everything (SDF shapes, glyph-atlas text, display-link-paced animation at near-zero CPU); the architecture is [sketchybar](https://github.com/FelixKratz/SketchyBar)'s proven live-object model: a single `ybar` binary that is both daemon and CLI client, driven entirely over IPC — plus an embedded Lua runtime so whole configs run in-process.
+**Top bar for macOS and Windows** — a GPU-rendered, scriptable status bar. On macOS, Metal renders everything (SDF shapes, glyph-atlas text, display-link-paced animation at near-zero CPU); a [native Windows port](#windows) mirrors the engine on Direct3D 11 + DirectComposition. The architecture is [sketchybar](https://github.com/FelixKratz/SketchyBar)'s proven live-object model: a single `ybar` binary that is both daemon and CLI client, driven entirely over IPC — plus an embedded Lua runtime so whole configs run in-process, and themes and scripts move between the two platforms with only OS-inherent edits.
 
 ![YBar in use: AeroSpace workspace pills with live app icons, then the app-menus swap](docs/media/ybar-demo.gif)
 
@@ -30,36 +30,13 @@ ybar --query hello                    # live state as JSON
 ## Why
 
 - Keeps **sketchybar's command grammar and script contract** — existing configs port mechanically, and a pure-Lua compatibility shim runs SbarLua configs nearly verbatim.
-- Renders with **Metal**: instanced SDF quads + a CoreText glyph atlas, damage-driven — zero GPU work while the bar is static.
-- **100% public APIs** in v1, so macOS updates don't break it.
-- On macOS 26+, pills and popups sit on **real Liquid Glass** (`NSGlassEffectView` backdrops — clear for bar pills, frosted for popups); older systems get an in-shader approximation.
+- **GPU-rendered**: instanced SDF quads + a glyph atlas, damage-driven — zero GPU work while the bar is static (Metal on macOS, Direct3D 11 on Windows).
+- **100% public APIs** in v1, so OS updates don't break it.
+- On macOS 26+, pills and popups sit on **real Liquid Glass** (`NSGlassEffectView` backdrops — clear for bar pills, frosted for popups); older systems get an in-shader approximation. On Windows they map to DWM Acrylic that follows your system Transparency setting.
 
 ## What's here
 
-**Rendering & layout**
-- Bar window per display (borderless non-activating panel; behind-windows / floating / cover-menu-bar levels; all Spaces), menu-bar-autohide aware (including the macOS 26 settings location)
-- `fullscreen_show=on` keeps the bar visible over **native-fullscreen Spaces** — auto-raises above the fullscreen window, restores on regular Spaces (public APIs; no SkyLight needed)
-- SDF rounded rects (per-corner radii, borders, gradients, shadows), glyph atlas with font fallback, color emoji, tinted SF Symbols (`icon=sf:wifi`), ink-precise text metrics matching sketchybar's pixel behavior
-- Five-cursor item layout (`left right center q e`, notch-aware), fixed widths with align slack and clipping, `--default` prototypes
-- Per-setup notch handling: the `q`/`e` dead zone exists only on physically notched displays (`notch_width=0` auto-detects the housing width), `notch_offset` drops the bar below the camera on notched screens only, `notch_display_height` gives them their own bar height
-
-**Components**
-- Brackets, anchored popups (auto-close, alignment), graphs, draggable sliders — interactive on the bar and inside popups (click + drag deliver `PERCENTAGE`)
-- **Alias items** — live ScreenCaptureKit captures of other apps' menu bar items (`--add alias "App[,Window]"`)
-- **Marquee text** (`scroll_texts`), **hover tooltips**, `background.image` + `background.clip` cutouts, **idle inhibitor**
-- **Arc gauges** — speedometer-style rings with the label centered in the dial (`gauge.*`)
-- **Images** — `image.string` renders real app icons (`app.<Name>`), SF symbols by name (`sf.<symbol>`, immune to PUA codepoint drift), or image files, through the atlas color page
-- **Popup flow layout** — `popup.wrap_width` wraps members into grids (calendar month grids, tile dashboards); blank rows collapse into slim separators
-
-**Scripting & events**
-- Embedded **Lua 5.4** config runtime (`ybarrc.lua`, in-process, Lua-first event dispatch) alongside the shell/CLI contract (`NAME/SENDER/INFO/BUTTON/MODIFIER` env)
-- Message-scoped `--animate <curve> <frames>` (`linear sin quadratic tanh exp circ bounce overshoot`), per-channel color lerp in linear space, `width=dynamic` sentinel animation
-- Events: mouse enter/exit/click/scroll (+ global exit), `front_app_switched`, `space_change`, wake/sleep, `power_source_change`, `volume_change`, `wifi_change`, `system_stats`, **`modifier_change`** (live ⌥-held UX), **`app_launched` / `app_terminated`**, **`media_change`** (Music/Spotify now-playing via distributed notifications — no private MediaRemote; state seeded at startup so a bar launched mid-song shows it immediately)
-- Native providers: NSWorkspace, IOKit battery, CoreAudio volume, NWPathMonitor, in-process CPU/memory stats
-- AeroSpace integration: the workspace-change hook can invoke `ybar --trigger` directly (the CLI folds `$AEROSPACE_FOCUSED_WORKSPACE` from its environment), with debounced, generation-guarded refreshes for rapid switching
-
-**Packaging & privacy**
-- `make app` builds a minimal **app bundle** so the daemon owns its TCC identity — Bluetooth, Calendar, and Apple Events prompts attribute to YBar instead of your terminal, and grants cover every helper the daemon spawns
+YBar is a full engine, not a wrapper: GPU-rendered items and popups, a component library (graphs, sliders, arc gauges, images, brackets, flow-layout popups), an embedded Lua 5.4 runtime, a rich event/provider set, and packaging that owns its own privacy identity. The complete capability catalog — the surface you build widgets and themes against — lives in **[docs/EXTENDING.md](docs/EXTENDING.md)**.
 
 ## Install
 
@@ -73,11 +50,9 @@ install — that prompt is expected; `brew trust AegiosOT/ybar` pre-approves it.
 
 See [docs/INSTALL.md](docs/INSTALL.md) for the release-zip route, first-run privacy-permission walkthrough, stable local signing (keeps TCC grants across rebuilds), and login autostart.
 
-## Planned
+(Windows users: see [Windows](#windows) below.)
 
-Space→item association (SkyLight) · per-display `hidden` · `font.features` · `popup.topmost` · taskbar (window list) example widget.
-
-## Build
+## Build (macOS)
 
 Runs on macOS 14+. Building needs a Swift 6 toolchain; the Liquid Glass
 backdrops additionally need the macOS 26 SDK (Xcode 26 / CLT 26) — on older
@@ -92,6 +67,27 @@ make app         # ~/Applications/YBar.app — the recommended way to run the da
 open -g ~/Applications/YBar.app --args -c <your ybarrc.lua>
 ```
 
+## Windows
+
+YBar has a native **Windows 11** port — a separate C++ engine with the same soul. It lives on the [`windows` branch](../../tree/windows) (an orphan branch with its own toolchain and release cadence) and speaks the exact same command grammar, IPC protocol, and embedded Lua 5.4 API, so themes, configs, and shell scripts carry over with only OS-inherent edits (shell commands, glyph fonts, window-manager adapter).
+
+- **Engine** — Direct3D 11 + a DirectWrite glyph atlas + DirectComposition, paced to the monitor's refresh rate (120 Hz verified), near-zero CPU while static: the macOS Metal engine's mirror.
+- **Window management** — [komorebi](https://github.com/LGUG2Z/komorebi) and YTile as first-class workspace adapters (replacing AeroSpace/yabai), driven by their event streams rather than CLI polling.
+- **Native providers** — battery/power, audio (WASAPI), network & Wi-Fi (`netsh` + WinRT), now-playing media (GSMTC), and in-process CPU/memory stats, all mapped to the same events as macOS.
+- **Look** — the flagship `sketchybar-glass` theme is ported and restyled to Windows 11 Fluent: flat pills, Acrylic and popup opacity that follow your system **Transparency** setting, and Fluent Wi-Fi / Bluetooth / system-monitor / calendar popups.
+
+**Install** — download `ybar-win.zip` from a [`win-*` release](../../releases) (or the latest CI build); winget and scoop manifests live under `packaging/` on the `windows` branch. Fresh unsigned builds may be gated by Smart App Control until code signing lands.
+
+**Build** (Windows 11 22H2+, Visual Studio 2022 C++ tools, CMake ≥ 3.24, [vcpkg](https://github.com/microsoft/vcpkg) with `VCPKG_ROOT` set):
+
+```powershell
+cmake --preset default
+cmake --build --preset default
+ctest --preset default
+```
+
+The full design and platform contract is in [docs/WINDOWS-PORT.md](docs/WINDOWS-PORT.md); the branch's own [README](../../blob/windows/README.md) has the source-tree map and packaging details.
+
 ## Config
 
 Three surfaces, mixable at will:
@@ -100,7 +96,7 @@ Three surfaces, mixable at will:
 - **CLI**: any shell script or REPL can drive the same live-object model over the socket at runtime — the bar is not a parsed file.
 - **JSONC**: point `-c` at a `.jsonc` file for a declarative bar — comments and trailing commas allowed, translated through the same command layer ([example](examples/jsonc-demo/ybar.jsonc)).
 
-The example config's workspace pills speak both **AeroSpace** and **yabai** (native macOS Spaces) and pick the one actually running — the two can coexist installed side by side; see [examples/yabai-skhd](examples/yabai-skhd) for the yabai/skhd setup, including what needs yabai's scripting addition and what works without it.
+The example config's workspace pills speak both **AeroSpace** and **yabai** (native macOS Spaces) and pick the one actually running — the two can coexist installed side by side; see [examples/yabai-skhd](examples/yabai-skhd) for the yabai/skhd setup, including what needs yabai's scripting addition and what works without it. On Windows the same pills speak **komorebi** and **YTile** instead, driven off their event streams.
 
 **Themes**: ship-selectable presets — `scripts/ybar-theme list|use <name>|install <git-url>`. See [docs/THEMES.md](docs/THEMES.md) for the gallery (Liquid Glass flagship, the darxk Waybar replication, and more) and how to publish your own. [examples/yabai-skhd](examples/yabai-skhd) has the yabai signal recipes (instant window-level updates; the CLI folds `$YABAI_*` signal vars into `--trigger` env) and an skhd setup driving the bar's hotkey-mode indicator pill.
 
