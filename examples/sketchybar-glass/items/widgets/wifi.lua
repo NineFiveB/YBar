@@ -121,13 +121,14 @@ local current_status = sbar.add("item", {
 })
 
 -- ── Network list: fixed row pool bound per scan (flyout body) ──────────────
--- Items carry exactly two text parts, and the engine shapes each part in
--- ONE family — there is no system-font fallback, so a slot must never mix
--- PUA glyphs with ssid text (the ssid's Latin characters land on Segoe
--- Fluent's .notdef boxes; seen on screen). Both PUA glyphs — the signal
--- arc plus the lock badge when secured — share the fixed-width icon run,
--- like Win11's lock-badged network glyph, and the ssid keeps the UI text
--- face in the label. The fixed icon width keeps the ssid column aligned.
+-- Items carry exactly two text parts, and a part must never mix PUA
+-- glyphs with ssid text: Segoe Fluent Icons is a symbol font, and
+-- DirectWrite never font-falls-back OUT of a symbol font, so regular
+-- text in an icon-family part shapes to the icon font's .notdef boxes
+-- (seen on screen; spec 7.4). Both PUA glyphs — the signal arc plus the
+-- lock badge when secured — share the fixed-width icon run, like Win11's
+-- lock-badged network glyph, and the ssid keeps the UI text face in the
+-- label. The fixed icon width keeps the ssid column aligned.
 local net_rows = {}
 for i = 1, MAX_NETS do
   net_rows[i] = sbar.add("item", "widgets.wifi.net." .. i, {

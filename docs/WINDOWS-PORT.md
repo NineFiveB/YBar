@@ -465,11 +465,19 @@ macOS. The painted glass rim (`flagGlass`) ships with its exact constants;
 
 Model on Windows Terminal AtlasEngine + `lhecker/dwrite-hlsl`:
 
-- **Shaping**: `IDWriteTextAnalyzer` (`GetGlyphs/GetGlyphPlacements`) with
-  system font fallback via `IDWriteFontFallback::MapCharacters` — each mapped
-  range is one run with its own `IDWriteFontFace`, mirroring the per-run
-  CTLine walk. A custom `IDWriteFontFallbackBuilder` chain routes the icon
-  font's PUA range first.
+- **Shaping**: `IDWriteTextLayout` + a custom `IDWriteTextRenderer` run
+  collector (`font_cache.cpp`) — the layout engine owns shaping AND
+  per-character system font fallback internally, so each fallback range
+  arrives as its own run with its own `IDWriteFontFace`, mirroring the
+  per-run CTLine walk. This replaced the originally planned explicit
+  `IDWriteTextAnalyzer` + `MapCharacters` + fallback-builder stack; icon
+  routing is not a fallback chain either — `sf:`/`sf.` strings resolve to
+  the icon font family before shaping (7.5). **Symbol-font caveat (seen
+  live 2026-08-28)**: DirectWrite never falls back *out of* a symbol font,
+  and Segoe Fluent Icons is one — a part whose `font.family` is the icon
+  font shapes regular text to the icon font's `.notdef` boxes. Theme rule:
+  PUA glyphs and text never share a part
+  (`examples/sketchybar-glass/PORTING-WIN.md`).
 - **Raster into the same atlas**: mask page 2048² R8 via
   `IDWriteGlyphRunAnalysis::CreateAlphaTexture` with
   **`DWRITE_TEXT_ANTIALIAS_MODE_GRAYSCALE`** (forced — ClearType 3×1 would

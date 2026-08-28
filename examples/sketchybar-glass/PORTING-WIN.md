@@ -30,6 +30,18 @@ installed via `ybar theme use` must be self-contained.
 | `x-apple.systempreferences:` links | `explorer.exe "ms-settings:..."` deep links |
 | `open -a Calendar` | `explorer.exe outlookcal:` |
 
+## Icon-font rules
+
+- `sf:` strings resolve as WHOLE strings — a glyph cannot be concatenated
+  into a text string. Pair an `sf.` image with plain text, or split the
+  glyph and the text across the item's two parts.
+- Literal Segoe Fluent PUA characters (icons.lua's `switch`/`signal`
+  tables) render only in a part whose `font.family` is the icon font —
+  and that part must then hold PUA glyphs ONLY. Segoe Fluent Icons is a
+  symbol font, and DirectWrite never font-falls-back out of a symbol
+  font, so any regular text in the same part shapes to `.notdef` boxes
+  (bitten live by the wifi rows' ssids; spec 7.4).
+
 ## Dropped (no Windows concept)
 
 - `items/menus.lua` — the app-menu title swap reads the frontmost app's
