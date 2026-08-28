@@ -275,7 +275,14 @@ struct DaemonState {
                     if (r == WAIT_OBJECT_0) return; // stop event
                     if (r == WAIT_TIMEOUT) continue; // compositor idle: no frame due
                     if (r != WAIT_OBJECT_0 + 1) { // clock unavailable: ~60 Hz fallback
-                        Sleep(16);
+                        // WAIT_FAILED means the API never waited on our stop
+                        // handle, so pace with a stop-aware wait instead of a
+                        // blind Sleep — otherwise a persistent clock failure
+                        // spins here forever and stopAnimationPump()'s join()
+                        // (UI thread) deadlocks. animationPumpStop is
+                        // manual-reset, so this latches the moment stop fires.
+                        if (WaitForSingleObject(animationPumpStop, 16) == WAIT_OBJECT_0)
+                            return;
                     }
                     // Auto-reset event: signaling while already signaled is a
                     // no-op, so a stalled UI thread coalesces ticks for free.
