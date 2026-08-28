@@ -1,6 +1,7 @@
 #include "win/popup_surface.h"
 
 #include "win/input.h"
+#include "win/system_appearance.h"
 
 // clang-format off
 #define WIN32_LEAN_AND_MEAN
@@ -224,8 +225,10 @@ void PopupSurface::present(ybar::model::Size panelSize, const ybar::model::Rect&
 void PopupSurface::setBackdrop(bool acrylic, double cornerRadius) {
     // spec 7.6: Acrylic behind the panel when popup.blur_radius > 0, plus a
     // rounded backdrop so the plate does not square off the painted corners.
-    const auto backdrop =
-        static_cast<int>(acrylic ? DWMSBT_TRANSIENTWINDOW : DWMSBT_NONE);
+    // Gated on Transparency effects — off means the panel is composited opaque
+    // (see buildPopupScene), so an Acrylic material would not match.
+    const auto backdrop = static_cast<int>(
+        acrylic && systemTransparencyEnabled() ? DWMSBT_TRANSIENTWINDOW : DWMSBT_NONE);
     DwmSetWindowAttribute(impl_->hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop));
     const BOOL dark = TRUE;
     DwmSetWindowAttribute(impl_->hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));

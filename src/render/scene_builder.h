@@ -40,11 +40,14 @@ void emitItem(DisplayList& list, ybar::model::Item& item, const ybar::model::Rec
               double scale, FontCache& fonts, GlyphAtlas& atlas, double clock = 0);
 
 // Popup panel: popup.background plate + members at their layout boxes
-// (panel-local, spec 3.9). Same paint order as the bar.
+// (panel-local, spec 3.9). Same paint order as the bar. `opaquePanel` forces
+// the panel plate to full alpha — the daemon sets it when Windows'
+// Transparency effects are off, so a translucent theme panel reads flat like
+// the rest of the shell (spec 7.6).
 DisplayList buildPopupScene(const std::vector<ybar::model::Item*>& members,
                             const std::vector<ybar::model::Rect>& contentBoxes,
                             const ybar::model::PopupState& popup,
                             ybar::model::Size panelSize, double scale, FontCache& fonts,
-                            GlyphAtlas& atlas);
+                            GlyphAtlas& atlas, bool opaquePanel = false);
 
 } // namespace ybar::render

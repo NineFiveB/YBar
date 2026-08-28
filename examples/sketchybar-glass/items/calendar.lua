@@ -45,7 +45,10 @@ local cal = sbar.add("item", "calendar", {
     },
   },
   position = "right",
-  update_freq = 30,
+  -- 10 s so the minute rolls over promptly (the native taskbar clock updates
+  -- on the minute); os.date is cheap. A time-zone change updates instantly via
+  -- WM_TIMECHANGE regardless (the daemon re-reads the zone and refreshes).
+  update_freq = 10,
   padding_left = 1,
   padding_right = 1,
   background = {

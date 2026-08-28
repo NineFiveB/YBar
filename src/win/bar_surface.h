@@ -42,6 +42,10 @@ public:
     // Re-applies frame/level from settings (height/margin/topmost/hidden...).
     void applySettings(const ybar::model::BarSettings& settings);
 
+    // Re-applies the DWM backdrop (glass/blur vs the system Transparency
+    // effects setting) without a settings change — driven from WM_SETTINGCHANGE.
+    void refreshBackdrop();
+
     // fullscreen_show: raise this surface over a fullscreen window on ITS
     // monitor, or drop it back to the configured level (spec 6).
     void setFullscreenElevation(bool elevated);

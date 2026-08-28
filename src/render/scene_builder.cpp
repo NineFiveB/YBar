@@ -428,13 +428,20 @@ DisplayList buildScene(const std::vector<std::unique_ptr<Item>>& items,
 DisplayList buildPopupScene(const std::vector<Item*>& members,
                             const std::vector<Rect>& contentBoxes,
                             const ybar::model::PopupState& popup, ybar::model::Size panelSize,
-                            double scale, FontCache& fonts, GlyphAtlas& atlas) {
+                            double scale, FontCache& fonts, GlyphAtlas& atlas,
+                            bool opaquePanel) {
     DisplayList list;
     list.viewportSize = {static_cast<float>(snap(panelSize.width, scale)),
                          static_cast<float>(snap(panelSize.height, scale))};
     if (popup.background.drawing) {
-        list.quads.push_back(backgroundQuad(
-            popup.background, Rect{0, 0, panelSize.width, panelSize.height}, scale));
+        auto background = popup.background;
+        // Transparency effects off: force the plate opaque so the whole panel
+        // reads flat. Straight-alpha argb — set the top byte (spec 7.6). Note
+        // the members still composite over it with their own alpha; the plate
+        // being opaque is what stops the desktop showing through.
+        if (opaquePanel) background.color.argb |= 0xff000000u;
+        list.quads.push_back(
+            backgroundQuad(background, Rect{0, 0, panelSize.width, panelSize.height}, scale));
     }
     for (std::size_t i = 0; i < members.size() && i < contentBoxes.size(); ++i) {
         if (!members[i] || contentBoxes[i].isZero()) continue;

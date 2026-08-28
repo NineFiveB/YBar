@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <future>
 #include <memory>
 #include <thread>
@@ -52,6 +53,7 @@
 #include "win/display_manager.h"
 #include "win/input.h"
 #include "win/popup_surface.h"
+#include "win/system_appearance.h"
 
 namespace ybar::app {
 
@@ -131,6 +133,9 @@ struct DaemonState {
     std::vector<std::unique_ptr<ybar::win::BarSurface>> surfaces;
     std::unordered_map<int, std::unique_ptr<ybar::render::GlyphAtlas>> atlases; // key: scale*100
     bool renderQueued = false;
+    // Windows "Transparency effects": gates DWM Acrylic and forces popup panels
+    // opaque when off. Cached and refreshed on WM_SETTINGCHANGE (spec 7.6).
+    bool systemTransparency = ybar::win::systemTransparencyEnabled();
 
     ScriptRunner scripts;
     std::unique_ptr<ybar::providers::KomorebiProvider> komorebi;
@@ -344,6 +349,30 @@ struct DaemonState {
         syncAnimationTimer();
     }
 
+    // Re-run every routine item's script once, ignoring the tick counters —
+    // used on WM_TIMECHANGE so an os.date clock jumps to the new zone at once
+    // instead of waiting up to its update_freq.
+    void refreshRoutineItems() {
+        for (const auto& item : store.items()) {
+            if (item->updateFrequency <= 0) continue;
+            if (item->script.empty() && !item->hasLuaHandlers) continue;
+            if (item->updatePolicy == ybar::model::UpdatePolicy::Off) continue;
+            if (bus.runItemScript)
+                bus.runItemScript(*item,
+                                  {{"NAME", item->name}, {"SENDER", "routine"}, {"INFO", ""}});
+        }
+    }
+
+    // Re-read Transparency effects; if it flipped, re-apply the bar backdrops
+    // and re-render so popups pick up the opaque flag (spec 7.6).
+    void refreshSystemAppearance() {
+        const bool now = ybar::win::systemTransparencyEnabled();
+        if (now == systemTransparency) return;
+        systemTransparency = now;
+        for (const auto& surface : surfaces) surface->refreshBackdrop();
+        renderAll();
+    }
+
     ~DaemonState() { stopAnimationPump(); }
 
     ybar::render::GlyphAtlas* atlasFor(double scale) {
@@ -454,8 +483,30 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             delete update;
             return 0;
         }
+        case WM_TIMECHANGE:
+            // System time or time zone changed (incl. an automatic time-zone
+            // update). Re-read the zone and refresh the clock now rather than
+            // waiting for its next routine tick. Forwarded from a bar window —
+            // a message-only window never receives the broadcast.
+            if (g_state) {
+                ::_tzset();
+                g_state->refreshRoutineItems();
+            }
+            return 0;
+        case WM_SETTINGCHANGE:
+        case WM_THEMECHANGED:
+            // Personalization changed — Transparency effects among them. A
+            // no-op unless the transparency bit actually flipped.
+            if (g_state) g_state->refreshSystemAppearance();
+            return 0;
         case WM_TIMER:
             if (wParam == kRoutineTimer && g_state) {
+                // Refresh the CRT timezone every tick so a clock built on
+                // os.date tracks the OS zone: the UCRT caches it on first use
+                // and does not re-read on a zone change (automatic time zone,
+                // travel) until _tzset() is called. WM_TIMECHANGE gives the
+                // instant update; this is the belt if a broadcast is missed.
+                ::_tzset();
                 // Gate BEFORE incrementing (reference ordering): policy-off or
                 // hidden items must not advance their counters, or re-enabling
                 // fires at a different phase.
@@ -1308,7 +1359,8 @@ void DaemonState::updatePopups() {
 
         const auto layout = ybar::model::layoutPopup(members, host->popup, measure);
         auto scene = ybar::render::buildPopupScene(members, layout.contentBoxes, host->popup,
-                                                   layout.panelSize, scale, *fonts, *atlas);
+                                                   layout.panelSize, scale, *fonts, *atlas,
+                                                   /*opaquePanel=*/!systemTransparency);
         if (scene.empty()) { // never leave a stale, still-clickable panel
             if (liveIt != popups.end()) {
                 liveIt->second.surface->hide();

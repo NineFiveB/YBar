@@ -1,6 +1,7 @@
 #include "win/bar_surface.h"
 
 #include "win/input.h"
+#include "win/system_appearance.h"
 
 // clang-format off
 #define WIN32_LEAN_AND_MEAN
@@ -139,9 +140,13 @@ public:
     // undocumented SetWindowCompositionAttribute accent path is dead on
     // Win11 and is never used.
     void applyBackdrop() {
-        const auto backdrop = static_cast<int>(
-            (settings.glass || settings.blurRadius > 0) ? DWMSBT_TRANSIENTWINDOW
-                                                        : DWMSBT_NONE);
+        // Honour Transparency effects: with it off the shell renders Acrylic
+        // as a solid fallback, so a glass bar drops to no backdrop and matches
+        // (spec 7.6).
+        const bool wantsAcrylic =
+            (settings.glass || settings.blurRadius > 0) && systemTransparencyEnabled();
+        const auto backdrop =
+            static_cast<int>(wantsAcrylic ? DWMSBT_TRANSIENTWINDOW : DWMSBT_NONE);
         DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop));
         // Documented only to darken the frame; that it also selects the dark
         // Acrylic variant is undocumented-but-stable (the same reliance
@@ -314,11 +319,21 @@ LRESULT CALLBACK barWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         case WM_POWERBROADCAST:
         case WM_FONTCHANGE:
         case WM_DISPLAYCHANGE:
+        case WM_TIMECHANGE:
+        case WM_THEMECHANGED:
             // Forward broadcasts to the daemon's message-only mailbox, which
             // never receives them directly (spec 5 note). The daemon debounces
-            // WM_DISPLAYCHANGE and rebuilds every surface.
+            // WM_DISPLAYCHANGE and rebuilds every surface; WM_TIMECHANGE
+            // refreshes the clock's zone; WM_THEMECHANGED re-checks
+            // transparency.
             if (g_broadcastTarget) PostMessageW(g_broadcastTarget, msg, wParam, lParam);
             return msg == WM_POWERBROADCAST ? TRUE : 0;
+        case WM_SETTINGCHANGE:
+            // lParam is a string on this message, not a value — forward only
+            // the id so the daemon re-reads Transparency effects. (Do not
+            // relay the pointer to another window.)
+            if (g_broadcastTarget) PostMessageW(g_broadcastTarget, msg, 0, 0);
+            return 0;
         case WM_DPICHANGED:
             // PerMonitorV2: adopt the new DPI, recompute the frame from
             // settings (the suggested rect assumes a normal window), and let
@@ -539,6 +554,8 @@ void BarSurface::applySettings(const BarSettings& settings) {
     if (backdropChanged) impl_->applyBackdrop();
     if (stickyChanged) impl_->applyStickyPinning();
 }
+
+void BarSurface::refreshBackdrop() { impl_->applyBackdrop(); }
 
 void BarSurface::followCurrentDesktop() { impl_->followCurrentDesktop(); }
 
