@@ -229,20 +229,29 @@ local busy = false
 local spinner = require("helpers.spinner").attach(header)
 
 -- ── Populate ───────────────────────────────────────────────────────────────
+-- "Unknown" (a WinRT read that timed out) is NOT "off": the device nodes
+-- still enumerated — they print before the radio line precisely so a slow
+-- radio read can't suppress them — so only an explicit Off/Disabled/none
+-- collapses the list and greys the pill.
+local function radio_is_off()
+  return radio_state == "Off" or radio_state == "Disabled" or radio_state == "none"
+end
+
 local function populate()
-  local radio_on = radio_state == "On"
+  local off = radio_is_off()
   header:set({
     label = {
-      string = radio_on and icons.switch.on or icons.switch.off,
-      color = radio_on and colors.blue or colors.grey,
+      string = (not off) and icons.switch.on or icons.switch.off,
+      -- Accent blue only when confirmed On; neutral white when Unknown.
+      color = radio_state == "On" and colors.blue or (off and colors.grey or colors.white),
     },
   })
   access_row:set({ drawing = radio_state == "none" })
 
-  -- Device rows only while the radio is on (the flyout body collapses to
-  -- just the header when it is off, like the native one).
+  -- Device rows whenever the radio isn't definitively off (the flyout body
+  -- collapses to just the header when it is, like the native one).
   local row = 0
-  if radio_on then
+  if not off then
     for _, dev in ipairs(paired_cache) do
       if row < max_devices then
         row = row + 1
@@ -271,8 +280,10 @@ end
 -- (macOS also brightened on active connections — connected state is a
 -- per-device property read on Windows, so the pill stays two-state).
 local function apply_bar_icon()
+  -- Grey only when definitively off; Unknown keeps the pill lit (devices
+  -- enumerated), matching populate()'s device-visibility rule.
   bt_icon:set({
-    icon = { color = radio_state == "On" and colors.blue or colors.grey },
+    icon = { color = radio_is_off() and colors.grey or colors.blue },
   })
 end
 

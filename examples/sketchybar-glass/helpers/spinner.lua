@@ -10,6 +10,10 @@ function M.attach(item, opts)
   local align = opts.align or "r"
   local running = false
   local angle = 0
+  -- Refcount so overlapping round trips (wifi runs its interface probe and
+  -- its scan at once) don't let the first to finish stop the spinner out
+  -- from under the second: it hides only when the last start is matched.
+  local depth = 0
 
   local function tick()
     if not running then return end
@@ -20,6 +24,7 @@ function M.attach(item, opts)
 
   return {
     start = function()
+      depth = depth + 1
       if running then return end
       running = true
       angle = 0
@@ -35,7 +40,8 @@ function M.attach(item, opts)
       tick()
     end,
     stop = function()
-      if not running then return end
+      if depth > 0 then depth = depth - 1 end
+      if depth > 0 or not running then return end
       running = false
       item:set({ image = { drawing = false } })
     end,

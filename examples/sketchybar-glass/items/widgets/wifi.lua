@@ -245,25 +245,28 @@ end
 -- Connection state: one `show interfaces` round trip collapsed by awk into
 -- "state|ssid|auth|power" ("Software Off" is the radio-off continuation
 -- line; `^ *SSID` does not match the BSSID line).
+-- Fields are tab-separated, not '|': an ssid may legally contain '|', which
+-- would corrupt a pipe-delimited record (wrong field split on the Lua side).
 local iface_cmd = "netsh wlan show interfaces | tr -d '\\r' | awk -F' : ' '"
   .. 'BEGIN{pwr="on"} '
   .. '/^ *State/{st=$2} '
   .. '/^ *SSID/{ssid=$2} '
   .. '/^ *Authentication/{auth=$2} '
   .. '/Software Off/{pwr="off"} '
-  .. 'END{printf "%s|%s|%s|%s", st, ssid, auth, pwr}'
+  .. 'END{printf "%s\\t%s\\t%s\\t%s", st, ssid, auth, pwr}'
   .. "'"
 
 -- Network scan: "net|<ssid>|<secured>|<signal>" per visible network. Only
 -- mode=bssid emits Signal lines (one per BSSID — the strongest wins), so
 -- emission waits for the next SSID header / END to let a network's BSSID
 -- lines accumulate; a network with no Signal line reports 0.
+-- Tab-separated fields (an ssid may contain '|'); "net" stays a line marker.
 local scan_cmd = "netsh wlan show networks mode=bssid | tr -d '\\r' | awk -F' : ' '"
-  .. '/^SSID/{ if (ssid != "") printf "net|%s|%d|%d\\n", ssid, sec, sig; '
+  .. '/^SSID/{ if (ssid != "") printf "net\\t%s\\t%d\\t%d\\n", ssid, sec, sig; '
   .. 'ssid=$2; sec=1; sig=0 } '
   .. '/^ *Authentication/{ sec = ($2 ~ /Open/) ? 0 : 1 } '
   .. '/^ *Signal/{ pct=$2; sub(/%/, "", pct); if (pct+0 > sig) sig=pct+0 } '
-  .. 'END{ if (ssid != "") printf "net|%s|%d|%d\\n", ssid, sec, sig }'
+  .. 'END{ if (ssid != "") printf "net\\t%s\\t%d\\t%d\\n", ssid, sec, sig }'
   .. "'"
 
 local function apply_pill()
@@ -282,7 +285,7 @@ local function refresh_state()
   sbar.exec(iface_cmd, function(out)
     details_running = false
     spinner.stop()
-    local st, ssid, auth, pwr = out:match("^(.-)|(.-)|(.-)|(.-)%s*$")
+    local st, ssid, auth, pwr = out:match("^(.-)\t(.-)\t(.-)\t(.-)%s*$")
     if st then
       details = {
         ssid = ssid ~= "" and ssid or nil,
@@ -306,7 +309,7 @@ local function scan_networks()
     spinner.stop()
     net_cache = {}
     local seen = {}
-    for ssid, sec, sig in (out or ""):gmatch("net|([^|\n]+)|([01])|(%d+)") do
+    for ssid, sec, sig in (out or ""):gmatch("net\t([^\t\n]+)\t([01])\t(%d+)") do
       if not seen[ssid] and #net_cache < MAX_NETS then
         seen[ssid] = true
         net_cache[#net_cache + 1] =
@@ -331,6 +334,17 @@ end
 header:subscribe("mouse.clicked", open_wifi_settings)
 settings_row:subscribe("mouse.clicked", open_wifi_settings)
 
+-- The ssid reaches netsh through `sh -c` inside double quotes. Inside sh
+-- double quotes only $, backtick and backslash keep meaning (and " ends the
+-- quote), so any of those in a scanned ssid — an attacker names their AP
+-- `$(...)` — would inject shell. Rather than escape through the MSYS
+-- backslash-halving layer, refuse the CLI join for such ssids and fall
+-- through to Settings, which joins safely via the OS UI. Everything else
+-- (spaces, &, ;, ', parens, …) is literal inside the double quotes.
+local function ssid_shell_safe(ssid)
+  return not ssid:find('[%$`\\"]')
+end
+
 -- Row click: connect if the profile is saved (unsaved networks have no
 -- non-interactive join — netsh just errors and the state refresh shrugs).
 for i = 1, MAX_NETS do
@@ -343,11 +357,15 @@ for i = 1, MAX_NETS do
       if net.ssid ~= (d.ssid or "") then
         row = row + 1
         if row == i then
-          sbar.exec('netsh wlan connect name="' .. net.ssid:gsub('"', "") .. '"')
-          sbar.delay(4, function()
-            refresh_state()
-            scan_networks()
-          end)
+          if ssid_shell_safe(net.ssid) then
+            sbar.exec('netsh wlan connect name="' .. net.ssid .. '"')
+            sbar.delay(4, function()
+              refresh_state()
+              scan_networks()
+            end)
+          else
+            open_wifi_settings()
+          end
           return
         end
       end
