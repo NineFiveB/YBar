@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.9.0.schema.json
 #
 # Version manifest. Submit this directory's three files to
-# microsoft/winget-pkgs under manifests/j/AegiosOT/ybar-win/<version>/.
+# microsoft/winget-pkgs under manifests/a/AegiosOT/ybar-win/<version>/.
 # Bump PackageVersion here and in the other two files together.
 PackageIdentifier: AegiosOT.ybar-win
 PackageVersion: 0.1.0

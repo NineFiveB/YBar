@@ -15,9 +15,9 @@ git push origin win-v0.1.0
 `ybar-win-<version>-x64.zip`, publishes it, and prints the SHA256 in the
 release body.
 
-Then update the manifests below with that version and hash. The four
-placeholder hashes are all-zero on purpose so a stale manifest fails loudly
-instead of installing the wrong bits.
+Then update the manifests below with that version and hash. The two
+placeholder hashes (winget installer, scoop) are all-zero on purpose so a
+stale manifest fails loudly instead of installing the wrong bits.
 
 ## winget
 

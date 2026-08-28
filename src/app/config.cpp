@@ -64,7 +64,7 @@ std::string locateConfig(const std::string& instance, const std::string& explici
     for (const auto& directory : directories) {
         if (fileExists(directory + "\\" + rcLua)) return directory + "\\" + rcLua;
         if (fileExists(directory + "\\" + rc)) return directory + "\\" + rc;
-        // JSONC entries are first-class on ybar-win (Lua runtime pending).
+        // JSONC entries are first-class on ybar-win.
         if (fileExists(directory + "\\" + instance + "rc.jsonc"))
             return directory + "\\" + instance + "rc.jsonc";
         if (fileExists(directory + "\\" + instance + ".jsonc"))
