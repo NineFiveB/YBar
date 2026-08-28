@@ -23,6 +23,12 @@ struct SceneParams {
     double clock = 0; // monotonic seconds, drives marquee phase
 };
 
+// Clips a glyph quad to a device-px box and remaps its UVs proportionally —
+// exact for axis-aligned quads, no scissor or stencil (spec 3.9). Returns
+// false when the glyph lies fully outside; the caller drops the instance.
+// Exposed for the headless UV-remap tests (spec 14).
+bool clipGlyph(GlyphInstance& glyph, const Float2& clipMin, const Float2& clipMax);
+
 DisplayList buildScene(const std::vector<std::unique_ptr<ybar::model::Item>>& items,
                        const std::unordered_map<int, ybar::model::Rect>& contentBoxes,
                        const ybar::model::BarSettings& settings, const SceneParams& params,

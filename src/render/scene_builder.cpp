@@ -57,11 +57,12 @@ QuadInstance backgroundQuad(const BackgroundStyle& bg, const Rect& rect, double 
     return quad;
 }
 
-// Emits one shaped line at (penX, baselineY) in logical points, snapped to
-// device pixels; returns nothing useful — glyphs go straight into the list.
+} // namespace
+
 // Clips a glyph quad to `clip` (device px) and remaps its UVs proportionally
 // — exact for axis-aligned quads, no scissor or stencil (spec 3.9). Returns
-// false when the glyph lies fully outside.
+// false when the glyph lies fully outside. Namespace scope: the headless
+// UV-remap tests pin this math (spec 14).
 bool clipGlyph(GlyphInstance& glyph, const Float2& clipMin, const Float2& clipMax) {
     const float left = glyph.origin.x;
     const float top = glyph.origin.y;
@@ -85,6 +86,10 @@ bool clipGlyph(GlyphInstance& glyph, const Float2& clipMin, const Float2& clipMa
     return true;
 }
 
+namespace {
+
+// Emits one shaped line at (penX, baselineY) in logical points, snapped to
+// device pixels; returns nothing useful — glyphs go straight into the list.
 void emitText(DisplayList& list, const ShapedLine& line, double penX, double baselineY,
               Color color, double scale, GlyphAtlas& atlas,
               const Rect* clipRect = nullptr) {
