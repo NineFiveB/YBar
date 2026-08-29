@@ -479,6 +479,11 @@ void emitItem(DisplayList& list, Item& item, const Rect& contentBox, double scal
                               item.background.paddingRight,
                           bgHeight};
 
+        // A graph plate is a chart frame: its baseline runs flush along the
+        // bottom edge, so the bottom corners go square (90°) and only the top
+        // two keep the theme's rounding — a bottom curve would cut across the
+        // zero line (user request; Task Manager look).
+        const bool squareBottom = item.graph.has_value();
         if (item.background.shadow.drawing) {
             const double radians =
                 item.background.shadow.angle * 3.14159265358979323846 / 180.0;
@@ -489,11 +494,15 @@ void emitItem(DisplayList& list, Item& item, const Rect& contentBox, double scal
             shadowStyle.gradientColor.reset();
             shadowStyle.borderWidth = 0;
             shadowStyle.glass = false;
-            list.quads.push_back(backgroundQuad(
+            auto shadowQuad = backgroundQuad(
                 shadowStyle, Rect{bgRect.x + dx, bgRect.y + dy, bgRect.width, bgRect.height},
-                scale)); // hard offset copy, no blur (spec 3.9)
+                scale); // hard offset copy, no blur (spec 3.9)
+            if (squareBottom) shadowQuad.radii.z = shadowQuad.radii.w = 0;
+            list.quads.push_back(shadowQuad);
         }
-        list.quads.push_back(backgroundQuad(item.background, bgRect, scale));
+        auto plateQuad = backgroundQuad(item.background, bgRect, scale);
+        if (squareBottom) plateQuad.radii.z = plateQuad.radii.w = 0;
+        list.quads.push_back(plateQuad);
     }
 
     Rect adjusted = contentBox;
