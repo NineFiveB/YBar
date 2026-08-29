@@ -38,8 +38,8 @@ for i = 1, MAX_SLOTS do
     icon = {
       font = { family = settings.font.numbers },
       string = tostring(i),
-      padding_left = 12,
-      padding_right = 12,
+      padding_left = 11,
+      padding_right = 11,
       color = colors.white,
       highlight_color = colors.red,
     },
@@ -51,7 +51,7 @@ for i = 1, MAX_SLOTS do
     background = {
       color = colors.bg1,
       border_width = 0,
-      height = 26,
+      height = 23,
     },
     -- Focus by position on the focused monitor: index-based, so unnamed
     -- workspaces (published as "1","2",...) focus just as well as named.
@@ -66,7 +66,7 @@ for i = 1, MAX_SLOTS do
     background = {
       color = colors.transparent,
       border_color = colors.bg2,
-      height = 28,
+      height = 25,
       border_width = 0,
     },
   })

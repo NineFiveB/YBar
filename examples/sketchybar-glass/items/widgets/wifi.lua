@@ -26,8 +26,8 @@ local settings = require("settings")
 -- the WinRT Radio API, no non-admin CLI.
 -- NOTE: netsh output is localized; the parses assume an English Windows.
 
-local popup_width = 300
-local inset = 12
+local popup_width = 264
+local inset = 11
 local MAX_NETS = 8
 
 -- ── Bar pill ────────────────────────────────────────────────────────────────
@@ -35,8 +35,8 @@ local wifi = sbar.add("item", "widgets.wifi.padding", {
   position = "right",
   icon = {
     string = icons.wifi.connected,
-    padding_left = 8,
-    padding_right = 8,
+    padding_left = 7,
+    padding_right = 7,
   },
   label = { drawing = false },
 })
@@ -45,7 +45,7 @@ local wifi_bracket = sbar.add("bracket", "widgets.wifi.bracket", {
   wifi.name,
 }, {
   background = { color = colors.bg1 },
-  popup = { align = "center", height = 30 }
+  popup = { align = "center", height = 26 }
 })
 
 local popup_pos = "popup." .. wifi_bracket.name
@@ -62,7 +62,7 @@ local header = sbar.add("item", {
   icon = {
     align = "left",
     string = "Wi-Fi",
-    font = { size = 14, style = settings.font.style_map["Bold"] },
+    font = { size = 12.5, style = settings.font.style_map["Bold"] },
     width = popup_width / 2,
     padding_left = inset,
   },
@@ -71,12 +71,12 @@ local header = sbar.add("item", {
     string = icons.switch.on,
     -- Literal Segoe Fluent toggle glyph — needs the explicit family (only
     -- sf: strings auto-select the icon font).
-    font = { family = icons.switch.font, size = 18 },
+    font = { family = icons.switch.font, size = 16 },
     color = colors.blue,
     width = popup_width / 2,
     padding_right = inset,
   },
-  background = { height = 2, color = colors.grey, y_offset = -15 },
+  background = { height = 2, color = colors.grey, y_offset = -13 },
 })
 
 -- Connected network block (name + lock/wifi glyph, then the green dot).
@@ -88,8 +88,8 @@ local current_name = sbar.add("item", {
     align = "left",
     string = "",
     color = colors.white,
-    font = { size = 13, style = settings.font.style_map["Semibold"] },
-    width = popup_width - 70,
+    font = { size = 11.5, style = settings.font.style_map["Semibold"] },
+    width = popup_width - 62,
     padding_left = inset,
   },
   -- One right-edge glyph (lock when secured, unlock otherwise). Literal
@@ -97,9 +97,9 @@ local current_name = sbar.add("item", {
   label = {
     align = "right",
     string = "",
-    font = { family = icons.wifi.signal.font, size = 12 },
+    font = { family = icons.wifi.signal.font, size = 10.5 },
     color = colors.grey,
-    width = 70,
+    width = 62,
     padding_right = inset,
   },
 })
@@ -112,16 +112,16 @@ local current_status = sbar.add("item", {
     align = "left",
     string = "•",
     color = colors.green,
-    font = { size = 15, style = settings.font.style_map["Bold"] },
-    width = 16,
+    font = { size = 13, style = settings.font.style_map["Bold"] },
+    width = 14,
     padding_left = inset,
   },
   label = {
     align = "left",
     string = "Connected",
     color = colors.grey,
-    font = { size = 12 },
-    width = popup_width - 18 - inset,
+    font = { size = 10.5 },
+    width = popup_width - 16 - inset,
   },
 })
 
@@ -144,16 +144,16 @@ for i = 1, MAX_NETS do
     icon = {
       string = "",
       color = colors.white,
-      font = { family = icons.wifi.signal.font, size = 13 },
-      width = 56,
+      font = { family = icons.wifi.signal.font, size = 11.5 },
+      width = 49,
       align = "left",
       padding_left = inset,
     },
     label = {
       string = "",
       color = colors.white,
-      font = { size = 13 },
-      width = popup_width - 56 - inset,
+      font = { size = 11.5 },
+      width = popup_width - 49 - inset,
       align = "left",
     },
   })
@@ -175,7 +175,7 @@ local settings_row = sbar.add("item", {
     string = "More Wi-Fi settings",
     align = "left",
     color = colors.white,
-    font = { size = 12.0 },
+    font = { size = 10.5 },
     width = popup_width - inset,
     padding_left = inset,
   },

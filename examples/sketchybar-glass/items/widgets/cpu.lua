@@ -12,15 +12,15 @@ local settings = require("settings")
 -- utilization (the same figure Task Manager shows), so its graph fills
 -- while open. Chip/adapter names come from one WMI probe on popup open.
 
-local popup_width = 240
-local inset = 12
+local popup_width = 211
+local inset = 11
 
 -- ── Bar item: small CPU graph in the menu bar ─────────────────────────────
 local cpu = sbar.add("graph", "widgets.cpu", 42, {
   position = "right",
   graph = { color = colors.blue },
   background = {
-    height = 22,
+    height = 19,
     color = { alpha = 0 },
     border_color = { alpha = 0 },
     drawing = true,
@@ -31,14 +31,14 @@ local cpu = sbar.add("graph", "widgets.cpu", 42, {
     font = {
       family = settings.font.numbers,
       style = settings.font.style_map["Bold"],
-      size = 9.0,
+      size = 8,
     },
     align = "right",
     padding_right = 0,
     width = 0,
     y_offset = 4
   },
-  padding_right = settings.paddings + 6
+  padding_right = settings.paddings + 5
 })
 
 local cpu_bracket = sbar.add("bracket", "widgets.cpu.bracket", { cpu.name }, {
@@ -56,7 +56,7 @@ local header = sbar.add("item", "widgets.cpu.popup.header", {
   align = "center",
   icon = {
     string = "System Monitor",
-    font = { size = 14, style = settings.font.style_map["Bold"] },
+    font = { size = 12.5, style = settings.font.style_map["Bold"] },
   },
   label = { drawing = false },
 })
@@ -69,7 +69,7 @@ local function add_section_title(name)
     icon = {
       string = name,
       align = "left",
-      font = { size = 13, style = settings.font.style_map["Bold"] },
+      font = { size = 11.5, style = settings.font.style_map["Bold"] },
       width = popup_width / 2,
       padding_left = inset,
     },
@@ -78,14 +78,14 @@ local function add_section_title(name)
       align = "right",
       font = {
         family = settings.font.numbers,
-        size = 13,
+        size = 11.5,
         style = settings.font.style_map["Semibold"],
       },
       color = colors.white,
       width = popup_width / 2,
       padding_right = inset,
     },
-    padding_top = 6,
+    padding_top = 5,
   })
 end
 
@@ -102,7 +102,7 @@ local function add_history_graph(name)
       line_width = 1.5,
     },
     background = {
-      height = 64,
+      height = 56,
       color = colors.with_alpha(colors.white, 0.03),
       border_color = colors.with_alpha(colors.grey, 0.4),
       border_width = 1,
@@ -125,7 +125,7 @@ local function add_center(text, opts)
       string = text,
       color = opts.color or colors.white,
       font = {
-        size = opts.size or 13,
+        size = opts.size or 11.5,
         style = settings.font.style_map[opts.style or "Semibold"],
       },
     },
@@ -149,11 +149,11 @@ end
 add_separator()
 local cpu_title = add_section_title("CPU")
 local cpu_hist  = add_history_graph("widgets.cpu.hist")
-local cpu_chip  = add_center("…", { color = colors.grey, size = 11, style = "Regular" })
+local cpu_chip  = add_center("…", { color = colors.grey, size = 9.5, style = "Regular" })
 add_separator()
 local gpu_title = add_section_title("GPU")
 local gpu_hist  = add_history_graph("widgets.gpu.hist")
-local gpu_chip  = add_center("…", { color = colors.grey, size = 11, style = "Regular" })
+local gpu_chip  = add_center("…", { color = colors.grey, size = 9.5, style = "Regular" })
 
 -- ── Helpers ───────────────────────────────────────────────────────────────
 local function cpu_color_for(load)

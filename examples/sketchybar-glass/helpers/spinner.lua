@@ -34,7 +34,7 @@ function M.attach(item, opts)
         align = align,
         rotation = 0,
         drawing = true,
-        padding_left = opts.padding_left or 5,
+        padding_left = opts.padding_left or 4,
         padding_right = opts.padding_right or 0,
       } })
       tick()

@@ -21,8 +21,8 @@ local settings = require("settings")
 --   * per-app volume — the popup slider now drives SYSTEM volume via the
 --     native volume_change event plus volume-key synthesis.
 
-local popup_width = 300
-local inset = 12
+local popup_width = 264
+local inset = 11
 -- YBAR PORT: art_size/art_dir gone — no artwork surface on Windows, so no
 -- per-user cache directory either.
 
@@ -42,14 +42,14 @@ local media = sbar.add("item", "widgets.media", {
   icon = {
     string = "sf:music.note",
     color = colors.grey,
-    padding_left = 8,
+    padding_left = 7,
     padding_right = 2,
   },
   label = {
-    width = 150,
+    width = 132,
     color = colors.white,
     padding_left = 2,
-    padding_right = 8,
+    padding_right = 7,
   },
   padding_left = 2,
   padding_right = 2,
@@ -93,7 +93,7 @@ local title_row = sbar.add("item", "widgets.media.title", {
   icon = { drawing = false },
   label = {
     string = "—",
-    font = { size = 14, style = settings.font.style_map["Bold"] },
+    font = { size = 12.5, style = settings.font.style_map["Bold"] },
     color = colors.white,
   },
 })
@@ -109,7 +109,7 @@ local subtitle_row = sbar.add("item", "widgets.media.subtitle", {
   icon = { drawing = false },
   label = {
     string = "",
-    font = { size = 12 },
+    font = { size = 10.5 },
     color = colors.grey,
   },
 })
@@ -144,9 +144,9 @@ local function transport_button(name, glyph, size, color)
   })
 end
 
-local prev_btn = transport_button("widgets.media.prev", "sf:backward.fill", 16, colors.white)
-local play_btn = transport_button("widgets.media.play", glyph_play, 22, colors.white)
-local next_btn = transport_button("widgets.media.next", "sf:forward.fill", 16, colors.white)
+local prev_btn = transport_button("widgets.media.prev", "sf:backward.fill", 14, colors.white)
+local play_btn = transport_button("widgets.media.play", glyph_play, 19.5, colors.white)
+local next_btn = transport_button("widgets.media.next", "sf:forward.fill", 14, colors.white)
 
 -- 4. Footer: separator, source app, system volume.
 sbar.add("item", {
@@ -172,7 +172,7 @@ local source_row = sbar.add("item", "widgets.media.source", {
   icon = { drawing = false },
   label = {
     string = "…",
-    font = { size = 12, style = settings.font.style_map["Semibold"] },
+    font = { size = 10.5, style = settings.font.style_map["Semibold"] },
     color = colors.grey,
     padding_left = inset,
   },
@@ -182,7 +182,7 @@ local source_row = sbar.add("item", "widgets.media.source", {
 -- Windows has no per-app volume API worth shelling to, so it now mirrors and
 -- sets SYSTEM volume — read via the native volume_change event, written as
 -- volume-key ticks (2 % each).
-local vol_slider = sbar.add("slider", "widgets.media.volume", 250, {
+local vol_slider = sbar.add("slider", "widgets.media.volume", 220, {
   position = popup_pos,
   width = popup_width,
   padding_left = 0,
@@ -191,16 +191,16 @@ local vol_slider = sbar.add("slider", "widgets.media.volume", 250, {
   icon = {
     string = "sf:speaker.wave.2.fill",
     color = colors.grey,
-    font = { size = 11 },
+    font = { size = 9.5 },
     padding_left = inset,
-    padding_right = 8,
+    padding_right = 7,
   },
   label = { drawing = false },
   slider = {
     percentage = 50,
     highlight_color = colors.white,
     background = {
-      height = 6,
+      height = 5,
       corner_radius = 3,
       color = colors.bg2,
     },

@@ -1,7 +1,7 @@
 local colors = require("colors")
 
 sbar.bar({
-  height = 40,
+  height = 35,
   color = colors.bar.bg,
   -- Fluent minimal: a dark, near-opaque strip with NO Acrylic backdrop —
   -- the Windows default look is flat, not glass (the macOS theme keeps its

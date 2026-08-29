@@ -11,7 +11,7 @@ sbar.default({
     font = {
       family = settings.font.text,
       style = settings.font.style_map["Bold"],
-      size = 14.0
+      size = 12.5
     },
     color = colors.white,
     padding_left = settings.paddings,
@@ -21,15 +21,15 @@ sbar.default({
     font = {
       family = settings.font.text,
       style = settings.font.style_map["Semibold"],
-      size = 13.0
+      size = 11.5
     },
     color = colors.white,
     padding_left = settings.paddings,
     padding_right = settings.paddings,
   },
   background = {
-    height = 28,
-    corner_radius = 8, -- Fluent "overlay corner" radius
+    height = 25,
+    corner_radius = 7, -- Fluent "overlay corner" radius
     border_width = 0,
     glass = false,
   },
@@ -37,7 +37,7 @@ sbar.default({
     blur_radius = 0, -- no Acrylic behind popups: solid Fluent panels
     background = {
       border_width = 0,
-      corner_radius = 8,
+      corner_radius = 7,
       color = colors.popup.bg,
       glass = false,
     },

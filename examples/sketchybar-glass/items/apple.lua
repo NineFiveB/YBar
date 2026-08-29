@@ -10,18 +10,18 @@ local settings = require("settings")
 -- live tracking (Task Manager row is static), and "Log Out <name>" (the
 -- `id -F` full-name lookup is macOS-only).
 
-local popup_width = 240
-local inset = 12
+local popup_width = 211
+local inset = 11
 
 -- Padding item required because of bracket
-sbar.add("item", { width = 5 })
+sbar.add("item", { width = 4 })
 
 local apple = sbar.add("item", {
   icon = {
-    font = { size = 16.0 },
+    font = { size = 14 },
     string = icons.apple, -- resolves to "sf:apps" (Fluent ViewAll grid) on Windows
-    padding_right = 8,
-    padding_left = 8,
+    padding_right = 7,
+    padding_left = 7,
   },
   label = { drawing = false },
   background = {
@@ -37,14 +37,14 @@ local apple = sbar.add("item", {
 local apple_bracket = sbar.add("bracket", { apple.name }, {
   background = {
     color = colors.transparent,
-    height = 30,
+    height = 26,
     border_color = colors.grey,
   },
   popup = { align = "left" }
 })
 
 -- Padding item required because of bracket
-sbar.add("item", { width = 7 })
+sbar.add("item", { width = 6 })
 
 local popup_pos = "popup." .. apple_bracket.name
 
@@ -79,22 +79,22 @@ local function add_row(title, action, opts)
       string = opts.glyph or "",
       size = 16,
       padding_left = inset,
-      padding_right = 8,
+      padding_right = 7,
     },
     icon = {
       string = title,
       align = "left",
       color = colors.white,
-      font = { size = 13.0 },
+      font = { size = 11.5 },
       padding_left = opts.glyph and 0 or inset,
-      width = popup_width - 78 - (opts.glyph and (inset + 24) or inset),
+      width = popup_width - 69 - (opts.glyph and (inset + 21) or inset),
     },
     label = right and {
       string = right,
       align = "right",
       color = colors.with_alpha(colors.grey, 0.9),
-      font = { size = 12.0 },
-      width = 78,
+      font = { size = 10.5 },
+      width = 69,
       padding_right = inset,
     } or { drawing = false },
   })

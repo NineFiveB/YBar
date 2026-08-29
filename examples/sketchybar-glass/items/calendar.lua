@@ -16,7 +16,7 @@ local colors = require("colors")
 -- Padding item required because of bracket
 sbar.add("item", { position = "right", width = settings.group_paddings })
 
-local cell_w = 30
+local cell_w = 26
 local grid_width = cell_w * 7   -- 7 columns
 local max_cells = 42
 
@@ -28,20 +28,20 @@ local cal = sbar.add("item", "calendar", {
   -- needed a hand-tuned y_offset and still read misaligned.
   icon = {
     color = colors.white,
-    padding_left = 8,
+    padding_left = 7,
     font = {
       family = settings.font.text,
       style = settings.font.style_map["Regular"],
-      size = 13.0,
+      size = 11.5,
     },
   },
   label = {
     color = colors.white,
-    padding_right = 8,
+    padding_right = 7,
     font = {
       family = settings.font.text,
       style = settings.font.style_map["Regular"],
-      size = 13.0,
+      size = 11.5,
     },
   },
   position = "right",
@@ -62,7 +62,7 @@ local cal = sbar.add("item", "calendar", {
 local cal_bracket = sbar.add("bracket", "calendar.bracket", { cal.name }, {
   background = {
     color = colors.transparent,
-    height = 30,
+    height = 26,
     border_color = colors.grey,
   },
   popup = { align = "right", wrap_width = grid_width }
@@ -80,7 +80,7 @@ local header = sbar.add("item", "calendar.header", {
   align = "center",
   icon = { drawing = false },
   label = {
-    font = { size = 14, style = settings.font.style_map["Bold"] },
+    font = { size = 12.5, style = settings.font.style_map["Bold"] },
     color = colors.white,
   },
 })
@@ -97,7 +97,7 @@ for i = 1, 7 do
     icon = { drawing = false },
     label = {
       string = daynames[i],
-      font = { size = 10, style = settings.font.style_map["Semibold"] },
+      font = { size = 9, style = settings.font.style_map["Semibold"] },
       color = colors.grey,
     },
   })
@@ -117,12 +117,12 @@ for i = 1, max_cells do
     background = {
       drawing = true,
       color = colors.transparent,
-      height = 22,
-      corner_radius = 11,
+      height = 19,
+      corner_radius = 10,
     },
     label = {
       string = "",
-      font = { size = 12 },
+      font = { size = 10.5 },
       color = colors.white,
     },
   })
@@ -149,7 +149,7 @@ local open_calendar = sbar.add("item", "calendar.open", {
   icon = { drawing = false },
   label = {
     string = "Open Calendar",
-    font = { size = 12, style = settings.font.style_map["Bold"] },
+    font = { size = 10.5, style = settings.font.style_map["Bold"] },
     color = colors.white,
     padding_left = 4,
   },

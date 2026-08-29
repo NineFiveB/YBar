@@ -26,8 +26,8 @@ local settings = require("settings")
 -- Nearby Devices section (inquiry scan + pair-on-click) is dropped
 -- entirely: no inquiry CLI on Windows.
 
-local popup_width = 300
-local inset = 12
+local popup_width = 264
+local inset = 11
 local max_devices = 6
 
 -- One probe, compact output parsed in Lua:
@@ -93,10 +93,10 @@ local bt_icon = sbar.add("item", "widgets.bluetooth", {
   position = "right",
   icon = {
     string = bt_logo,
-    font = { size = 15.0 },
+    font = { size = 13 },
     color = colors.blue,
-    padding_left = 8,
-    padding_right = 8,
+    padding_left = 7,
+    padding_right = 7,
   },
   label = { drawing = false },
   padding_left = 2,
@@ -105,7 +105,7 @@ local bt_icon = sbar.add("item", "widgets.bluetooth", {
 
 local bt_bracket = sbar.add("bracket", "widgets.bluetooth.bracket", { bt_icon.name }, {
   background = { color = colors.bg1 },
-  popup = { align = "center", height = 30 },
+  popup = { align = "center", height = 26 },
 })
 
 sbar.add("item", "widgets.bluetooth.padding", {
@@ -128,7 +128,7 @@ local header = sbar.add("item", "widgets.bluetooth.popup.header", {
   icon = {
     string = "Bluetooth",
     align = "left",
-    font = { size = 14, style = settings.font.style_map["Bold"] },
+    font = { size = 12.5, style = settings.font.style_map["Bold"] },
     width = popup_width / 2,
     padding_left = inset,
   },
@@ -137,12 +137,12 @@ local header = sbar.add("item", "widgets.bluetooth.popup.header", {
     align = "right",
     -- Literal Segoe Fluent toggle glyph — needs the explicit family (only
     -- sf: strings auto-select the icon font).
-    font = { family = icons.switch.font, size = 18 },
+    font = { family = icons.switch.font, size = 16 },
     color = colors.blue,
     width = popup_width / 2,
     padding_right = inset,
   },
-  background = { height = 2, color = colors.grey, y_offset = -15 },
+  background = { height = 2, color = colors.grey, y_offset = -13 },
 })
 
 -- Shown only when WinRT enumerates no Bluetooth radio at all (macOS used
@@ -155,7 +155,7 @@ local access_row = sbar.add("item", "widgets.bluetooth.access", {
     string = "No Bluetooth radio found",
     align = "left",
     color = colors.grey,
-    font = { size = 12.0 },
+    font = { size = 10.5 },
     width = popup_width / 2,
     padding_left = inset,
   },
@@ -163,7 +163,7 @@ local access_row = sbar.add("item", "widgets.bluetooth.access", {
     string = "Open Settings",
     align = "right",
     color = colors.white,
-    font = { size = 12.0, style = settings.font.style_map["Semibold"] },
+    font = { size = 10.5, style = settings.font.style_map["Semibold"] },
     width = popup_width / 2,
     padding_right = inset,
   },
@@ -183,16 +183,16 @@ for i = 1, max_devices do
     icon = {
       string = bt_logo,
       color = colors.white,
-      font = { size = 14 },
-      width = 40,
+      font = { size = 12.5 },
+      width = 35,
       align = "center",
       padding_left = inset,
     },
     label = {
       string = "",
       color = colors.white,
-      font = { size = 13 },
-      width = popup_width - 40 - inset,
+      font = { size = 11.5 },
+      width = popup_width - 35 - inset,
       align = "left",
     },
   })
@@ -218,7 +218,7 @@ local settings_row = sbar.add("item", "widgets.bluetooth.settings", {
     string = "More Bluetooth settings",
     align = "left",
     color = colors.white,
-    font = { size = 12.0 },
+    font = { size = 10.5 },
     width = popup_width - inset,
     padding_left = inset,
   },

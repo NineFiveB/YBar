@@ -17,8 +17,8 @@ local settings = require("settings")
 -- charge log to replay, so the graph fills from live samples while the
 -- bar runs (216 buckets x 400 s = a rolling 24 h window once full).
 
-local popup_width = 260
-local inset = 12
+local popup_width = 229
+local inset = 11
 
 local battery = sbar.add("item", "widgets.battery", {
   position = "right",
@@ -28,10 +28,10 @@ local battery = sbar.add("item", "widgets.battery", {
       -- icons auto-select the icon font regardless, so this is safe.
       family = icons.battery.charging.font,
       style = settings.font.style_map["Regular"],
-      size = 19.0,
+      size = 16.5,
     },
-    padding_left = 8,
-    padding_right = 8,
+    padding_left = 7,
+    padding_right = 7,
   },
   label = { drawing = false },
   update_freq = 400,   -- belt behind the native events + graph sample cadence
@@ -41,7 +41,7 @@ local battery = sbar.add("item", "widgets.battery", {
 
 local battery_bracket = sbar.add("bracket", "widgets.battery.bracket", { battery.name }, {
   background = { color = colors.bg1 },
-  popup = { align = "center", height = 30 }
+  popup = { align = "center", height = 26 }
 })
 
 local popup_pos = "popup." .. battery_bracket.name
@@ -53,19 +53,19 @@ local header = sbar.add("item", {
   icon = {
     align = "left",
     string = "Battery",
-    font = { size = 14, style = settings.font.style_map["Bold"] },
+    font = { size = 12.5, style = settings.font.style_map["Bold"] },
     width = popup_width / 2,
     padding_left = inset,
   },
   label = {
     align = "right",
     string = "…",
-    font = { size = 14, style = settings.font.style_map["Bold"] },
+    font = { size = 12.5, style = settings.font.style_map["Bold"] },
     color = colors.white,
     width = popup_width / 2,
     padding_right = inset,
   },
-  background = { height = 2, color = colors.grey, y_offset = -15 },
+  background = { height = 2, color = colors.grey, y_offset = -13 },
 })
 
 local function add_detail(title)
@@ -76,15 +76,15 @@ local function add_detail(title)
       align = "left",
       string = title,
       color = colors.grey,
-      font = { size = 12.0 },
+      font = { size = 10.5 },
       width = popup_width / 2,
-      padding_left = inset + 6,
+      padding_left = inset + 5,
     },
     label = {
       align = "right",
       string = "—",
       color = colors.grey,
-      font = { size = 12.0, style = settings.font.style_map["Semibold"] },
+      font = { size = 10.5, style = settings.font.style_map["Semibold"] },
       width = popup_width / 2,
       padding_right = inset,
     },
@@ -118,7 +118,7 @@ sbar.add("item", {
     align = "left",
     string = "Battery Level",
     color = colors.white,
-    font = { size = 13, style = settings.font.style_map["Bold"] },
+    font = { size = 11.5, style = settings.font.style_map["Bold"] },
     width = popup_width / 2,
     padding_left = inset,
   },
@@ -126,18 +126,18 @@ sbar.add("item", {
     align = "right",
     string = "Last 24 Hours",
     color = colors.grey,
-    font = { size = 11.0 },
+    font = { size = 9.5 },
     width = popup_width / 2,
     padding_right = inset,
   },
-  padding_top = 6,
+  padding_top = 5,
 })
 
 local history = sbar.add("graph", "widgets.battery.history", history_buckets, {
   position = popup_pos,
   graph = { color = colors.green },
   background = {
-    height = 64,
+    height = 56,
     color = { alpha = 0 },
     border_color = { alpha = 0 },
     drawing = true,
@@ -170,8 +170,8 @@ local settings_row = sbar.add("item", {
     string = "Settings",
     align = "left",
     color = colors.white,
-    font = { size = 12.0 },
-    width = popup_width - 20 - inset,
+    font = { size = 10.5 },
+    width = popup_width - 18 - inset,
     padding_left = 4,
   },
   label = { drawing = false },
