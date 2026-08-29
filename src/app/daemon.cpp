@@ -849,6 +849,11 @@ void DaemonState::rebuildSurfaces() {
     attachMouseHandlers();
     appliedOffsetPhysical = -1; // force the work-area handshake to re-run
     renderAll();
+    // Freshly created surfaces start shown; if a fullscreen window already
+    // covers a monitor (a display change while a game is up doesn't move the
+    // foreground, so nothing else re-checks until the 1 s tick), re-apply the
+    // fullscreen policy now so the rebuilt bar doesn't flash over it.
+    updateFullscreenElevation();
 }
 
 // Subscribes to komorebi when it is running and we are not already attached.

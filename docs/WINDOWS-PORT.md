@@ -368,7 +368,13 @@ HWND  WS_POPUP | (borderless)
   fullscreen Space. Auto-hide ORs with the user's `hidden=` toggle and keeps
   the appbar reservation (no window reflow when toggling). Switching to a
   workspace without the fullscreen window restores the bar because its
-  foreground no longer covers the monitor.
+  foreground no longer covers the monitor. **Known limitation** (pre-existing
+  in the detector, shared by the elevation path): detection keys off the
+  single *global* foreground window, so a fullscreen app on a monitor you are
+  not focused on is not detected — that monitor's bar stays put until its
+  window is focused. A per-monitor top-window scan would lift this but risks
+  false positives on background borderless-maximized windows, so it is
+  deferred.
 - `hidden`, `shadow` (DWM shadow toggle), `margin/y_offset/height/position`
   math identical (all y-down native — the AppKit y-up conversions are simply
   deleted).
