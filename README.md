@@ -71,6 +71,20 @@ open -g ~/Applications/YBar.app --args -c <your ybarrc.lua>
 
 YBar has a native **Windows 11** port — a separate C++ engine with the same soul. It lives on the [`windows` branch](../../tree/windows) (an orphan branch with its own toolchain and release cadence) and speaks the exact same command grammar, IPC protocol, and embedded Lua 5.4 API, so themes, configs, and shell scripts carry over with only OS-inherent edits (shell commands, glyph fonts, window-manager adapter).
 
+![The Windows bar: workspace pills tracking komorebi/YTile with a live front-app label and CPU graph](docs/media/ybar-win-bar.gif)
+
+*The `sketchybar-glass` theme on Windows 11, restyled to Fluent: workspace
+pills tracking the active YTile/komorebi workspace, the front-app label and
+CPU graph updating live — a flat, opaque strip that follows the system
+Transparency setting.*
+
+![Windows popups: system monitor, Wi-Fi, Bluetooth, calendar and battery flyouts](docs/media/ybar-win-popups.gif)
+
+*Popups are first-class items laid out by the same engine: a Task
+Manager-style system monitor with live CPU/GPU graphs, Fluent Wi-Fi and
+Bluetooth flyouts, a calendar month grid, and a battery panel. Network and
+device names in this recording are placeholders.*
+
 - **Engine** — Direct3D 11 + a DirectWrite glyph atlas + DirectComposition, paced to the monitor's refresh rate (120 Hz verified), near-zero CPU while static: the macOS Metal engine's mirror.
 - **Window management** — [komorebi](https://github.com/LGUG2Z/komorebi) and YTile as first-class workspace adapters (replacing AeroSpace/yabai), driven by their event streams rather than CLI polling.
 - **Native providers** — battery/power, audio (WASAPI), network & Wi-Fi (`netsh` + WinRT), now-playing media (GSMTC), and in-process CPU/memory stats, all mapped to the same events as macOS.
