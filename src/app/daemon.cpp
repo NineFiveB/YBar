@@ -455,6 +455,10 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                 g_state->bus.trigger("komorebi_workspace_change", update->focusedWorkspace,
                                      env);
                 g_state->bus.trigger("space_change", "", env);
+                // A workspace switch changes the foreground window, so the
+                // fullscreen auto-hide must re-evaluate now, not up to a second
+                // later on the routine tick.
+                g_state->updateFullscreenElevation();
             }
             delete update;
             return 0;
@@ -479,6 +483,10 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                 g_state->bus.trigger("komorebi_workspace_change", update->focusedWorkspace,
                                      env);
                 g_state->bus.trigger("space_change", "", env);
+                // A workspace switch changes the foreground window, so the
+                // fullscreen auto-hide must re-evaluate now, not up to a second
+                // later on the routine tick.
+                g_state->updateFullscreenElevation();
             }
             delete update;
             return 0;
@@ -975,10 +983,25 @@ void DaemonState::detachKomorebiIfReserveChanged() {
     }
 }
 
+// Fullscreen policy per monitor, re-evaluated on the 1 s tick, on the shell's
+// ABN_FULLSCREENAPP signal, and on a workspace switch:
+//   fullscreen_show=on  → raise the bar OVER the fullscreen window (never hide)
+//   fullscreen_show=off → auto-hide the bar while a fullscreen window covers
+//                         the monitor (the Win11-taskbar convention, and the
+//                         analog of the macOS bar not showing over a
+//                         fullscreen Space). Switching to a workspace without
+//                         the fullscreen window changes the foreground, so the
+//                         geometry test clears and the bar returns.
 void DaemonState::updateFullscreenElevation() {
     for (const auto& surface : surfaces) {
-        surface->setFullscreenElevation(settings.fullscreenShow &&
-                                        surface->monitorHasFullscreenWindow());
+        const bool fullscreen = surface->monitorHasFullscreenWindow();
+        if (settings.fullscreenShow) {
+            surface->setHiddenForFullscreen(false);
+            surface->setFullscreenElevation(fullscreen);
+        } else {
+            surface->setFullscreenElevation(false);
+            surface->setHiddenForFullscreen(fullscreen);
+        }
     }
 }
 

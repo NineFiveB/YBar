@@ -49,6 +49,10 @@ public:
     // fullscreen_show: raise this surface over a fullscreen window on ITS
     // monitor, or drop it back to the configured level (spec 6).
     void setFullscreenElevation(bool elevated);
+    // fullscreen_show=off (default): auto-hide this surface while a fullscreen
+    // window covers its monitor, and show it again otherwise. ORed with the
+    // user's hidden= toggle.
+    void setHiddenForFullscreen(bool hidden);
     bool monitorHasFullscreenWindow() const;
 
     // sticky=on upkeep: follow the active virtual desktop. Driven from the

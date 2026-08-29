@@ -354,12 +354,21 @@ HWND  WS_POPUP | (borderless)
   `QueryDisplayConfig` device path (EDID-stable), then rebuild debounced
   500 ms (the sledgehammer, kept). `display=active` = monitor of
   `GetForegroundWindow()`.
-- `fullscreen_show`: prefer komorebi state (monocle/maximized container on
-  that monitor) when the provider is live; else appbar `ABN_FULLSCREENAPP`
-  when registered; else foreground-window-rect == monitor-rect heuristic
-  (`SHQueryUserNotificationState` alone is unreliable for borderless-fullscreen
-  games). Behavior contract unchanged: per-surface elevation to topmost while
-  fullscreen is detected on *that* monitor.
+- `fullscreen_show`: detection prefers komorebi state (monocle/maximized
+  container on that monitor) when the provider is live; else appbar
+  `ABN_FULLSCREENAPP` when registered; else the foreground-window-rect ==
+  monitor-rect heuristic (`SHQueryUserNotificationState` alone is unreliable
+  for borderless-fullscreen games). Re-evaluated on the 1 s tick, on
+  `ABN_FULLSCREENAPP`, and on every workspace switch (a switch changes the
+  foreground window). **Policy per monitor**: `fullscreen_show=on` elevates
+  that surface to topmost *over* the fullscreen window (macOS parity);
+  `fullscreen_show=off` (the default) **auto-hides** the surface while
+  fullscreen is detected on its monitor and shows it again otherwise — the
+  Win11-taskbar convention, and the analog of the macOS bar not drawing over a
+  fullscreen Space. Auto-hide ORs with the user's `hidden=` toggle and keeps
+  the appbar reservation (no window reflow when toggling). Switching to a
+  workspace without the fullscreen window restores the bar because its
+  foreground no longer covers the monitor.
 - `hidden`, `shadow` (DWM shadow toggle), `margin/y_offset/height/position`
   math identical (all y-down native — the AppKit y-up conversions are simply
   deleted).

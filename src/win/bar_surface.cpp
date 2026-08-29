@@ -75,6 +75,10 @@ public:
     // frame without a round trip to the daemon.
     BarSettings settings;
     bool elevatedForFullscreen = false;
+    // Auto-hide this monitor's bar while a fullscreen window covers it
+    // (fullscreen_show=off). Independent of the user's own hidden= toggle;
+    // the window hides when EITHER asks.
+    bool hiddenForFullscreen = false;
     bool appBarRegistered = false;
     ComPtr<IVirtualDesktopManager> desktopManager;
     bool warnedSticky = false;
@@ -101,6 +105,17 @@ public:
     HWND zOrder() const {
         if (elevatedForFullscreen) return HWND_TOPMOST;
         return settings.topmost == BarLevel::Off ? HWND_BOTTOM : HWND_TOPMOST;
+    }
+
+    // Show/hide from the OR of the user's hidden= toggle and the fullscreen
+    // auto-hide. lastHidden tracks the EFFECTIVE state so the per-frame
+    // applyFrame call is a no-op when nothing changed. (create() shows the
+    // window and seeds lastHidden before this is first reached.)
+    void applyVisibility() {
+        const bool hide = settings.hidden || hiddenForFullscreen;
+        if (hide == lastHidden) return;
+        ShowWindow(hwnd, hide ? SW_HIDE : SW_SHOWNOACTIVATE);
+        lastHidden = hide;
     }
 
     // Space reservation for users without a tiling WM (spec 6.1). The appbar
@@ -270,10 +285,7 @@ public:
             logicalW = widthPx / monitorInfo.scale;
             logicalH = heightPx / monitorInfo.scale;
         }
-        if (settings.hidden != lastHidden) {
-            ShowWindow(hwnd, settings.hidden ? SW_HIDE : SW_SHOWNOACTIVATE);
-            lastHidden = settings.hidden;
-        }
+        applyVisibility();
         if (frameChanged) compositionDevice->Commit();
     }
 
@@ -565,6 +577,12 @@ void BarSurface::setFullscreenElevation(bool elevated) {
     const HWND z = impl_->zOrder();
     SetWindowPos(impl_->hwnd, z, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     impl_->lastZ = z; // keep applyFrame's change guard honest
+}
+
+void BarSurface::setHiddenForFullscreen(bool hidden) {
+    if (impl_->hiddenForFullscreen == hidden) return;
+    impl_->hiddenForFullscreen = hidden;
+    impl_->applyVisibility();
 }
 
 bool BarSurface::monitorHasFullscreenWindow() const {
