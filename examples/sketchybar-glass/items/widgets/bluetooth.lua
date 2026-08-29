@@ -120,6 +120,11 @@ local popup_pos = "popup." .. bt_bracket.name
 local header = sbar.add("item", "widgets.bluetooth.popup.header", {
   position = popup_pos,
   width = popup_width,
+  -- Item-level align defaults to center, and the fixed icon+label slots fill
+  -- the row exactly — so any transient extra advance (the probe spinner's
+  -- image) turns the centering slack negative and shifts the whole header
+  -- left while a probe runs. Left-align the item so the slack never applies.
+  align = "left",
   icon = {
     string = "Bluetooth",
     align = "left",

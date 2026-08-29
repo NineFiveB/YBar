@@ -54,6 +54,11 @@ local popup_pos = "popup." .. wifi_bracket.name
 local header = sbar.add("item", {
   position = popup_pos,
   width = popup_width,
+  -- Item-level align defaults to center, and the fixed icon+label slots fill
+  -- the row exactly — so any transient extra advance (the probe spinner's
+  -- image) turns the centering slack negative and shifts the whole header
+  -- left while a probe runs. Left-align the item so the slack never applies.
+  align = "left",
   icon = {
     align = "left",
     string = "Wi-Fi",
@@ -87,12 +92,12 @@ local current_name = sbar.add("item", {
     width = popup_width - 70,
     padding_left = inset,
   },
-  -- One right-edge glyph (lock when secured, wifi otherwise): `sf:` refs
-  -- resolve only as whole strings, so no concatenated pairs.
+  -- One right-edge glyph (lock when secured, unlock otherwise). Literal
+  -- Segoe Fluent chars, so the part needs the explicit icon-font family.
   label = {
     align = "right",
     string = "",
-    font = { size = 12 },
+    font = { family = icons.wifi.signal.font, size = 12 },
     color = colors.grey,
     width = 70,
     padding_right = inset,
@@ -182,6 +187,7 @@ local wifi_power = true
 local is_connected = false
 local details_running = false
 local scanning = false
+local scan_gen = 0      -- bumping cancels the while-open rescan loop
 local details = nil     -- last parsed `show interfaces` snapshot
 local net_cache = {}    -- { ssid, secured, signal } rows from the last scan
 
@@ -189,7 +195,8 @@ local net_cache = {}    -- { ssid, secured, signal } rows from the last scan
 local spinner = require("helpers.spinner").attach(header)
 
 local function right_glyph(secured)
-  return secured and "sf:lock" or "sf:wifi"
+  local s = icons.wifi.signal
+  return secured and s.lock or s.unlock
 end
 
 -- Quartile breakpoints over netsh's 0-100 Signal percent; no Signal line
@@ -230,7 +237,8 @@ local function populate_rows()
         net_rows[row]:set({
           drawing = true,
           icon = { string = signal_glyph(net.signal or 0)
-            .. (net.secured and (" " .. icons.wifi.signal.lock) or "") },
+            .. " " .. (net.secured and icons.wifi.signal.lock
+                       or icons.wifi.signal.unlock) },
           label = { string = net.ssid },
         })
       end
@@ -269,6 +277,29 @@ local scan_cmd = "netsh wlan show networks mode=bssid | tr -d '\\r' | awk -F' : 
   .. 'END{ if (ssid != "") printf "net\\t%s\\t%d\\t%d\\n", ssid, sec, sig }'
   .. "'"
 
+-- netsh only READS the results of Windows' most recent scan — it never
+-- triggers one. The taskbar's native flyout is what normally forces
+-- rescans, and this bar hides the taskbar, so without a nudge the listing
+-- decays to just the connected network. WiFiAdapter.ScanAsync (WinRT, via
+-- Windows PowerShell's in-box projection + the AsTask bridge — the raw
+-- IAsyncOperation projects as a bare __ComObject in 5.1) forces a real
+-- scan (~3-5 s, live-verified 1 -> 24 networks here); the netsh listing
+-- right after reflects it. No adapter access (location consent denied on
+-- 24H2+) leaves Result empty and this falls through to the stale listing.
+local rescan_cmd = "powershell.exe -NoProfile -Command '"
+  .. 'Add-Type -AssemblyName System.Runtime.WindowsRuntime; '
+  .. '[Windows.Devices.WiFi.WiFiAdapter,Windows.Devices.WiFi,ContentType=WindowsRuntime]|Out-Null; '
+  .. '$m=[System.WindowsRuntimeSystemExtensions].GetMethods(); '
+  .. '$g=($m|Where-Object{$_.Name -eq \"AsTask\" -and $_.GetParameters().Count -eq 1'
+  .. ' -and $_.GetParameters()[0].ParameterType.Name -like \"IAsyncOperation*\"})[0]; '
+  .. '$a=($m|Where-Object{$_.Name -eq \"AsTask\" -and $_.GetParameters().Count -eq 1'
+  .. ' -and $_.GetParameters()[0].ParameterType.Name -eq \"IAsyncAction\"})[0]; '
+  .. '$t=$g.MakeGenericMethod([System.Collections.Generic.IReadOnlyList[Windows.Devices.WiFi.WiFiAdapter]])'
+  .. '.Invoke($null,@([Windows.Devices.WiFi.WiFiAdapter]::FindAllAdaptersAsync())); '
+  .. '$null=$t.Wait(5000); '
+  .. 'if($t.Result.Count -gt 0){$s=$a.Invoke($null,@($t.Result[0].ScanAsync())); $null=$s.Wait(15000)}'
+  .. "'"
+
 local function apply_pill()
   wifi:set({
     icon = {
@@ -300,28 +331,46 @@ local function refresh_state()
   end)
 end
 
-local function scan_networks()
+local function scan_networks(silent)
   if scanning then return end
   scanning = true
-  spinner.start()
-  sbar.exec(scan_cmd, function(out)
-    scanning = false
-    spinner.stop()
-    net_cache = {}
-    local seen = {}
-    for ssid, sec, sig in (out or ""):gmatch("net\t([^\t\n]+)\t([01])\t(%d+)") do
-      if not seen[ssid] and #net_cache < MAX_NETS then
-        seen[ssid] = true
-        net_cache[#net_cache + 1] =
-          { ssid = ssid, secured = sec == "1", signal = tonumber(sig) }
+  if not silent then spinner.start() end
+  -- Force the OS scan first; the netsh listing right after reflects it.
+  sbar.exec(rescan_cmd, function()
+    sbar.exec(scan_cmd, function(out)
+      scanning = false
+      if not silent then spinner.stop() end
+      net_cache = {}
+      local seen = {}
+      for ssid, sec, sig in (out or ""):gmatch("net\t([^\t\n]+)\t([01])\t(%d+)") do
+        if not seen[ssid] then
+          seen[ssid] = true
+          net_cache[#net_cache + 1] =
+            { ssid = ssid, secured = sec == "1", signal = tonumber(sig) }
+        end
       end
-    end
-    populate_rows()
+      -- Strongest first: populate_rows caps at MAX_NETS rows, so without
+      -- the sort a crowded neighborhood can crowd out the usable networks.
+      table.sort(net_cache, function(a, b)
+        return (a.signal or 0) > (b.signal or 0)
+      end)
+      populate_rows()
+    end)
   end)
+end
+
+-- Win11's flyout keeps scanning for as long as it is open; mirror that.
+-- Only the first pass spins the header — refreshes land silently. The
+-- generation bump on hide (or a re-open) orphans the old loop.
+local function scan_loop(gen, silent)
+  if gen ~= scan_gen then return end
+  scan_networks(silent)
+  sbar.delay(12, function() scan_loop(gen, true) end)
 end
 
 -- ── Interactions ───────────────────────────────────────────────────────────
 local function hide_details()
+  scan_gen = scan_gen + 1 -- ends the while-open rescan loop
   wifi_bracket:set({ popup = { drawing = false } })
 end
 
@@ -379,7 +428,8 @@ local function toggle_details()
     wifi_bracket:set({ popup = { drawing = true } })
     populate_rows()      -- last snapshot first, then the fresh round trips
     refresh_state()
-    scan_networks()
+    scan_gen = scan_gen + 1
+    scan_loop(scan_gen, false) -- scan now, then keep rescanning while open
   else
     hide_details()
   end
@@ -404,6 +454,8 @@ wifi:subscribe({ "wifi_change", "system_woke" }, on_wifi_event)
 sbar.add("item", { position = "right", width = settings.group_paddings })
 
 -- Warm caches at load so the first popup opens populated (also styles the
--- pill before the first wifi_change fires).
+-- pill before the first wifi_change fires). The silent scan means even the
+-- very first open shows a real network list, not just the connected row.
 refresh_state()
+scan_networks(true)
 scan_networks()

@@ -24,6 +24,9 @@ local battery = sbar.add("item", "widgets.battery", {
   position = "right",
   icon = {
     font = {
+      -- Icon-font family for the literal charging glyphs; the sf: level
+      -- icons auto-select the icon font regardless, so this is safe.
+      family = icons.battery.charging.font,
       style = settings.font.style_map["Regular"],
       size = 19.0,
     },
@@ -189,7 +192,10 @@ local function apply_pill()
 
   local icon, color
   if on_ac then
-    icon, color = icons.battery.charging, colors.green
+    -- Charging battery filled to the actual level (unknown charge reads
+    -- as full — plugged in with no reading is the AC-only desktop case).
+    local level = math.min(10, math.floor((charge or 100) / 10))
+    icon, color = icons.battery.charging[level], colors.green
   elseif charge and charge > 80 then
     icon, color = icons.battery._100, colors.green
   elseif charge and charge > 60 then
