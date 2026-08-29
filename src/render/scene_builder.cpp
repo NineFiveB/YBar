@@ -1,5 +1,6 @@
 #include "render/scene_builder.h"
 
+#include <algorithm>
 #include <cmath>
 #include <optional>
 
@@ -127,19 +128,28 @@ void emitText(DisplayList& list, const ShapedLine& line, double penX, double bas
 }
 
 // Graph: per-segment fill quads down to the box baseline + constant-thickness
-// polyline quads (spec 3.9). Sample x step = 1 point; y = maxY - sample*h.
+// polyline quads (spec 3.9). Samples spread across the box width (reference
+// tessellateGraph stepX = width/(count-1)); line centers are clamped to
+// [minY+half, maxY-half] so the stroke never leaves the box — the reference
+// centers a zero sample ON maxY, which under a bordered plate paints the
+// stroke over the border and half a line width below the stadium
+// (user-reported on the system-monitor graphs).
 void emitGraph(DisplayList& list, const ybar::model::GraphState& graph, const Rect& box,
                bool rightToLeft, double scale) {
     const auto samples = graph.ordered();
-    if (samples.size() < 2) return;
+    if (samples.size() < 2 || box.width <= 0 || box.height <= 0) return;
     const auto lineColor = colorOf(graph.lineColor);
     const auto fillColor = colorOf(graph.effectiveFillColor());
     const double half = graph.lineWidth / 2.0;
+    const double stepX = box.width / static_cast<double>(samples.size() - 1);
+    const double clampPad = std::min(half, box.height / 2);
+    const double yLo = box.y + clampPad;
+    const double yHi = box.maxY() - clampPad;
 
     auto pointAt = [&](std::size_t i) {
-        const double x = rightToLeft ? box.maxX() - static_cast<double>(i)
-                                     : box.minX() + static_cast<double>(i);
-        const double y = box.maxY() - samples[i] * box.height;
+        const double x = rightToLeft ? box.maxX() - static_cast<double>(i) * stepX
+                                     : box.minX() + static_cast<double>(i) * stepX;
+        const double y = std::clamp(box.maxY() - samples[i] * box.height, yLo, yHi);
         return Point{x * scale, y * scale};
     };
     const float baseline = static_cast<float>(box.maxY() * scale);
@@ -524,8 +534,13 @@ void emitItem(DisplayList& list, Item& item, const Rect& contentBox, double scal
         const double height = item.background.height > 0 ? item.background.height
                                                          : adjusted.height - 2;
         const double centerY = adjusted.y + adjusted.height / 2;
-        const Rect box{penX, centerY - height / 2,
-                       static_cast<double>(item.graph->capacity), height};
+        // A bordered plate frames the graph: inset the box by the border
+        // width so stroke and fill run inside the frame instead of over it.
+        const double inset =
+            item.background.drawing ? std::max(0.0, item.background.borderWidth) : 0.0;
+        const Rect box{penX + inset, centerY - height / 2 + inset,
+                       static_cast<double>(item.graph->capacity) - 2 * inset,
+                       height - 2 * inset};
         emitGraph(list, *item.graph, box, rightToLeft, scale);
         penX += item.graph->capacity;
     }

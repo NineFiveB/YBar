@@ -211,7 +211,12 @@ image → icon → graph/slider/gauge → label; all quads → all triangles →
 glyphs), pixel snapping (origin and size rounded independently), hard offset
 shadows (no blur — do not "improve"), `background.clip` holes (max 16),
 graph right-to-left on right-side positions, gauge 270° dial with label
-centered inside contributing zero width.
+centered inside contributing zero width. Deliberate graph deviation: the
+reference centers a zero sample's stroke ON the box bottom (half the line
+hangs outside — under a bordered plate it overpaints the border and reads
+as a baseline under the stadium, user-reported); the port clamps line
+centers to [minY+half, maxY−half] and insets the graph box by the plate's
+border width, so stroke and fill stay inside the frame.
 
 ---
 
