@@ -1,4 +1,3 @@
-local icons = require("icons")
 local colors = require("colors")
 local settings = require("settings")
 
@@ -20,27 +19,48 @@ local settings = require("settings")
 local popup_width = 229
 local inset = 11
 
-local battery = sbar.add("item", "widgets.battery", {
+-- The pill body is a slider so the charge fill is CONTINUOUS (smooth) rather
+-- than 5 discrete SF-glyph levels: the slider track is the empty battery
+-- body, the highlight fill is the charge fraction.
+local battery = sbar.add("slider", "widgets.battery", 20, {
   position = "right",
-  icon = {
-    font = {
-      -- Icon-font family for the literal charging glyphs; the sf: level
-      -- icons auto-select the icon font regardless, so this is safe.
-      family = icons.battery.charging.font,
-      style = settings.font.style_map["Regular"],
-      size = 16.5,
+  slider = {
+    percentage = 100,
+    -- Read-only meter: without this every mouse-down rewrites the percentage
+    -- from the pointer x, so clicking the pill showed a fabricated charge
+    -- (and a drag scrubbed it) until something re-applied the real value.
+    interactive = false,
+    highlight_color = colors.green,
+    background = {
+      height = 9,
+      corner_radius = 2,
+      color = colors.with_alpha(colors.white, 0.10),  -- empty body
     },
-    padding_left = 7,
-    padding_right = 7,
+    knob = { drawing = false },
   },
+  -- Both parts off: a slider item still carries an icon/label part, and the
+  -- empty icon's advance would left-shift the track inside the bracket pill.
+  icon = { drawing = false },
   label = { drawing = false },
   update_freq = 400,   -- belt behind the native events + graph sample cadence
-  padding_left = 2,
-  padding_right = 2,
+  -- Equal padding = the body sits centered in the bracket pill; the track is
+  -- auto-centered vertically (emitSlider centers on the row's mid-line).
+  -- The pill's INNER margin comes from the bracket padding below (bracketFrame
+  -- wraps the members' CONTENT boxes; a slider has no icon padding to supply
+  -- margin). Item padding lands OUTSIDE the pill, so it must MATCH the bracket
+  -- padding for the pill to reserve its full width in the flow and keep the
+  -- inter-pill gaps uniform (~2pt each side + spacer). The 1px asymmetry offsets
+  -- the calendar's leading spacer so both battery gaps land on the shared 6pt.
+  padding_left = 9,
+  padding_right = 8,
 })
 
 local battery_bracket = sbar.add("bracket", "widgets.battery.bracket", { battery.name }, {
   background = { color = colors.bg1 },
+  -- Inner pill margin around the slider so the meter floats like the icon
+  -- pills (whose margin comes from their icon padding, which a slider lacks).
+  padding_left = 9,
+  padding_right = 9,
   popup = { align = "center", height = 26 }
 })
 
@@ -188,27 +208,11 @@ local last_charge = nil   -- 0-100
 local on_ac = nil         -- true | false | nil (unknown)
 
 local function apply_pill()
-  local charge = last_charge
-
-  local icon, color
-  if on_ac then
-    -- Charging battery filled to the actual level (unknown charge reads
-    -- as full — plugged in with no reading is the AC-only desktop case).
-    local level = math.min(10, math.floor((charge or 100) / 10))
-    icon, color = icons.battery.charging[level], colors.green
-  elseif charge and charge > 80 then
-    icon, color = icons.battery._100, colors.green
-  elseif charge and charge > 60 then
-    icon, color = icons.battery._75, colors.green
-  elseif charge and charge > 40 then
-    icon, color = icons.battery._50, colors.green
-  elseif charge and charge > 20 then
-    icon, color = icons.battery._25, colors.orange
-  else
-    icon, color = icons.battery._0, colors.red
-  end
-
-  battery:set({ icon = { string = icon, color = color } })
+  -- Unknown charge (AC-only desktop with no reading) reads as full.
+  local charge = last_charge or 100
+  -- Monochrome theme: a dimmer fill flags a low battery in place of a colour.
+  local fill = (charge <= 20 and not on_ac) and colors.grey or colors.green
+  battery:set({ slider = { percentage = charge, highlight_color = fill } })
 end
 
 -- One Win32_Battery round trip: prints "level|status|runtime" (runtime in
@@ -265,6 +269,10 @@ local function toggle_details()
     -- no update_history(): the graph already holds the live-sampled window
   else
     hide_details()
+    -- Belt: re-assert the real charge on close too, so the meter is correct
+    -- even on an engine without slider.interactive (where the closing
+    -- mouse-down would leave a pointer-derived percentage on screen).
+    apply_pill()
   end
 end
 

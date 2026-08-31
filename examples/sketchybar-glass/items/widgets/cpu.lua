@@ -38,7 +38,10 @@ local cpu = sbar.add("graph", "widgets.cpu", 42, {
     width = 0,
     y_offset = 4
   },
-  padding_right = settings.paddings + 5
+  -- Keeps the cpu->wifi gap on the shared inter-pill spacing (was paddings+5
+  -- = 8, which made that gap double the others). Uses the theme setting so
+  -- retuning group_paddings still moves this gap with the rest.
+  padding_right = settings.group_paddings
 })
 
 local cpu_bracket = sbar.add("bracket", "widgets.cpu.bracket", { cpu.name }, {

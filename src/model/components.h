@@ -60,6 +60,12 @@ struct SliderState {
     }();
     TextPart knob;
     bool isDragged = false;
+    // A slider used as a READ-ONLY meter (a battery/level gauge) must not be
+    // scrubbable: without this, every mouse-down rewrites `percentage` from
+    // the pointer x, so a click shows a fabricated value until something
+    // re-applies the real one. interactive=off keeps the visual and drops the
+    // drag machinery (no press/drag/PERCENTAGE, sets always apply).
+    bool interactive = true;
 };
 
 struct GaugeState {

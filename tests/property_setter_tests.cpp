@@ -165,6 +165,22 @@ TEST_CASE("slider percentage is ignored while dragging") {
     CHECK(item.slider->percentage == 40);
 }
 
+TEST_CASE("slider.interactive marks a read-only meter") {
+    // A slider used as a battery/level meter must not be scrubbable: the
+    // daemon's press path skips the drag entirely when interactive=off, so a
+    // click can never rewrite the displayed percentage.
+    auto item = makeItem();
+    item.slider.emplace();
+    CHECK(item.slider->interactive); // interactive by default (volume sliders)
+    CHECK_FALSE(PropertySetter::set(item, "slider.interactive", "off"));
+    CHECK_FALSE(item.slider->interactive);
+    // Sets still apply — only the pointer-driven path is disabled.
+    CHECK_FALSE(PropertySetter::set(item, "slider.percentage", "55"));
+    CHECK(item.slider->percentage == 55);
+    CHECK_FALSE(PropertySetter::set(item, "slider.interactive", "on"));
+    CHECK(item.slider->interactive);
+}
+
 TEST_CASE("popup properties") {
     auto item = makeItem();
     CHECK_FALSE(PropertySetter::set(item, "popup.drawing", "toggle"));

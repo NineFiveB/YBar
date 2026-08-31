@@ -121,6 +121,7 @@ json itemDict(const Item& item, const BoundingRects& boundingRects) {
             {"percentage", item.slider->percentage},
             {"width", item.slider->width},
             {"highlight_color", item.slider->highlightColor.hex()},
+            {"interactive", item.slider->interactive ? "on" : "off"},
         };
     }
     if (item.image) {

@@ -383,6 +383,9 @@ Result setSlider(Item& item, const Segments& segs, std::size_t at, const std::st
         slider.width = std::max(1.0, *parsed);
         return ok;
     }
+    // interactive=off: a read-only meter (battery/level gauge). Drops the
+    // press/drag machinery so a click cannot rewrite the displayed value.
+    if (key == "interactive") return setBool(slider.interactive, value);
     if (key == "highlight_color") return setColor(slider.highlightColor, segs, at + 1, value, fullPath);
     if (key == "knob") return setText(slider.knob, segs, at + 1, value, fullPath);
     if (key == "background") {

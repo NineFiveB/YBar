@@ -1450,7 +1450,8 @@ void DaemonState::updatePopups() {
                     };
                     if (event.kind == Kind::Down) {
                         auto* member = memberAt(event.x, event.y);
-                        if (member && member->slider) {
+                        // Same read-only rule inside popups (spec 3.9).
+                        if (member && member->slider && member->slider->interactive) {
                             draggingSliderId = member->id;
                             member->slider->isDragged = true;
                             scheduler.cancel("item." + std::to_string(member->id) +
@@ -1729,7 +1730,9 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
             // auto-close popups except the pressed host's (spec 3.9).
             if (event.kind == Kind::Down) {
                 state.closeAutoClosePopups(item ? item->id : -1);
-                if (item && item->slider) {
+                // interactive=off is a read-only meter: no drag, and no
+                // pointer-derived percentage overwrite (spec 3.9).
+                if (item && item->slider && item->slider->interactive) {
                     state.draggingSliderId = item->id;
                     item->slider->isDragged = true;
                     // An in-flight percentage animation would fight the drag
