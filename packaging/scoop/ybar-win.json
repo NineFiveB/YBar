@@ -1,7 +1,7 @@
 {
     "version": "0.1.0",
     "description": "GPU-rendered scriptable status bar for Windows with komorebi integration",
-    "homepage": "https://github.com/AegiosOT/YBar/tree/windows",
+    "homepage": "https://github.com/NineFiveB/YBar/tree/windows",
     "license": "GPL-3.0-only",
     "notes": [
         "Start the bar with 'ybar', stop it with 'ybar --exit'.",
@@ -11,19 +11,19 @@
     ],
     "architecture": {
         "64bit": {
-            "url": "https://github.com/AegiosOT/YBar/releases/download/win-v0.1.0/ybar-win-0.1.0-x64.zip",
+            "url": "https://github.com/NineFiveB/YBar/releases/download/win-v0.1.0/ybar-win-0.1.0-x64.zip",
             "hash": "0000000000000000000000000000000000000000000000000000000000000000"
         }
     },
     "bin": "ybar.exe",
     "checkver": {
-        "github": "https://github.com/AegiosOT/YBar",
+        "github": "https://github.com/NineFiveB/YBar",
         "regex": "releases/tag/win-v([\\d.]+)"
     },
     "autoupdate": {
         "architecture": {
             "64bit": {
-                "url": "https://github.com/AegiosOT/YBar/releases/download/win-v$version/ybar-win-$version-x64.zip"
+                "url": "https://github.com/NineFiveB/YBar/releases/download/win-v$version/ybar-win-$version-x64.zip"
             }
         }
     }

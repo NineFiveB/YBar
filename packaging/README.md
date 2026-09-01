@@ -24,7 +24,7 @@ stale manifest fails loudly instead of installing the wrong bits.
 
 Three files under `winget/`, submitted to
 [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) as
-`manifests/a/AegiosOT/ybar-win/<version>/`:
+`manifests/n/NineFiveB/ybar-win/<version>/`:
 
 ```powershell
 winget validate --manifest packaging/winget
@@ -46,7 +46,7 @@ A single manifest under `scoop/`. Either submit it to a bucket or install it
 directly:
 
 ```powershell
-scoop install https://raw.githubusercontent.com/AegiosOT/YBar/windows/packaging/scoop/ybar-win.json
+scoop install https://raw.githubusercontent.com/NineFiveB/YBar/windows/packaging/scoop/ybar-win.json
 ```
 
 `checkver`/`autoupdate` track `win-v*` tags, so scoop picks up new releases

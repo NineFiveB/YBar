@@ -7,7 +7,7 @@
 #
 # InstallerSha256 must match the release asset. The release workflow prints it,
 # or: (Get-FileHash ybar-win-<version>-x64.zip -Algorithm SHA256).Hash
-PackageIdentifier: AegiosOT.ybar-win
+PackageIdentifier: NineFiveB.ybar-win
 PackageVersion: 0.1.0
 MinimumOSVersion: 10.0.22000.0  # Windows 11: DWM system backdrops, PerMonitorV2
 InstallerType: zip
@@ -21,7 +21,7 @@ NestedInstallerFiles:
 ArchiveBinariesDependOnPath: true
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/AegiosOT/YBar/releases/download/win-v0.1.0/ybar-win-0.1.0-x64.zip
+    InstallerUrl: https://github.com/NineFiveB/YBar/releases/download/win-v0.1.0/ybar-win-0.1.0-x64.zip
     InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
 ManifestType: installer
 ManifestVersion: 1.9.0

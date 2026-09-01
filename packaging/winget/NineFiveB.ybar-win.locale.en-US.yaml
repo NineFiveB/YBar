@@ -1,15 +1,15 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.9.0.schema.json
-PackageIdentifier: AegiosOT.ybar-win
+PackageIdentifier: NineFiveB.ybar-win
 PackageVersion: 0.1.0
 PackageLocale: en-US
-Publisher: AegiosOT
-PublisherUrl: https://github.com/AegiosOT
-PublisherSupportUrl: https://github.com/AegiosOT/YBar/issues
+Publisher: NineFiveB
+PublisherUrl: https://github.com/NineFiveB
+PublisherSupportUrl: https://github.com/NineFiveB/YBar/issues
 PackageName: ybar-win
-PackageUrl: https://github.com/AegiosOT/YBar/tree/windows
+PackageUrl: https://github.com/NineFiveB/YBar/tree/windows
 License: GPL-3.0-only
-LicenseUrl: https://github.com/AegiosOT/YBar/blob/windows/LICENSE
-Copyright: Copyright (c) AegiosOT
+LicenseUrl: https://github.com/NineFiveB/YBar/blob/windows/LICENSE
+Copyright: Copyright (c) NineFiveB
 ShortDescription: GPU-rendered scriptable status bar for Windows with komorebi integration
 Description: |-
   ybar-win is a GPU-rendered (Direct3D 11 + DirectComposition) status bar for
@@ -31,11 +31,11 @@ Tags:
   - taskbar
   - lua
   - sketchybar
-ReleaseNotesUrl: https://github.com/AegiosOT/YBar/releases
+ReleaseNotesUrl: https://github.com/NineFiveB/YBar/releases
 Documentations:
   - DocumentLabel: README
-    DocumentUrl: https://github.com/AegiosOT/YBar/blob/windows/README.md
+    DocumentUrl: https://github.com/NineFiveB/YBar/blob/windows/README.md
   - DocumentLabel: Design and parity contract
-    DocumentUrl: https://github.com/AegiosOT/YBar/blob/windows/docs/WINDOWS-PORT.md
+    DocumentUrl: https://github.com/NineFiveB/YBar/blob/windows/docs/WINDOWS-PORT.md
 ManifestType: defaultLocale
 ManifestVersion: 1.9.0
