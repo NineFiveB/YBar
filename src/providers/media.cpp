@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstdint>
 #include <cstdio>
 #include <mutex>
 #include <thread>
@@ -55,9 +56,13 @@ class MediaProviderImpl : public std::enable_shared_from_this<MediaProviderImpl>
 public:
     GlobalSystemMediaTransportControlsSessionManager manager{nullptr};
     GlobalSystemMediaTransportControlsSession session{nullptr};
-    winrt::event_token sessionsToken{};
+    winrt::event_token sessionsToken{};  // CurrentSessionChanged
+    winrt::event_token sessionListToken{}; // SessionsChanged
     winrt::event_token propertiesToken{};
     winrt::event_token playbackToken{};
+    // Bumped on every re-attach. A slow cross-process read that started
+    // against an older session must not publish its result over a newer one.
+    std::uint64_t generation = 0;
     MediaEnvironment cached;
     // Copied from the facade at start() and cleared at stop() so a late
     // handler can never call through a destroyed MediaProvider.
@@ -92,45 +97,108 @@ public:
     }
 
     void attachCurrentSession() {
-        std::lock_guard<std::recursive_mutex> lock(sessionMutex);
-        if (stopping) return;
-        detachSession();
-        if (!manager) return;
-        session = manager.GetCurrentSession();
-        if (!session) {
-            publish({}); // nothing playing
-            return;
+        // The lock covers ONLY the swap: publishFromSession() blocks on
+        // cross-process reads, and sessionMutex is recursive, so calling it
+        // from inside the guarded region would hold the lock across those
+        // reads — wedging every other handler (and stop()) behind a hung app.
+        {
+            std::lock_guard<std::recursive_mutex> lock(sessionMutex);
+            if (stopping) return;
+            detachSession();
+            if (!manager) return;
+            try {
+                session = manager.GetCurrentSession();
+            } catch (const winrt::hresult_error&) {
+                // A manager that cannot answer has no session to show.
+                session = nullptr;
+            }
+            ++generation;
+            if (!session) {
+                publish({}); // nothing playing
+                return;
+            }
+            std::weak_ptr<MediaProviderImpl> weak = weak_from_this();
+            propertiesToken = session.MediaPropertiesChanged([weak](auto&&, auto&&) {
+                if (auto self = weak.lock()) self->publishFromSession();
+            });
+            playbackToken = session.PlaybackInfoChanged([weak](auto&&, auto&&) {
+                if (auto self = weak.lock()) self->publishFromSession();
+            });
         }
-        std::weak_ptr<MediaProviderImpl> weak = weak_from_this();
-        propertiesToken = session.MediaPropertiesChanged([weak](auto&&, auto&&) {
-            if (auto self = weak.lock()) self->publishFromSession();
-        });
-        playbackToken = session.PlaybackInfoChanged([weak](auto&&, auto&&) {
-            if (auto self = weak.lock()) self->publishFromSession();
-        });
         publishFromSession();
     }
 
     void publishFromSession() {
-        std::lock_guard<std::recursive_mutex> lock(sessionMutex);
-        if (stopping || !session) return;
+        GlobalSystemMediaTransportControlsSession local{nullptr};
+        std::uint64_t startedAt = 0;
+        {
+            std::lock_guard<std::recursive_mutex> lock(sessionMutex);
+            if (stopping || !session) return;
+            local = session;
+            startedAt = generation;
+        }
         MediaEnvironment env;
         try {
-            const auto info = session.GetPlaybackInfo();
+            const auto info = local.GetPlaybackInfo();
             env["MEDIA_STATE"] = info ? stateName(info.PlaybackStatus()) : "closed";
-            env["MEDIA_APP"] = narrow(session.SourceAppUserModelId());
+            env["MEDIA_APP"] = narrow(local.SourceAppUserModelId());
             // TryGetMediaPropertiesAsync is async; get() is safe here because
-            // we are already on a WinRT worker thread, never the UI thread.
-            const auto properties = session.TryGetMediaPropertiesAsync().get();
+            // we are on a WinRT worker thread, never the UI thread — and now
+            // no lock is held across it.
+            const auto properties = local.TryGetMediaPropertiesAsync().get();
             if (properties) {
                 env["MEDIA_TITLE"] = narrow(properties.Title());
                 env["MEDIA_ARTIST"] = narrow(properties.Artist());
                 env["MEDIA_ALBUM"] = narrow(properties.AlbumTitle());
             }
         } catch (const winrt::hresult_error&) {
-            return; // a session can vanish mid-query
+            // Transient RPC failures happen while a track is still playing
+            // (an app recycling its session), so do NOT blank the pill here —
+            // that would flicker mid-song. The revalidate() tick re-queries
+            // the manager and hides it if the session is really gone.
+            return;
+        }
+        {
+            // A re-attach that landed while we were blocked owns the state now.
+            std::lock_guard<std::recursive_mutex> lock(sessionMutex);
+            if (stopping || generation != startedAt) return;
         }
         publish(env);
+    }
+
+    // Safety net for the notifications GSMTC does not deliver: a session that
+    // disappears without CurrentSessionChanged firing, or a re-attach that
+    // raced the session list and latched a dying session. Runs off the worker
+    // thread's timed wait, never under a lock.
+    void revalidate() {
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            if (cached.empty()) return; // idle bar: nothing to correct
+        }
+        GlobalSystemMediaTransportControlsSessionManager localManager{nullptr};
+        GlobalSystemMediaTransportControlsSession known{nullptr};
+        {
+            std::lock_guard<std::recursive_mutex> lock(sessionMutex);
+            if (stopping || !manager) return;
+            localManager = manager;
+            known = session;
+        }
+        GlobalSystemMediaTransportControlsSession current{nullptr};
+        try {
+            current = localManager.GetCurrentSession();
+        } catch (const winrt::hresult_error&) {
+            publish({});
+            return;
+        }
+        if (!current) {
+            publish({});
+            return;
+        }
+        if (current != known) {
+            attachCurrentSession(); // the list moved under us
+            return;
+        }
+        publishFromSession(); // same session: refresh its state
     }
 
     void publish(MediaEnvironment env) {
@@ -182,6 +250,13 @@ bool MediaProvider::start() {
                                                                                  auto&&) {
                     if (auto self = weak.lock()) self->attachCurrentSession();
                 });
+                // CurrentSessionChanged only fires when the CURRENT session
+                // pointer moves; a session disconnecting while it was not
+                // current is reported here instead.
+                impl->sessionListToken =
+                    impl->manager.SessionsChanged([weak](auto&&, auto&&) {
+                        if (auto self = weak.lock()) self->revalidate();
+                    });
                 impl->attachCurrentSession();
                 ok = true;
             }
@@ -200,14 +275,24 @@ bool MediaProvider::start() {
             return;
         }
 
-        // Park until stop(): the event handlers fire on WinRT threadpool
-        // threads, so this thread exists only to own the MTA and the
-        // registrations.
-        WaitForSingleObject(impl->stopEvent, INFINITE);
+        // Timed park: the handlers fire on WinRT threadpool threads, so this
+        // thread owns the MTA and the registrations — plus a slow
+        // revalidation tick, because GSMTC does not reliably notify when a
+        // session goes away (measured on this machine: closing a browser tab
+        // that was playing leaves its session behind, still reporting
+        // Playing, with no event ever following). 10 s keeps the correction
+        // cheap, and revalidate() returns immediately when the bar is idle.
+        for (;;) {
+            if (WaitForSingleObject(impl->stopEvent, 10000) != WAIT_TIMEOUT) break;
+            if (impl->stopping) break;
+            impl->revalidate();
+        }
         // stop() set `stopping` before signaling, so any handler entering a
         // sessionMutex-guarded section from here on is a no-op.
         if (impl->manager && impl->sessionsToken)
             impl->manager.CurrentSessionChanged(impl->sessionsToken);
+        if (impl->manager && impl->sessionListToken)
+            impl->manager.SessionsChanged(impl->sessionListToken);
         impl->detachSession();
         {
             std::lock_guard<std::recursive_mutex> lock(impl->sessionMutex);

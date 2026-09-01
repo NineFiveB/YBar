@@ -281,11 +281,20 @@ end
 media:subscribe("media_change", function(env)
   local state = env.MEDIA_STATE or ""
   local playing = state == "playing"
-  local show = playing or state == "paused"
   local app = env.MEDIA_APP or ""
   local artist = env.MEDIA_ARTIST or ""
   local album = env.MEDIA_ALBUM or ""
   local title = env.MEDIA_TITLE or ""
+  -- GHOST SESSIONS (measured 2026-08-31, Chrome 1xx): closing a tab that was
+  -- playing leaves Chrome's SMTC session REGISTERED and still reporting
+  -- "playing" — GetCurrentSession() keeps returning it, no GSMTC event ever
+  -- fires again, and the pill stayed up forever. The one thing the ghost does
+  -- drop is its metadata, and metadata is the pill's entire content: an empty
+  -- title/artist/album renders a blank pill regardless. So require some
+  -- metadata to draw. (Timeline staleness is NOT usable here — measured: a
+  -- genuinely playing Chrome session also stops updating LastUpdatedTime.)
+  local has_meta = title ~= "" or artist ~= "" or album ~= ""
+  local show = (playing or state == "paused") and has_meta
 
   -- Pill: unchanged from the pre-popup widget.
   local text = (artist ~= "" and (artist .. " — ") or "") .. title
