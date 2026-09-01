@@ -29,6 +29,9 @@ local settings = require("settings")
 local popup_width = 264
 local inset = 11
 local MAX_NETS = 8
+-- Width of the leading glyph column (signal arc + security badge). Every row
+-- in the flyout indents its text by this, so names form one column.
+local glyph_col = 49
 
 -- ── Bar pill ────────────────────────────────────────────────────────────────
 local wifi = sbar.add("item", "widgets.wifi.padding", {
@@ -84,23 +87,32 @@ local current_name = sbar.add("item", {
   position = popup_pos,
   drawing = false,
   width = popup_width,
+  -- Item align defaults to CENTRE, and the fixed part widths fill the row, so
+  -- any slack recentres the whole block — which is what pushed the connected
+  -- name into the middle instead of the name column (same trap the header
+  -- documents).
+  align = "left",
+  -- Structurally IDENTICAL to a scanned row: glyph column, then the name. The
+  -- name lands in the shared column BY CONSTRUCTION rather than by a padding
+  -- tuned to match it — an icon part's padding_left and a label part's start
+  -- do not measure from the same origin, so matching them by arithmetic came
+  -- out 8pt wrong and only a calibrated magic number would have fixed it.
+  -- It also puts this row's security badge in the same column as every other
+  -- row's, instead of alone at the far right.
   icon = {
+    align = "left",
+    string = "", -- lock / unlock, set on update
+    font = { family = icons.wifi.signal.font, size = 11.5 },
+    color = colors.grey,
+    width = glyph_col,
+    padding_left = inset,
+  },
+  label = {
     align = "left",
     string = "",
     color = colors.white,
     font = { size = 11.5, style = settings.font.style_map["Semibold"] },
-    width = popup_width - 62,
-    padding_left = inset,
-  },
-  -- One right-edge glyph (lock when secured, unlock otherwise). Literal
-  -- Segoe Fluent chars, so the part needs the explicit icon-font family.
-  label = {
-    align = "right",
-    string = "",
-    font = { family = icons.wifi.signal.font, size = 10.5 },
-    color = colors.grey,
-    width = 62,
-    padding_right = inset,
+    width = popup_width - glyph_col - inset,
   },
 })
 
@@ -108,12 +120,16 @@ local current_status = sbar.add("item", {
   position = popup_pos,
   drawing = false,
   width = popup_width,
+  align = "left",
   icon = {
     align = "left",
     string = "•",
     color = colors.green,
     font = { size = 13, style = settings.font.style_map["Bold"] },
-    width = 14,
+    -- The dot occupies the glyph column, so "Connected" starts in the name
+    -- column with the SSID above it and the networks below — it used to sit
+    -- in a third column of its own, aligned with neither.
+    width = glyph_col,
     padding_left = inset,
   },
   label = {
@@ -121,7 +137,7 @@ local current_status = sbar.add("item", {
     string = "Connected",
     color = colors.grey,
     font = { size = 10.5 },
-    width = popup_width - 16 - inset,
+    width = popup_width - glyph_col - inset,
   },
 })
 
@@ -145,7 +161,7 @@ for i = 1, MAX_NETS do
       string = "",
       color = colors.white,
       font = { family = icons.wifi.signal.font, size = 11.5 },
-      width = 49,
+      width = glyph_col,
       align = "left",
       padding_left = inset,
     },
@@ -153,7 +169,7 @@ for i = 1, MAX_NETS do
       string = "",
       color = colors.white,
       font = { size = 11.5 },
-      width = popup_width - 49 - inset,
+      width = popup_width - glyph_col - inset,
       align = "left",
     },
   })
@@ -223,8 +239,10 @@ local function populate_rows()
   local show_current = wifi_power and is_connected and d.ssid and d.ssid ~= ""
   current_name:set({
     drawing = show_current or false,
-    icon = { string = d.ssid or "" },
-    label = { string = right_glyph(d.secured) },
+    -- Badge in the glyph column, name in the name column — the same two slots
+    -- a scanned row uses, so the columns line up without any tuning.
+    icon = { string = right_glyph(d.secured) },
+    label = { string = d.ssid or "" },
   })
   current_status:set({ drawing = (show_current and is_connected) or false })
 
@@ -236,9 +254,16 @@ local function populate_rows()
         row = row + 1
         net_rows[row]:set({
           drawing = true,
-          icon = { string = signal_glyph(net.signal or 0)
-            .. " " .. (net.secured and icons.wifi.signal.lock
-                       or icons.wifi.signal.unlock) },
+          -- Badge FIRST, arc second. Both glyphs share one run, and Segoe
+          -- Fluent's Wifi1..Wifi4 are proportional — the stronger the signal
+          -- the wider the glyph — so with the arc leading, whatever followed
+          -- it inherited that drift: the lock column wandered 5pt across the
+          -- list (measured 100/97/94/90 px at 2x). The badge is the same glyph
+          -- every row, so leading with it gives BOTH columns a fixed left edge
+          -- and only the arc's own ink varies, which is the point of an arc.
+          icon = { string = (net.secured and icons.wifi.signal.lock
+                             or icons.wifi.signal.unlock)
+            .. " " .. signal_glyph(net.signal or 0) },
           label = { string = net.ssid },
         })
       end
