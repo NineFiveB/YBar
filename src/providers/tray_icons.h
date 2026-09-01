@@ -66,12 +66,23 @@ std::string invokeTrayIcon(const std::string& name);
 // only way to reach a background app once the shell taskbar is hidden.
 //
 // Task Manager's "End task" semantics, deliberately: WM_CLOSE to every window
-// the owning processes have, then a terminate for whatever is still alive a
-// few seconds later. WM_CLOSE alone does not work here — a tray app's usual
-// response is to HIDE to the tray, which is precisely the state being escaped
-// — and terminating outright would rob apps that do quit cleanly of the
-// chance to save. The escalation runs on a detached thread so the caller
-// never blocks the UI.
+// the owning processes have, then a terminate five seconds later for whatever
+// is still alive AND no longer showing a window. WM_CLOSE alone does not work
+// here — a tray app's usual response is to HIDE to the tray, precisely the
+// state being escaped — and terminating outright would rob apps that quit
+// cleanly of the chance to save. A process still showing a window after being
+// asked to close is mid-prompt with the user, so it is spared.
+//
+// Targets are confirmed by FULL IMAGE PATH, never by executable basename. The
+// list in trayIcons() may match loosely (a stray row is harmless, and NVIDIA's
+// SYSTEM-owned icon depends on it) but a kill may not: a basename matched the
+// packaged Claude desktop app's registration onto three unrelated Claude Code
+// CLI processes on the author's machine. A process whose path cannot be read
+// is unverifiable and is never terminated.
+//
+// The wait runs on a detached thread, but the call itself is NOT free: it
+// re-enumerates via trayIcons() to resolve the name, which reads the registry
+// and takes a process snapshot.
 //
 // Returns "" once the request is issued (not once the app is gone).
 std::string closeTrayApp(const std::string& name);

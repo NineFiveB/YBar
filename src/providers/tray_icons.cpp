@@ -247,11 +247,53 @@ std::vector<DWORD> processesForImage(const std::wstring& leafLower) {
 BOOL CALLBACK postCloseToOwned(HWND hwnd, LPARAM param) {
     DWORD owner = 0;
     GetWindowThreadProcessId(hwnd, &owner);
-    // Post, never Send: a hung app would otherwise block the bar's UI thread
-    // for the full SendMessage timeout.
+    // Post, never Send: a hung app would otherwise block the caller for the
+    // full SendMessage timeout.
     if (owner == static_cast<DWORD>(param)) PostMessageW(hwnd, WM_CLOSE, 0, 0);
     return TRUE;
 }
+
+struct VisibleWindowSearch {
+    DWORD pid;
+    bool found;
+};
+
+BOOL CALLBACK findVisibleWindow(HWND hwnd, LPARAM param) {
+    auto* search = reinterpret_cast<VisibleWindowSearch*>(param);
+    DWORD owner = 0;
+    GetWindowThreadProcessId(hwnd, &owner);
+    if (owner == search->pid && IsWindowVisible(hwnd)) {
+        search->found = true;
+        return FALSE;
+    }
+    return TRUE;
+}
+
+// A process still showing a window after being asked to close is talking to
+// the user — an unsaved-changes prompt, most likely. One with no visible
+// window took the request and hid to the tray instead, which is the case this
+// verb exists to defeat. Only the latter gets terminated.
+bool hasVisibleWindow(DWORD pid) {
+    VisibleWindowSearch search{pid, false};
+    EnumWindows(findVisibleWindow, reinterpret_cast<LPARAM>(&search));
+    return search.found;
+}
+
+std::wstring imagePathOf(HANDLE process) {
+    wchar_t buffer[MAX_PATH * 2];
+    DWORD size = static_cast<DWORD>(std::size(buffer));
+    if (!QueryFullProcessImageNameW(process, 0, buffer, &size)) return {};
+    return std::wstring(buffer, size);
+}
+
+// A PID plus a handle opened at request time. The handle is what makes the
+// delayed terminate safe: it pins the kernel object, so the PID cannot be
+// recycled onto an unrelated process during the grace period and be killed in
+// its place.
+struct CloseTarget {
+    HANDLE handle;
+    DWORD pid;
+};
 
 std::set<std::wstring> runningExecutables() {
     std::set<std::wstring> names;
@@ -507,24 +549,64 @@ std::string closeTrayApp(const std::string& name) {
     // is not a mistake worth leaving reachable.
     if (leaf == L"explorer.exe") return "[!] refusing to close the Windows shell";
 
-    auto pids = processesForImage(leaf);
-    std::erase(pids, GetCurrentProcessId()); // never close the bar itself
-    if (pids.empty()) return "[!] " + name + " is not running";
-
-    for (const DWORD pid : pids) EnumWindows(postCloseToOwned, static_cast<LPARAM>(pid));
-
-    // Escalate off the UI thread: a tray app's usual answer to WM_CLOSE is to
-    // hide, so waiting for a clean exit and then forcing it is the only thing
-    // that actually removes it. OpenProcess failing is the natural guard on
-    // anything running at a higher integrity level than the bar — those simply
-    // survive rather than needing a blocklist.
-    std::thread([pids] {
-        std::this_thread::sleep_for(std::chrono::seconds(3));
-        for (const DWORD pid : pids) {
-            const HANDLE process = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pid);
-            if (!process) continue;
-            if (WaitForSingleObject(process, 0) == WAIT_TIMEOUT) TerminateProcess(process, 0);
+    // The basename only PRE-FILTERS. Every candidate is then confirmed against
+    // the registration's full path, because a basename is not an identity and
+    // trusting it here was a live, dangerous bug: this machine has a tray
+    // registration for the packaged Claude desktop app under Program Files
+    // that is NOT running, while three Claude Code CLI processes — a different
+    // product, in AppData — are. Basename matching aimed the terminate at
+    // those three. Liveness in trayIcons() may stay loose (a stray row costs
+    // nothing, and NVIDIA's SYSTEM-owned icon needs it); a kill may not.
+    const std::wstring wantedPath = lower(widen(exePath));
+    const DWORD self = GetCurrentProcessId();
+    std::vector<CloseTarget> targets;
+    std::size_t unverifiable = 0;
+    for (const DWORD pid : processesForImage(leaf)) {
+        if (pid == self) continue; // never close the bar itself
+        // Ask for the terminate right up front: a process the bar cannot kill
+        // (anything at a higher integrity level) drops out here, which is what
+        // keeps system-owned icons safe without maintaining a blocklist.
+        const HANDLE process =
+            OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE, FALSE,
+                        pid);
+        if (!process) {
+            ++unverifiable;
+            continue;
+        }
+        const std::wstring actual = lower(imagePathOf(process));
+        // An unreadable path is an unverifiable identity, and an unverified
+        // process must never be terminated. A path that simply differs is a
+        // different program that happens to share an executable name.
+        if (actual.empty()) ++unverifiable;
+        if (actual != wantedPath) {
             CloseHandle(process);
+            continue;
+        }
+        targets.push_back({process, pid});
+    }
+    if (targets.empty()) {
+        // Distinguish the two, because "not running" would be a lie about
+        // Task Manager or NVIDIA's SYSTEM-owned icon: both are running, the
+        // bar just has no right to inspect or end them.
+        if (unverifiable > 0) return "[!] " + name + " runs above the bar's privileges";
+        return "[!] " + name + " is not running";
+    }
+
+    for (const auto& target : targets)
+        EnumWindows(postCloseToOwned, static_cast<LPARAM>(target.pid));
+
+    // Escalate off the caller's thread. A tray app's usual answer to WM_CLOSE
+    // is to hide, so waiting and then forcing is the only thing that removes
+    // it — but a process still showing a window is mid-conversation with the
+    // user (an unsaved-work prompt), and killing that would destroy exactly
+    // what the polite first step exists to protect.
+    std::thread([targets = std::move(targets)]() mutable {
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+        for (auto& target : targets) {
+            if (WaitForSingleObject(target.handle, 0) == WAIT_TIMEOUT &&
+                !hasVisibleWindow(target.pid))
+                TerminateProcess(target.handle, 0);
+            CloseHandle(target.handle);
         }
     }).detach();
     return {};

@@ -184,7 +184,13 @@ for i = 1, MAX_ROWS do
   rows[i]:subscribe("mouse.clicked", function(env)
     local name = cache[i]
     if not name then return end
-    local quoted = '"' .. name:gsub('"', "") .. '"'
+    -- The name comes from a registry tooltip an arbitrary app wrote, and it is
+    -- about to be interpolated into a shell command line. Stripping the quote
+    -- is not enough — &, |, >, ^ and % all mean something to cmd. Refuse the
+    -- row outright rather than build a command out of untrusted text; no real
+    -- tray label contains these, so this only ever fires on something hostile.
+    if name:find('[%c"&|<>%^%%%$`\\]') then return end
+    local quoted = '"' .. name .. '"'
     if env and env.BUTTON == "right" then
       -- Quitting is the whole point of a tray on a bar that hides the
       -- taskbar: with no taskbar there is otherwise no way to reach a
