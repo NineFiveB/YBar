@@ -1555,6 +1555,13 @@ void DaemonState::updatePopups() {
 
 void DaemonState::renderAll() {
     if (!renderer || !fonts) return;
+    // Shaped-line eviction happens HERE, not inside FontCache::shape(). This
+    // is the one point in the frame where no ShapedLine reference is live:
+    // shape() hands out references into its map, clear() is what invalidates
+    // them, and both the layout measure below and emitItem hold two shaped
+    // lines at once. Nothing re-enters the frame either — the message pump is
+    // drained before runFrame(), and renderAll() never pumps.
+    fonts->beginFrame();
     trace("renderAll: begin");
     marqueeOnScreen = false; // recomputed from this frame's scenes
     surfaceFrames.resize(surfaces.size());

@@ -72,7 +72,20 @@ public:
 
     // Shape + measure one line (cached by text+font). Never fails: an
     // unusable font falls back to the system default (Segoe UI Variable).
+    //
+    // LIFETIME: the reference belongs to the cache and stays valid until the
+    // next beginFrame() or clear(). Insertion and rehashing do NOT invalidate
+    // it, so holding several shaped lines live across further shape() calls
+    // inside one frame is safe — which callers rely on, shaping an icon and
+    // then its label while still holding the icon. Holding one ACROSS a frame
+    // boundary is not: copy out the scalars you need instead.
     const ShapedLine& shape(const std::string& text, const ybar::model::FontSpec& font);
+
+    // Frame-boundary eviction. Call ONLY where no reference handed out by
+    // shape() is still live — the top of a frame, before any shaping. The cap
+    // used to live inside shape() itself, where it freed the map out from
+    // under references that shape()'s own callers were still holding.
+    void beginFrame();
 
     void clear(); // font-change invalidation
 

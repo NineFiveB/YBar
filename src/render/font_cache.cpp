@@ -202,9 +202,26 @@ void FontCache::clear() {
     impl_->facesKeepAlive.clear();
 }
 
-const ShapedLine& FontCache::shape(const std::string& text, const ybar::model::FontSpec& font) {
-    if (impl_->lines.size() > 1024) clear(); // wholesale eviction cap
+namespace {
+// The cache has to stay capped — the config mints fresh keys forever: the
+// clock label alone is a new key every minute (720 distinct times over 12 h),
+// and media titles are unbounded. But eviction is only safe at a frame
+// boundary, so the cap is enforced from beginFrame() and never from shape().
+constexpr std::size_t kMaxShapedLines = 1024;
+} // namespace
 
+void FontCache::beginFrame() {
+    if (impl_->lines.size() > kMaxShapedLines) clear();
+}
+
+const ShapedLine& FontCache::shape(const std::string& text, const ybar::model::FontSpec& font) {
+    // NO eviction here. This used to open with `if (lines.size() > 1024)
+    // clear();`, which freed every ShapedLine its own callers were still
+    // holding — they shape an icon and then a label while keeping both live,
+    // so once the cache filled, the second call destroyed the first call's
+    // result and the caller went on to read freed memory. clear() is the only
+    // thing that invalidates (insertion and rehashing do not), so moving the
+    // cap to beginFrame() makes every existing call site correct unchanged.
     const std::string key =
         text + "\x1f" + font.family + "\x1f" + font.style + "\x1f" + std::to_string(font.size);
     if (const auto it = impl_->lines.find(key); it != impl_->lines.end()) return it->second;

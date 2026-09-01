@@ -121,25 +121,38 @@ public:
         if (widthPx == width && heightPx == height) return;
 
         // ResizeBuffers refuses while ANY reference to the back buffer is
-        // outstanding, and releasing our own ComPtr is not enough: draw() binds
-        // the RTV through OMSetRenderTargets and the output-merger holds a
-        // reference of its own. Unbound, every resize returned
+        // outstanding, and rtv.Reset() alone is not enough: D3D11 destroys
+        // objects LAZILY, so the view lives on past its last Release and keeps
+        // the buffer alive. That deferred destruction is what returned
         // DXGI_ERROR_INVALID_CALL — unchecked — leaving the swap chain at its
         // old size while createRtv() below re-viewed the stale back buffer.
+        // Flush() is the call that fixes it: it retires the pending destroy.
+        //
+        // The unbind is belt-and-braces, not the cure. This is a flip-model
+        // swap chain (FLIP_SEQUENTIAL), where Present unbinds the back buffer
+        // from the output merger — which is exactly why render() re-binds it
+        // every frame — and every path that binds reaches Present, so the OM
+        // is already empty here. It stays because it costs nothing and is the
+        // documented precondition if that ever stops holding.
         rtv.Reset();
         ComPtr<ID3D11DeviceContext> context;
         device->GetImmediateContext(&context);
         if (context) {
             context->OMSetRenderTargets(0, nullptr, nullptr);
-            context->Flush(); // retire the reference the binding still defers
+            context->Flush(); // retire the deferred destroy of the old view
         }
 
         const HRESULT hr = swapChain->ResizeBuffers(
             0, static_cast<UINT>(widthPx), static_cast<UINT>(heightPx), DXGI_FORMAT_UNKNOWN, 0);
         if (FAILED(hr)) {
-            // Keep the old width/height so the equality check above does not
-            // swallow a retry at this same size, and still rebuild a view so
-            // the surface keeps drawing rather than going black.
+            // Commit the new size only on success, so the viewport render()
+            // derives from width/height keeps matching the real back buffer.
+            // This does NOT buy a retry: both callers record the size they
+            // asked for whether or not it took (bar_surface.cpp
+            // lastAppliedFrame, popup_surface.cpp widthPx/heightPx), so a
+            // failed resize stands until the next genuine size change.
+            // Rebuild a view regardless — the surface then keeps drawing at
+            // its old size instead of going black.
             std::fprintf(stderr, "[ybar] swap chain resize to %dx%d failed (0x%08lx)\n", widthPx,
                          heightPx, static_cast<unsigned long>(hr));
             createRtv();
