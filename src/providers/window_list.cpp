@@ -181,6 +181,10 @@ BOOL CALLBACK enumProc(HWND hwnd, LPARAM param) {
     if (name.empty()) name = appNameForProcess(processId);
     if (name.empty() && !path.empty()) name = appNameForExecutablePath(path);
     if (name.empty()) return TRUE;
+    // A window whose name still resolves to the UWP host is one whose real
+    // identity we failed to recover — "Application Frame Host" is a shell
+    // implementation detail, never something to offer the user as an app.
+    if (name == "Application Frame Host") return TRUE;
 
     // Group per application. Windows with no readable path (access denied)
     // group by display name instead so they still collapse sensibly.

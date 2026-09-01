@@ -144,6 +144,19 @@ std::string appNameForWindow(void* hwndValue) {
             const std::string hosted = appNameForProcess(search.childProcessId);
             if (!hosted.empty()) return hosted;
         }
+        // Current Windows 11 builds do NOT reparent the app's CoreWindow into
+        // the frame — it stays a top-level window of its own — so the child
+        // search only ever finds same-pid frame furniture and returns
+        // nothing. Without a fallback every UWP app reports as "Application
+        // Frame Host" (seen on the bar). The frame's title is the app's own
+        // name, which is what the shell shows as well.
+        const int length = GetWindowTextLengthW(hwnd);
+        if (length > 0) {
+            std::wstring title(static_cast<std::size_t>(length) + 1, L'\0');
+            const int copied = GetWindowTextW(hwnd, title.data(), length + 1);
+            title.resize(copied > 0 ? static_cast<std::size_t>(copied) : 0);
+            if (!title.empty()) return narrow(title);
+        }
     }
     return appNameForProcess(processId);
 }
