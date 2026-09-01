@@ -115,6 +115,28 @@ layout), `wifi_ssid_prompt` (SSID needs no location grant from Win32 — but see
 §10.4 for the 24H2 caveat), `font_smoothing`. No-op keys accept any value
 without validation (their values are never read).
 
+Windows-specific **added** keys (deliberate divergences; each absent from the
+reference namespace, listed again in §15's divergence roll-up):
+
+- `slider.interactive` (bool, default `on`): `off` makes a slider a
+  **read-only meter** — the press/drag path is skipped entirely, while
+  property sets still apply and rendering is unchanged. Without it, any item
+  carrying `item.slider` gets its percentage **overwritten from the pointer
+  x on every mouse-down** (bar and popup paths both), so a battery-style
+  fill meter showed a fabricated value on click and scrubbed on drag.
+  Serialized in `--query` as `"interactive": on|off`.
+- `image.desaturate` (bool, default `off`): renders a colour image greyscale
+  via a Rec. 709 luma conversion in the shader (§7.3). The glyph pipeline
+  multiplies colour-atlas samples by the instance colour's **alpha only**,
+  discarding its RGB, so without this flag a colour icon cannot be dimmed to
+  grey from Lua at all.
+- `image.y_offset` (float, default 0, positive-up like a text part's):
+  images centre on the em box while text ink sits below that centre, and a
+  theme cannot close the gap with the text's own `y_offset` — moving the
+  text changes the row height, which re-centres the image and chases the
+  gap. The tray rows drop their icon onto the label's optical centre with
+  `-4`.
+
 **Ambiguity rulings** (resolved 2026-08 after the compliance audit found the
 spec's letter and the reference's behavior disagreeing):
 
@@ -177,6 +199,11 @@ sorted keys, colors `0x%08x` lowercase. **Coordinate-space note:** `frame` and
 native convention); the macOS build reports AppKit y-up global points for
 `frame`. Document this — do not convert.
 
+Windows extension targets (both arrays, matched **before** item lookup so
+they reach Lua through the existing query trampoline unchanged): `--query
+windows` returns the running-app list, and `--query tray` the
+notification-area registrations as `{name, hidden, icon}` rows (§10.6).
+
 ### 3.7 Lua API (`LuaRuntime.swift` + prelude + sbar shim)
 
 The whole surface: `ybar.bar/default/set/subscribe/delay/update/query_table/
@@ -190,6 +217,15 @@ event, generation-guarded `exec`/`delay` completions, SENDER=forced →
 and ships **byte-identical**. Bridge invariants preserved: no
 `luaL_check*`/`luaL_error` in trampolines (longjmp/destructor UB), key-copy
 before stringify in table walks, `lua_State` generation counter.
+
+One deliberate Windows **addition** rides the raw bridge: `ybar.tray(name,
+action)` (no macOS counterpart — there is no notification area to act on)
+routes the §10.6 tray verbs through the daemon's own token-dispatch path
+in-process. Shelling `ybar --tray` from a click script instead measured
+35–54 ms of `cmd.exe` plus 41–44 ms of CLI-socket round trip back into the
+daemon the config already runs inside, and forced a shell-metacharacter
+guard on names an app controls via its registry tooltip; the binding
+retires both.
 
 ### 3.8 Animation
 
@@ -211,7 +247,16 @@ image → icon → graph/slider/gauge → label; all quads → all triangles →
 glyphs), pixel snapping (origin and size rounded independently), hard offset
 shadows (no blur — do not "improve"), `background.clip` holes (max 16),
 graph right-to-left on right-side positions, gauge 270° dial with label
-centered inside contributing zero width.
+centered inside contributing zero width. Deliberate graph deviations: the
+reference centers a zero sample's stroke ON the box bottom (half the line
+hangs outside — under a bordered plate it overpaints the border and reads
+as a baseline under the stadium, user-reported); the port clamps line
+centers to [minY+half, maxY−half] and insets the graph box by the plate's
+border width, so stroke and fill stay inside the frame. And a graph item's
+own plate (and its shadow) squares its BOTTOM corners — only the top two
+keep the theme's corner_radius — so the flush baseline meets a 90° frame
+instead of being cut by the bottom rounding (chart-frame look, per the
+maintainer).
 
 ---
 
@@ -345,12 +390,31 @@ HWND  WS_POPUP | (borderless)
   `QueryDisplayConfig` device path (EDID-stable), then rebuild debounced
   500 ms (the sledgehammer, kept). `display=active` = monitor of
   `GetForegroundWindow()`.
-- `fullscreen_show`: prefer komorebi state (monocle/maximized container on
-  that monitor) when the provider is live; else appbar `ABN_FULLSCREENAPP`
-  when registered; else foreground-window-rect == monitor-rect heuristic
-  (`SHQueryUserNotificationState` alone is unreliable for borderless-fullscreen
-  games). Behavior contract unchanged: per-surface elevation to topmost while
-  fullscreen is detected on *that* monitor.
+- `fullscreen_show`: detection ANDs two signals —
+  `SHQueryUserNotificationState` in {`QUNS_BUSY`,
+  `QUNS_RUNNING_D3D_FULL_SCREEN`, `QUNS_PRESENTATION_MODE`} for *whether* a
+  real full-screen app owns the session, and foreground-window-rect ==
+  monitor-rect for *which* monitor. Neither alone is right: the shell state
+  has no per-monitor notion, and geometry alone cannot tell a full-screen app
+  from an ordinary borderless window that merely spans the display — hiding
+  the bar under a "Windowed (Fullscreen)" game and a maximized borderless
+  editor was user-reported. Re-evaluated on the 1 s tick, on
+  `ABN_FULLSCREENAPP`, and on every workspace switch (a switch changes the
+  foreground window). **Policy per monitor**: `fullscreen_show=on` elevates
+  that surface to topmost *over* the fullscreen window (macOS parity);
+  `fullscreen_show=off` (the default) **auto-hides** the surface while
+  fullscreen is detected on its monitor and shows it again otherwise — the
+  Win11-taskbar convention, and the analog of the macOS bar not drawing over a
+  fullscreen Space. Auto-hide ORs with the user's `hidden=` toggle and keeps
+  the appbar reservation (no window reflow when toggling). Switching to a
+  workspace without the fullscreen window restores the bar because its
+  foreground no longer covers the monitor. **Known limitation** (pre-existing
+  in the detector, shared by the elevation path): detection keys off the
+  single *global* foreground window, so a fullscreen app on a monitor you are
+  not focused on is not detected — that monitor's bar stays put until its
+  window is focused. A per-monitor top-window scan would lift this but risks
+  false positives on background borderless-maximized windows, so it is
+  deferred.
 - `hidden`, `shadow` (DWM shadow toggle), `margin/y_offset/height/position`
   math identical (all y-down native — the AppKit y-up conversions are simply
   deleted).
@@ -458,18 +522,29 @@ unchanged); Metal and D3D share NDC conventions so `to_clip` is untouched.
 The GPU instance ABI (QuadInstance 112 B / GlyphInstance 64 B / ShapeVertex
 32 B / Hole 32 B, flag bits, binding slots t0/b1/t0+t1 textures) is preserved
 with static asserts. `cornerExponent` stays transmitted-but-unused, as on
-macOS. The painted glass rim (`flagGlass`) ships with its exact constants;
-`nativeGlassBackdrops` is always false on Windows.
+macOS. One Windows-added flag bit extends the ABI: `kGlyphFlagDesaturate`
+(`1u << 1`; `kGlyphFlagGrey` in the HLSL) applies a Rec. 709 luma conversion
+to colour-atlas samples — valid directly on premultiplied colour — backing
+`image.desaturate` (§3.3). The painted glass rim (`flagGlass`) ships with
+its exact constants; `nativeGlassBackdrops` is always false on Windows.
 
 ### 7.4 Text (DirectWrite)
 
 Model on Windows Terminal AtlasEngine + `lhecker/dwrite-hlsl`:
 
-- **Shaping**: `IDWriteTextAnalyzer` (`GetGlyphs/GetGlyphPlacements`) with
-  system font fallback via `IDWriteFontFallback::MapCharacters` — each mapped
-  range is one run with its own `IDWriteFontFace`, mirroring the per-run
-  CTLine walk. A custom `IDWriteFontFallbackBuilder` chain routes the icon
-  font's PUA range first.
+- **Shaping**: `IDWriteTextLayout` + a custom `IDWriteTextRenderer` run
+  collector (`font_cache.cpp`) — the layout engine owns shaping AND
+  per-character system font fallback internally, so each fallback range
+  arrives as its own run with its own `IDWriteFontFace`, mirroring the
+  per-run CTLine walk. This replaced the originally planned explicit
+  `IDWriteTextAnalyzer` + `MapCharacters` + fallback-builder stack; icon
+  routing is not a fallback chain either — `sf:`/`sf.` strings resolve to
+  the icon font family before shaping (7.5). **Symbol-font caveat (seen
+  live 2026-08-28)**: DirectWrite never falls back *out of* a symbol font,
+  and Segoe Fluent Icons is one — a part whose `font.family` is the icon
+  font shapes regular text to the icon font's `.notdef` boxes. Theme rule:
+  PUA glyphs and text never share a part
+  (`examples/sketchybar-glass/PORTING-WIN.md`).
 - **Raster into the same atlas**: mask page 2048² R8 via
   `IDWriteGlyphRunAnalysis::CreateAlphaTexture` with
   **`DWRITE_TEXT_ANTIALIAS_MODE_GRAYSCALE`** (forced — ClearType 3×1 would
@@ -596,14 +671,18 @@ Windows `usr\bin\sh.exe` located via the `GitForWindows` registry
 an Explorer-launched daemon otherwise fell back to PowerShell, where every
 sh-quoted theme command breaks; Git's sh does NOT self-prepend `/usr/bin`
 for `sh -c`, so the shell's directory joins the exe dir in the child PATH
-prepend — that is where tr/awk/coreutils live) → bundled
-`busybox64.exe sh` → `powershell.exe -NoProfile -Command` (last resort, with a
-one-time stderr warning that POSIX configs will break). Always
-`<shell> -c <script>` semantics, cwd = config dir, 60 s kill
-(`TerminateProcess` — note: child *trees* aren't killed on macOS either; a Job
-Object here would actually fix that latent bug, do it), fire-and-forget, PATH
-prepended with the `ybar.exe` directory and the resolved shell's directory
-(`;` separator). The exec pipe is
+prepend — that is where tr/awk/coreutils live) →
+`powershell.exe -NoProfile -Command` (last resort). `%YBAR_SHELL%` is
+classified by lowercased **basename** (not the whole path, so a POSIX shell
+nested under a `…\cmder\…` tree isn't mistaken for cmd): `powershell`/`pwsh`
+→ PowerShell, `cmd`/`cmd.exe` → `cmd /c`, anything else → POSIX `sh -c`; the
+value is read with `_wgetenv` so non-ASCII shell paths survive. Dispatch is
+`sh -c <script>` / `cmd /c <script>` / `powershell -NoProfile -Command
+<script>` by kind, cwd = config dir, 60 s watchdog that closes a
+**`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`** Job Object (kills the whole child
+*tree* — the latent "children of the shell survive" gap macOS shares is
+fixed here), fire-and-forget, PATH prepended with the `ybar.exe` directory
+and the resolved shell's directory (`;` separator). The exec pipe is
 drained concurrently with the child (same >64 KB deadlock exists with
 anonymous pipes). Config scripts: no chmod (no exec bit), dispatch by
 extension — `.lua`/`.jsonc` in-process, anything else through the resolved
@@ -615,10 +694,61 @@ document that these two escape the shell decision.
 `--add alias` and `ybar.add("alias", …)` return
 `[!] alias items are not supported on Windows`; `alias.*` property sets on
 nonexistent aliases keep the standard error; `--query` never reports
-`type=alias`. Rationale: menu-bar extras don't exist; tray icons are toolbar
-buttons inside Explorer with no per-icon capture API. A future tray widget
-(UIA over `TrayNotifyWnd` + `Windows.Graphics.Capture` crop) may revive the
-grammar — explicitly out of scope v1.
+`type=alias`. Rationale: menu-bar extras don't exist, and the notification
+area exposes no per-icon capture API.
+
+A tray **popup widget** shipped instead (`src/providers/tray_icons.h`;
+theme `items/widgets/apps.lua`): rows carry the owning app's registration
+name and its **executable's** icon (a cached PNG where Explorer kept one,
+else `exe.<path>` through §7.5) — resolved metadata, not captured tray
+pixels, so it does not revive the `alias` grammar. Left-click opens or
+restores the app; right-click quits it behind an in-row confirm.
+Two claims in this section's original rationale were measured false on
+26200.9168 and are recorded so they are not re-derived:
+
+- Tray icons are **not** toolbar buttons. The `TrayNotifyWnd` > `SysPager` >
+  `ToolbarWindow32` + `TB_GETBUTTON`/`TRAYDATA` technique is dead on 22H2
+  Moment 2+: `TrayNotifyWnd` is an empty leaf and no `ToolbarWindow32`
+  exists anywhere in the session.
+- UIA is **not** a sufficient source. It sees only the icons promoted onto
+  the taskbar (1 of 11 here), because the overflow flyout's host window is
+  created on demand and destroyed on dismiss; and even with that window
+  forced open it reported an empty `Name` for 3 of 10 overflow icons.
+
+The list therefore comes from `HKCU\Control Panel\NotifyIconSettings`
+filtered by process liveness — a **two-pass** enumeration (basename
+candidates first; handles, icon and version metadata only for survivors),
+because opening a handle on every process from the UI thread measured 50 ms
+warm / 225 ms cold. Liveness matches on executable **basename** (NVIDIA's
+icon is owned by a SYSTEM `NVDisplay.Container.exe` whose full path a normal
+process cannot read; a stray row beats a missing one). Explorer's own icons
+are omitted — they all report `explorer.exe`/"Windows Explorer" and the bar
+already carries those functions as first-class pills.
+
+The verb surface: `--query tray` / `--query windows` (§3.6), `--tray <name>
+invoke|close`, and the in-process `ybar.tray(name, action)` (§3.7).
+`invoke` tries, in order: (1) UIA `InvokePattern` — the real tray callback,
+prefix-matched because UIA labels carry status text the registry name lacks;
+it only reaches promoted icons or an already-open overflow flyout; (2)
+restoring a window of a **full-image-path-verified** PID — candidates
+ranked minimised first, else visible, and **never a merely-hidden window**:
+the first titled non-owned window is often an internal one the app hid on
+purpose (OneDrive's "GDI+ Window", SecurityHealthSystray, Radeon Software),
+so an app with nothing minimised or visible falls through to (3)
+`ShellExecute` on the owner, letting its own single-instance handling decide
+what to surface. `close` is Task Manager "End task" semantics: `WM_CLOSE` to
+every window the owning processes have, then a terminate five seconds later
+for whatever is still alive **and** no longer showing a window (still
+showing one = mid-prompt with the user, spared). Kill targets are confirmed
+by **full image path**, never basename — a basename is not an identity: a
+dormant registration for the packaged Claude desktop app matched three
+unrelated Claude Code CLI processes on the author's machine. A process
+whose path cannot be read is never terminated, `explorer.exe` is refused
+outright, and terminate rights are requested up front so anything at higher
+integrity drops out without a blocklist. The theme reconciles the row list
+at 1.5/4/7 s after a close — spanning the `WM_CLOSE` reply and the
+escalation — **not** gated on the popup still being open
+(`mouse.exited.global` hides it the moment the pointer leaves).
 
 ---
 
@@ -833,8 +963,10 @@ the README's third-party section.)
 ## 13. Packaging & distribution
 
 - **winget manifest + scoop bucket** (komorebi precedent for a CLI+daemon
-  hybrid); chocolatey on demand. Prebuilt zip — SmartScreen warns but no
-  Gatekeeper-style forcing function; `signtool` signing optional later.
+  hybrid); chocolatey on demand. Prebuilt zip, Authenticode-signed in CI
+  via Azure Trusted Signing (§15 punch-list item 2) — Smart App Control
+  makes that load-bearing rather than a nicety, and SmartScreen still
+  warns until the certificate accrues reputation.
 - Static CRT (`/MT`) → single `ybar.exe` + `shaders/` + `themes/` payload.
   No TCC/codesign/bundle apparatus — that entire macOS surface evaporates.
 - Identity: `AppUserModelID = "YBar.YBar"` (taskbar/notification identity;
@@ -925,8 +1057,9 @@ workspace pill and the CPU gauge. An in-tree **YTile provider** extension
 mirrors the komorebi update flow (fires `komorebi_workspace_change` for
 config compatibility); its wire contract is `docs/YTILE-IPC.md` in the
 sibling YTile repo (see the YTile parity paragraph below). **Popups + tooltips**
-(§3.9): vertical/horizontal/wrap layouts, per-host panels, WH_MOUSE_LL
-outside-click auto-close, press-on-bar-closes-others, 600 ms tooltip dwell —
+(layouts §3.9; panel lifecycle + ordering §6): vertical/horizontal/wrap
+layouts, per-host panels, WH_MOUSE_LL outside-click auto-close,
+press-on-bar-closes-others, 600 ms tooltip dwell —
 live-verified (panel screenshot, auto-close state flip, tooltip window
 enumeration).
 
@@ -1081,11 +1214,15 @@ Divergences are cataloged in `examples/sketchybar-glass/PORTING-WIN.md`.
    showed the bar re-rendering at exactly 40 DIP × scale (80 → 70 → 80
    physical px, pixel-sampled) with full-width layout, crisp glyphs, and an
    empty stderr across both transitions.
-2. Signing — the binary is unsigned: SmartScreen warns on first run, and
-   Smart App Control (enforcing on the reference machine since 2026-08-28)
-   blocks fresh unsigned builds outright, so a stock Win11 install cannot
-   run a CI zip at all. Azure Trusted Signing or an EV cert is the fix —
-   load-bearing now, not "optional later" (§13).
+2. ~~Signing~~ — DONE: Azure Trusted Signing, from CI, as a managed
+   identity over OIDC (no certificate file, no stored secret). `ci.yml`
+   signs every dev artifact — SAC blocks fresh unsigned binaries often
+   enough that live-verifying a dev build became a coin flip — and
+   `release.yml` signs `dist/ybar.exe` **before** packaging, so the
+   zip hash the winget and scoop manifests pin covers the signed bits.
+   Verified on the running build: `Get-AuthenticodeSignature` reports
+   `Valid`. Both paths skip while the `AZURE_CLIENT_ID` repo variable is
+   empty, so forks still build; the release body then says so.
 3. Cutting the first `win-v0.1.0` tag (release workflow + manifests are
    ready and validated; the tag is the maintainer's call).
 4. ~~Glass-theme polish~~ — RESOLVED as a deliberate restyle, not a port
@@ -1190,9 +1327,75 @@ CI binaries outright, so on-screen verification waits on the signing
 decision (item 2 below), which SAC upgrades from SmartScreen-nicety to
 load-bearing for stock Windows 11 installs.
 
-Deliberate divergences (never 1:1): alias items (§10.6), per-item glass
-pills (§7.6), distributed-notification bindings (§9), THERMAL_STATE
-(§10), single topmost z-band (§16).
+**Signing close-out (2026-09-01)**: the SAC block above is resolved, and
+the on-screen verification it was holding up went ahead on 2026-08-28 (the
+reworked bluetooth and wifi flyouts, which caught the symbol-font .notdef
+bug now written up in §7.4). Signing itself landed as Azure Trusted
+Signing rather than the OV certificate first chosen: since the 2023-06
+CA/B baseline an OV key must live on hardware, which would have meant
+signing manually on the maintainer's machine *after* each release and
+re-uploading the asset — hosted CI can never hold that key. Trusted
+Signing has no key to hold: the runner authenticates as a managed identity
+over OIDC and the service signs. Both workflows sign; the release does it
+before packaging so the published hash is the signed one. The signature
+reads `Valid` on the deployed build.
+
+**Post-signing feature pass (2026-08-29 → 09-01)**, all CI-green (the
+Catch2 suite now counts 188 test cases) and live-verified on hardware:
+
+- **Fullscreen auto-hide** (§6): the bar showing over fullscreen apps traced
+  to the theme's `fullscreen_show=true`; the policy was reworked so `off`
+  (now the theme default) auto-hides the monitor's bar. Adversarial review
+  of the feature caught the `WM_DISPLAYCHANGE` rebuild recreating bars
+  *shown* without moving the foreground — a ~1 s flash over fullscreen —
+  fixed by re-evaluating at the end of `rebuildSurfaces()`. A follow-up
+  ANDed `SHQueryUserNotificationState` into the detector after geometry
+  alone hid the bar under a merely-maximized borderless window
+  (user-reported).
+- **Graph baselines** (§3.9): zero-sample stroke clamped inside the plate,
+  reference `stepX = width/(count−1)` spreading, border-inset graph box,
+  and squared bottom corners on a graph item's plate and shadow.
+- **`slider.interactive` + battery meter** (§3.3): the battery pill became
+  a slider used as a continuous fill meter, which surfaced the
+  press-path overwrite recorded in §3.3 (real 63% read back 95% on click);
+  found by code review of the widget work, regression-tested.
+- **Tray widget** (§10.6): rebuilt from a UIA walk to the registry
+  registration list, grew real row icons, `invoke`/`close` verbs with the
+  candidate ranking and full-image-path kill confirmation recorded there,
+  and the in-process `ybar.tray` binding (§3.7).
+- **`image.desaturate` / `image.y_offset`** (§3.3): the closing tray row
+  greys its colour icon; row icons sit on the label's optical centre.
+- **Wifi rows** (theme): every row shares two columns. Segoe Fluent's
+  `Wifi1..Wifi4` are *proportional* — leading with the variable-width arc
+  shifted everything after it in the run (badges wandered 100/97/94/90 px),
+  so rows lead with the fixed-width glyph. An icon part's `padding_left`
+  and a label part's start do not share an origin — a row's *structure* is
+  matched to the reference row instead of tuning an indent.
+- **Three defects found live, none feature-related**: `FontCache::shape()`
+  could `clear()` the cache while callers held references into it — every
+  call site shapes an icon then a label and holds both — so the cap moved
+  to a new `beginFrame()` at the top of `renderAll()`, the one point where
+  no shaped reference is live. A resolution change could silently leave a
+  healthy daemon with **zero bar windows** for the rest of the session
+  (both `rebuildSurfaces()` failure paths were silent `continue`s, and the
+  500 ms debounce can land while the display stack is still settling) —
+  now logged and retried from the 1 s tick with 1→60 s backoff, and
+  `resize()` unbinds the render target before `ResizeBuffers` and checks
+  the HRESULT. And the monitor clamp pinned an edge-adjacent popup flush
+  against the bezel — the clamp now stops the theme's 7 pt short, left
+  clamp applied after right so an over-wide popup overflows rightwards
+  rather than off-screen.
+- Theme pass: near-black strip, darker pills, CPU as a fill meter, no
+  front-app label, equalised pill gaps; media marquee duration scales with
+  `utf8.len` for a constant ~45 pt/s reading pace (the fixed 100-frame
+  default raced long titles).
+
+Deliberate divergences (never 1:1): alias items but a tray widget + verbs +
+`ybar.tray` instead (§10.6, §3.7), the added `slider.interactive` /
+`image.desaturate` / `image.y_offset` keys (§3.3) with the desaturate
+shader flag behind them (§7.3), graph baseline clamping and squared plate
+bottoms (§3.9), per-item glass pills (§7.6), distributed-notification
+bindings (§9), THERMAL_STATE (§10), single topmost z-band (§16).
 
 ---
 
