@@ -21,9 +21,32 @@ git worktree add ..\ybar-win windows
 
 ## Install
 
-Download `ybar-win.zip` from the latest CI run and unpack it anywhere. The
-payload is self-contained — a statically linked `ybar.exe`, the shader it
-compiles at runtime, the shipped themes, and an app-local `d3dcompiler_47.dll`:
+One line, no admin rights (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/NineFiveB/YBar/windows/scripts/install.ps1 | iex
+```
+
+It downloads the latest signed `win-v*` release into
+`%LOCALAPPDATA%\Programs\ybar`, verifies the SHA256 the release publishes
+plus the Authenticode signature, and puts the directory on your `PATH`.
+Options via env vars: `$env:YBAR_START=1` (launch when done),
+`$env:YBAR_AUTOSTART=1` (run at login), `$env:YBAR_VERSION=0.1.0` (pin),
+`$env:YBAR_UNINSTALL=1` (remove; same one-liner).
+
+Or with [Scoop](https://scoop.sh):
+
+```powershell
+scoop install https://raw.githubusercontent.com/NineFiveB/YBar/windows/packaging/scoop/ybar-win.json
+```
+
+The shim lands on your `PATH` as `ybar`, and `scoop update ybar-win` follows
+new releases. A winget manifest is staged under `packaging/` for submission.
+
+Or manually: download `ybar-win-<version>-x64.zip` from the latest
+[`win-v*` release](../../releases) and unpack it anywhere. The payload is
+self-contained — a statically linked `ybar.exe`, the shader it compiles at
+runtime, the shipped themes, and an app-local `d3dcompiler_47.dll`:
 
 ```
 ybar.exe
@@ -32,7 +55,8 @@ examples\<theme>\ybarrc.jsonc
 d3dcompiler_47.dll
 ```
 
-Put the folder on your `PATH` so config scripts can call `ybar` back. Then:
+For a manual install, put the folder on your `PATH` so config scripts can
+call `ybar` back (Scoop's shim already covers this). Then:
 
 ```powershell
 ybar autostart enable    # HKCU Run entry; shows up in Task Manager > Startup apps
