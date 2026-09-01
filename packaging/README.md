@@ -11,9 +11,10 @@ git tag win-v0.1.0
 git push origin win-v0.1.0
 ```
 
-`.github/workflows/release.yml` builds, runs the tests, packages
-`ybar-win-<version>-x64.zip`, publishes it, and prints the SHA256 in the
-release body.
+`.github/workflows/release.yml` builds, runs the tests, signs `ybar.exe`,
+packages `ybar-win-<version>-x64.zip`, publishes it, and prints the SHA256 in
+the release body. Signing happens before packaging, so that hash covers the
+signed bits — the release body also states whether the build came out signed.
 
 Then update the manifests below with that version and hash. The two
 placeholder hashes (winget installer, scoop) are all-zero on purpose so a
@@ -54,6 +55,22 @@ which `scoop update` handles via `autoupdate`.
 
 ## Signing
 
-The binary is unsigned, so SmartScreen warns on first run. Signing is optional
-future work: a code-signing certificate plus a `signtool` step in the release
-workflow before packaging. Neither package manager requires it.
+Azure Trusted Signing, from CI, as a managed identity over OIDC — no
+certificate file and no stored secret. `ci.yml` signs dev artifacts and
+`release.yml` signs the release payload; both read the `AZURE_CLIENT_ID`,
+`AZURE_TENANT_ID` and `AZURE_SUBSCRIPTION_ID` repo variables and skip
+signing entirely while the first is empty, so forks still build.
+
+This stopped being optional when Smart App Control (enforcing on stock
+Windows 11) began blocking fresh unsigned builds outright rather than
+merely warning about them. Enforcement is reputation-dependent, not a
+hard unknown-hash wall — of two fresh unsigned CI builds on the reference
+machine, one was blocked and one ran — which makes it worse to ship
+against, not better: it fails for some users and not others. SmartScreen
+additionally warns until the certificate accrues reputation. Neither package manager
+requires a signature; winget and scoop pin the zip hash either way.
+
+The alternative, for the record: a traditional OV certificate. Since the
+2023-06 CA/B baseline its key must live on hardware, so signing could only
+happen on the maintainer's machine, after the release — which is why the
+hosted-CI route won.

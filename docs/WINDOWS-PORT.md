@@ -889,8 +889,10 @@ the README's third-party section.)
 ## 13. Packaging & distribution
 
 - **winget manifest + scoop bucket** (komorebi precedent for a CLI+daemon
-  hybrid); chocolatey on demand. Prebuilt zip — SmartScreen warns but no
-  Gatekeeper-style forcing function; `signtool` signing optional later.
+  hybrid); chocolatey on demand. Prebuilt zip, Authenticode-signed in CI
+  via Azure Trusted Signing (§15 punch-list item 2) — Smart App Control
+  makes that load-bearing rather than a nicety, and SmartScreen still
+  warns until the certificate accrues reputation.
 - Static CRT (`/MT`) → single `ybar.exe` + `shaders/` + `themes/` payload.
   No TCC/codesign/bundle apparatus — that entire macOS surface evaporates.
 - Identity: `AppUserModelID = "YBar.YBar"` (taskbar/notification identity;
@@ -1138,11 +1140,15 @@ Divergences are cataloged in `examples/sketchybar-glass/PORTING-WIN.md`.
    showed the bar re-rendering at exactly 40 DIP × scale (80 → 70 → 80
    physical px, pixel-sampled) with full-width layout, crisp glyphs, and an
    empty stderr across both transitions.
-2. Signing — the binary is unsigned: SmartScreen warns on first run, and
-   Smart App Control (enforcing on the reference machine since 2026-08-28)
-   blocks fresh unsigned builds outright, so a stock Win11 install cannot
-   run a CI zip at all. Azure Trusted Signing or an EV cert is the fix —
-   load-bearing now, not "optional later" (§13).
+2. ~~Signing~~ — DONE: Azure Trusted Signing, from CI, as a managed
+   identity over OIDC (no certificate file, no stored secret). `ci.yml`
+   signs every dev artifact — SAC blocks fresh unsigned binaries often
+   enough that live-verifying a dev build became a coin flip — and
+   `release.yml` signs `dist/ybar.exe` **before** packaging, so the
+   zip hash the winget and scoop manifests pin covers the signed bits.
+   Verified on the running build: `Get-AuthenticodeSignature` reports
+   `Valid`. Both paths skip while the `AZURE_CLIENT_ID` repo variable is
+   empty, so forks still build; the release body then says so.
 3. Cutting the first `win-v0.1.0` tag (release workflow + manifests are
    ready and validated; the tag is the maintainer's call).
 4. ~~Glass-theme polish~~ — RESOLVED as a deliberate restyle, not a port
@@ -1246,6 +1252,19 @@ pass predates the evaluation→enforce flip) and it refuses fresh unsigned
 CI binaries outright, so on-screen verification waits on the signing
 decision (item 2 below), which SAC upgrades from SmartScreen-nicety to
 load-bearing for stock Windows 11 installs.
+
+**Signing close-out (2026-09-01)**: the SAC block above is resolved, and
+the on-screen verification it was holding up went ahead on 2026-08-28 (the
+reworked bluetooth and wifi flyouts, which caught the symbol-font .notdef
+bug now written up in §7.4). Signing itself landed as Azure Trusted
+Signing rather than the OV certificate first chosen: since the 2023-06
+CA/B baseline an OV key must live on hardware, which would have meant
+signing manually on the maintainer's machine *after* each release and
+re-uploading the asset — hosted CI can never hold that key. Trusted
+Signing has no key to hold: the runner authenticates as a managed identity
+over OIDC and the service signs. Both workflows sign; the release does it
+before packaging so the published hash is the signed one. The signature
+reads `Valid` on the deployed build.
 
 Deliberate divergences (never 1:1): alias items (§10.6), per-item glass
 pills (§7.6), distributed-notification bindings (§9), THERMAL_STATE

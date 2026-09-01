@@ -82,10 +82,11 @@ jobs:
 
       # --- Code signing (Azure Trusted Signing) -----------------------------
       # CI artifacts are signed, not just release assets: Smart App Control is
-      # enforcing on stock Windows 11 and refuses unsigned binaries outright
-      # (measured — "An Application Control policy has blocked this file",
-      # CodeIntegrity 3077), so an unsigned dev build cannot be run on the
-      # machine it was built for. OIDC login as a managed identity, no stored
+      # enforcing on stock Windows 11 and blocks unsigned binaries (measured —
+      # "An Application Control policy has blocked this file", CodeIntegrity
+      # 3077). Enforcement is reputation-dependent rather than a hard
+      # unknown-hash wall (a later unsigned build ran fine), which makes
+      # live-verifying an unsigned dev build a coin flip. OIDC login as a managed identity, no stored
       # secrets. Skipped while AZURE_CLIENT_ID is empty, so forks and PRs
       # still build and just ship unsigned.
       - name: Azure login (OIDC)

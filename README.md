@@ -39,7 +39,8 @@ ybar autostart enable    # HKCU Run entry; shows up in Task Manager > Startup ap
 ybar                     # start the daemon
 ```
 
-SmartScreen will warn on first run — the binary is unsigned.
+Release binaries are Authenticode-signed (Azure Trusted Signing). SmartScreen
+may still warn until the certificate accrues reputation.
 
 ## Quick start
 

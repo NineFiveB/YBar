@@ -15,7 +15,15 @@ jobs:
   release:
     runs-on: windows-latest
     permissions:
+      # id-token: the OIDC token for the Azure signing login (no stored
+      # secrets). contents: write publishes the release.
+      id-token: write
       contents: write
+    env:
+      # Empty on forks and until the repo variables are configured; the
+      # signing steps below are skipped while it is empty, so a fork can
+      # still cut a build and the release body says it is unsigned.
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
     steps:
       - uses: actions/checkout@v4
 
@@ -58,6 +66,51 @@ jobs:
           $dll = Join-Path $sdk.FullName "x64/d3dcompiler_47.dll"
           if (Test-Path $dll) { Copy-Item $dll dist/ }
 
+      # --- Code signing (Azure Trusted Signing) -----------------------------
+      # Signed BEFORE packaging: the zip hash is what the winget and scoop
+      # manifests pin, so it has to cover the signed bits. Same OIDC managed
+      # identity as ci.yml, no stored secrets. Smart App Control (enforcing on
+      # stock Windows 11) refuses fresh unsigned binaries outright, so for the
+      # asset users actually download this is load-bearing, not cosmetic.
+      - name: Azure login (OIDC)
+        if: env.AZURE_CLIENT_ID != ''
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign ybar.exe
+        if: env.AZURE_CLIENT_ID != ''
+        uses: azure/trusted-signing-action@v0
+        with:
+          endpoint: https://eus.codesigning.azure.net/
+          trusted-signing-account-name: aegiosot
+          certificate-profile-name: release-signing
+          files-folder: ${{ github.workspace }}\dist
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      # Fails the release if signing was configured but did not take, and
+      # otherwise states in the release body which kind of build this is.
+      - name: Check signature
+        id: sign
+        run: |
+          $sig = Get-AuthenticodeSignature dist/ybar.exe
+          if ($env:AZURE_CLIENT_ID -and $sig.Status -ne 'Valid') {
+            throw "signature status is $($sig.Status)"
+          }
+          $note = if ($sig.Status -eq 'Valid') {
+            "Authenticode-signed: $($sig.SignerCertificate.Subject)"
+          } else {
+            'This build is **unsigned**: SmartScreen warns and Smart App Control may block it on first run.'
+          }
+          echo "note=$note" >> $env:GITHUB_OUTPUT
+          Write-Host $note
+      # ----------------------------------------------------------------------
+
       - name: Package
         id: package
         run: |
@@ -81,6 +134,7 @@ jobs:
             `SHA256` `${{ steps.package.outputs.sha256 }}`
 
             Unpack anywhere, add the folder to `PATH`, then `ybar autostart enable`.
-            The binary is unsigned, so SmartScreen warns on first run.
+
+            ${{ steps.sign.outputs.note }}
 
             Package manifests to update with this hash live in `packaging/`.
