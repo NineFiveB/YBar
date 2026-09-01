@@ -43,6 +43,7 @@
 #include "providers/komorebi.h"
 #include "providers/media.h"
 #include "providers/network.h"
+#include "providers/tray_icons.h"
 #include "providers/window_list.h"
 #include "providers/ytile.h"
 #include "render/font_cache.h"
@@ -1944,6 +1945,14 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     };
     hooks.windowAction = [](long long hwnd, const std::string& action) {
         return ybar::providers::windowAction(hwnd, action);
+    };
+    // Notification-area icons (spec 10.6). Also inline: a UIA pass measures
+    // ~15-20 ms, well under the IPC round trip that carries it.
+    hooks.trayIcons = [] {
+        return ybar::providers::serializeTrayIcons(ybar::providers::trayIcons());
+    };
+    hooks.trayInvoke = [](const std::string& name) {
+        return ybar::providers::invokeTrayIcon(name);
     };
     state.handler = std::make_unique<ybar::ipc::CommandHandler>(state.store, state.settings,
                                                                 state.bus, hooks,

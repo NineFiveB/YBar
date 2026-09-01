@@ -231,3 +231,28 @@ TEST_CASE("query windows returns the running-app list from the hook") {
     CommandHandler handler{store, settings, bus, hooks};
     CHECK(handler.handle({"--query", "windows"}) == "[{\"name\":\"Warp\"}]");
 }
+
+TEST_CASE("tray verb validates its arguments and reaches the hook") {
+    Fixture f;
+    CHECK(f.run({"--tray"}) == "[!] usage: --tray <name> invoke");
+    CHECK(f.run({"--tray", "OneDrive"}) == "[!] usage: --tray <name> invoke");
+    CHECK(f.run({"--tray", "OneDrive", "poke"}) == "[!] usage: --tray <name> invoke");
+    CHECK(f.run({"--tray", "OneDrive", "invoke"}) == "[!] tray actions are not available");
+    // Unwired query yields an empty list, never an item lookup.
+    CHECK(f.run({"--query", "tray"}) == "[]");
+
+    std::string seen;
+    ItemStore store;
+    BarSettings settings;
+    ybar::events::EventBus bus;
+    DaemonHooks hooks;
+    hooks.trayInvoke = [&](const std::string& name) {
+        seen = name;
+        return std::string{};
+    };
+    hooks.trayIcons = [] { return std::string("[{\"name\":\"NVIDIA Settings\"}]"); };
+    CommandHandler handler{store, settings, bus, hooks};
+    CHECK(handler.handle({"--tray", "NVIDIA Settings", "invoke"}).empty());
+    CHECK(seen == "NVIDIA Settings");
+    CHECK(handler.handle({"--query", "tray"}) == "[{\"name\":\"NVIDIA Settings\"}]");
+}

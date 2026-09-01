@@ -50,6 +50,10 @@ struct DaemonHooks {
     // trip that carries it.
     std::function<std::string()> runningApps;
     std::function<std::string(long long, const std::string&)> windowAction;
+    // `--query tray` lists the notification-area icons; `--tray <name> invoke`
+    // activates one through UI Automation (spec 10.6).
+    std::function<std::string()> trayIcons;
+    std::function<std::string(const std::string&)> trayInvoke;
 };
 
 class CommandHandler {

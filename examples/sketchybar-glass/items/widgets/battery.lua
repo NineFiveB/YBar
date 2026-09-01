@@ -166,6 +166,11 @@ local history = sbar.add("graph", "widgets.battery.history", history_buckets, {
   label = { drawing = false },
   padding_left = inset,
   padding_right = inset,
+  -- Lift the plot off the separator below it. The graph draws its own line
+  -- along the bottom of the box for zero samples, in a near-white stroke;
+  -- without this it lands on top of the dim separator and the two read as
+  -- one thick line.
+  y_offset = 8,
 })
 
 local function push_history_sample(charge)

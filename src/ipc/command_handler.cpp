@@ -323,6 +323,8 @@ std::string CommandHandler::handleBatch(const Batch& batch,
         // trampoline (which JSON-parses the reply into a table) unchanged.
         if (target == "windows")
             return hooks_.runningApps ? hooks_.runningApps() : std::string("[]");
+        if (target == "tray")
+            return hooks_.trayIcons ? hooks_.trayIcons() : std::string("[]");
         auto* item = store_.find(target);
         if (!item) return "[!] no item named " + target;
         return ybar::model::serializeItem(
@@ -413,6 +415,13 @@ std::string CommandHandler::handleBatch(const Batch& batch,
         if (!end || *end != '\0' || hwnd == 0) return "[!] invalid hwnd: " + args[0];
         if (!hooks_.windowAction) return "[!] window actions are not available";
         return hooks_.windowAction(hwnd, args[1]);
+    }
+
+    if (batch.domain == "tray") { // ybar-win extension (spec 10.6)
+        if (args.size() != 2 || args[1] != "invoke")
+            return "[!] usage: --tray <name> invoke";
+        if (!hooks_.trayInvoke) return "[!] tray actions are not available";
+        return hooks_.trayInvoke(args[0]);
     }
 
     if (batch.domain == "exit") {

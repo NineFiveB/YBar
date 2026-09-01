@@ -2,31 +2,31 @@ local colors = require("colors")
 local icons = require("icons")
 local settings = require("settings")
 
--- WINDOWS PORT, new widget: a running-apps list, because a bar that hides the
--- shell taskbar otherwise leaves no way to see or close what is running.
+-- WINDOWS PORT, new widget: the notification area (system tray), because a bar
+-- that hides the shell taskbar otherwise leaves no way to reach the icons that
+-- live there — NVIDIA Settings, Radeon Software, OneDrive, antivirus.
 --
--- This is NOT the tray-icon mirror spec 10.6 rules out (Explorer's tray
--- buttons still have no per-icon capture API). It is the alt-tab list:
--- `ybar --query windows` runs the engine's top-level window enumeration
--- (src/providers/window_list.cpp) and returns one entry per application,
--- already grouped, with the exe path for the icon. The query is synchronous
--- and in-process, so the popup opens from live data with no subprocess.
+-- These are NOT windows: they are Shell_NotifyIcon registrations owned by
+-- Explorer, so the running-apps enumeration cannot see them. `ybar --query
+-- tray` reads them through UI Automation (see src/providers/tray_icons.cpp;
+-- the legacy ToolbarWindow32 technique is dead on Windows 11 22H2+), and
+-- `ybar --tray "<name>" invoke` activates one — Explorer forwards that to the
+-- owning app as the real tray callback, exactly like clicking it in the
+-- taskbar.
 --
--- Click semantics: left-click closes the app's front window gracefully
--- (WM_CLOSE — the app still gets to prompt about unsaved work); right-click
--- arms a two-step force quit. Force-quitting on one unconfirmed click in a
--- hover-dismissed popup is far too easy to hit by accident.
+-- Icon pixels come from the registry's IconSnapshot PNGs, matched to labels by
+-- string; roughly half match confidently, and the rest fall back to a neutral
+-- glyph rather than risk showing the WRONG app's icon.
 
 local popup_width = 268
 local inset = 11
-local MAX_APPS = 10
+local MAX_ROWS = 12
 local ICON_W = 26
-local COUNT_W = 44
 
-local apps = sbar.add("item", "widgets.apps", {
+local tray = sbar.add("item", "widgets.apps", {
   position = "right",
   icon = {
-    string = icons.apple,          -- sf:apps — the Start-like app grid glyph
+    string = icons.apple,          -- sf:apps — the Start-like grid glyph
     font = { size = 13 },
     color = colors.white,
     padding_left = 7,
@@ -37,7 +37,7 @@ local apps = sbar.add("item", "widgets.apps", {
   padding_right = 2,
 })
 
-local apps_bracket = sbar.add("bracket", "widgets.apps.bracket", { apps.name }, {
+local tray_bracket = sbar.add("bracket", "widgets.apps.bracket", { tray.name }, {
   background = { color = colors.bg1 },
   popup = { align = "center", height = 26 },
 })
@@ -47,15 +47,14 @@ sbar.add("item", "widgets.apps.padding", {
   width = settings.group_paddings,
 })
 
-local popup_pos = "popup." .. apps_bracket.name
+local popup_pos = "popup." .. tray_bracket.name
 
--- ── Header ─────────────────────────────────────────────────────────────────
 local header = sbar.add("item", "widgets.apps.header", {
   position = popup_pos,
   width = popup_width,
   align = "left",
   icon = {
-    string = "Running Apps",
+    string = "Tray",
     align = "left",
     font = { size = 12.5, style = settings.font.style_map["Bold"] },
     width = popup_width / 2,
@@ -72,13 +71,11 @@ local header = sbar.add("item", "widgets.apps.header", {
   background = { height = 2, color = colors.grey, y_offset = -13 },
 })
 
--- ── Row pool ───────────────────────────────────────────────────────────────
--- image = the real app icon (engine resolves "exe.<path>" through
--- SHGetFileInfoW). The NAME lives in the icon part and the window count in
--- the label: never mix a PUA glyph into a text part (symbol fonts do not
--- font-fall-back — see wifi.lua).
+-- Fixed row pool. The image carries the tray icon's PNG when one matched; the
+-- NAME lives in the icon part as plain text. Never mix a PUA glyph into a text
+-- part — symbol fonts do not font-fall-back (see wifi.lua).
 local rows = {}
-for i = 1, MAX_APPS do
+for i = 1, MAX_ROWS do
   rows[i] = sbar.add("item", "widgets.apps.row." .. i, {
     position = popup_pos,
     drawing = false,
@@ -87,7 +84,7 @@ for i = 1, MAX_APPS do
     image = {
       string = "",
       size = 16,
-      drawing = true,
+      drawing = false,
       padding_left = inset,
       padding_right = 8,
     },
@@ -96,16 +93,10 @@ for i = 1, MAX_APPS do
       align = "left",
       color = colors.white,
       font = { size = 11.5 },
-      width = popup_width - inset - ICON_W - COUNT_W,
+      width = popup_width - inset - ICON_W,
+      padding_left = 0,
     },
-    label = {
-      string = "",
-      align = "right",
-      color = colors.grey,
-      font = { size = 10.5 },
-      width = COUNT_W,
-      padding_right = inset,
-    },
+    label = { drawing = false },
   })
 end
 
@@ -132,116 +123,63 @@ local taskmgr_row = sbar.add("item", "widgets.apps.taskmgr", {
 })
 
 -- ── State ──────────────────────────────────────────────────────────────────
-local cache = {}      -- row index -> { name, hwnd, pid, count }
-local armed = nil     -- row index awaiting force-quit confirmation
-local armed_gen = 0
+local cache = {}   -- row index -> tray icon name
 
 local function hide_popup()
-  apps_bracket:set({ popup = { drawing = false } })
-end
-
-local function disarm()
-  if not armed then return end
-  local i = armed
-  armed = nil
-  local entry = cache[i]
-  if entry then
-    rows[i]:set({
-      icon = { string = entry.name, color = colors.white },
-      label = { string = entry.count > 1 and (entry.count .. " windows") or "" },
-    })
-  end
+  tray_bracket:set({ popup = { drawing = false } })
 end
 
 local function populate()
-  local list = sbar.query("windows") or {}
+  local list = sbar.query("tray") or {}
   cache = {}
   local shown = 0
-  for _, app in ipairs(list) do
-    if shown >= MAX_APPS then break end
+  for _, entry in ipairs(list) do
+    if shown >= MAX_ROWS then break end
     shown = shown + 1
-    local count = app.window_count or 1
-    local first = app.windows and app.windows[1] or nil
-    cache[shown] = {
-      name = app.name or "?",
-      hwnd = first and first.hwnd or nil,
-      pid = app.pid,
-      count = count,
-    }
+    cache[shown] = entry.name
+    local has_icon = entry.icon and entry.icon ~= ""
     rows[shown]:set({
       drawing = true,
-      image = { string = (app.executable and app.executable ~= "")
-        and ("exe." .. app.executable) or "", drawing = true },
-      icon = { string = app.name or "?", color = colors.white },
-      label = { string = count > 1 and (count .. " windows") or "" },
+      image = { string = has_icon and entry.icon or "", drawing = has_icon or false },
+      icon = {
+        string = entry.name or "?",
+        -- No matched PNG: indent to the same column the icons occupy so the
+        -- labels still line up.
+        padding_left = has_icon and 0 or (ICON_W + inset),
+        color = colors.white,
+      },
     })
   end
-  for i = shown + 1, MAX_APPS do rows[i]:set({ drawing = false }) end
-  header:set({ label = { string = shown > 0 and (shown .. " apps") or "none" } })
-  armed = nil
+  for i = shown + 1, MAX_ROWS do rows[i]:set({ drawing = false }) end
+  header:set({ label = { string = shown > 0 and (shown .. " items") or "none" } })
 end
 
 -- ── Interactions ───────────────────────────────────────────────────────────
-for i = 1, MAX_APPS do
-  rows[i]:subscribe("mouse.clicked", function(env)
-    local entry = cache[i]
-    if not entry or not entry.hwnd then return end
-    local force = (env and env.BUTTON == "right")
-      or (env and env.MODIFIER == "shift")
-
-    if force then
-      if armed == i then
-        sbar.exec("ybar --window " .. entry.hwnd .. " kill")
-        armed = nil
-        sbar.delay(0.4, populate)
-      else
-        disarm()
-        armed = i
-        armed_gen = armed_gen + 1
-        local gen = armed_gen
-        rows[i]:set({
-          icon = { string = "Force quit " .. entry.name .. "?", color = colors.red },
-          label = { string = "" },
-        })
-        -- Auto-disarm: a stale armed row must never turn a later stray click
-        -- into a kill.
-        sbar.delay(3, function() if armed_gen == gen then disarm() end end)
-      end
-      return
-    end
-
-    disarm()
-    -- Front window only. Fanning WM_CLOSE across every window of a group
-    -- pops a save dialog per window, including ones parked on another
-    -- workspace with no visible owner.
-    sbar.exec("ybar --window " .. entry.hwnd .. " close")
-    sbar.delay(0.6, populate)
+for i = 1, MAX_ROWS do
+  rows[i]:subscribe("mouse.clicked", function()
+    local name = cache[i]
+    if not name then return end
+    -- Invoke opens the app's own tray UI (its window or context menu), so the
+    -- popup should get out of the way.
+    hide_popup()
+    sbar.exec('ybar --tray "' .. name:gsub('"', "") .. '" invoke')
   end)
 end
 
 taskmgr_row:subscribe("mouse.clicked", function()
-  sbar.exec("taskmgr.exe")
   hide_popup()
+  sbar.exec("taskmgr.exe")
 end)
 
 local function toggle_popup()
-  local should_draw = apps_bracket:query().popup.drawing == "off"
+  local should_draw = tray_bracket:query().popup.drawing == "off"
   if should_draw then
     populate()
-    apps_bracket:set({ popup = { drawing = true } })
+    tray_bracket:set({ popup = { drawing = true } })
   else
     hide_popup()
   end
 end
 
-apps:subscribe("mouse.clicked", toggle_popup)
-apps:subscribe("mouse.exited.global", function()
-  disarm()
-  hide_popup()
-end)
-
--- Keep the list current while it is open; these events already exist and
--- already arm the engine's 2 s lifecycle poller when subscribed.
-apps:subscribe({ "app_launched", "app_terminated" }, function()
-  if apps_bracket:query().popup.drawing == "on" then populate() end
-end)
+tray:subscribe("mouse.clicked", toggle_popup)
+tray:subscribe("mouse.exited.global", hide_popup)
