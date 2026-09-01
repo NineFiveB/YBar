@@ -192,6 +192,22 @@ std::string cacheIconPng(const std::vector<std::byte>& blob) {
     swprintf_s(leaf, L"\\%016llx.png", static_cast<unsigned long long>(hash));
     const std::wstring path = directory + leaf;
 
+    // Write-once, and deliberately never swept. A cleanup pass keyed on which
+    // apps are running would delete roughly half these files on any given popup
+    // open (14 of 29 registrations were live when measured) and regenerate them
+    // later — which destroys the deduplication, puts FindFirstFileW/DeleteFileW
+    // on the click-to-open path, and above all opens an absence window that
+    // content addressing makes PERMANENT: GlyphAtlas caches a failed load as
+    // nullopt under the source string and never erases it, so a regenerated
+    // file reuses the poisoned key and that row stays blank forever. If growth
+    // ever needs bounding, sweep by age ONCE at startup before any atlas
+    // exists, never by liveness.
+    //
+    // Growth is slow anyway: a new file appears only when an icon's bytes
+    // actually change. The matching cost is a color-atlas rect per distinct
+    // icon (the shelf packer has no eviction either), which the 1024x1024 page
+    // absorbs a few hundred times over before it warns and skips.
+    //
     // Identical content means an identical name, so an existing file is already
     // byte-for-byte what we would write.
     if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
