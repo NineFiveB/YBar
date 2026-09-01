@@ -13,6 +13,16 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      # id-token: the OIDC token for the Azure signing login (no stored
+      # secrets). contents: read is the default the explicit block replaces.
+      id-token: write
+      contents: read
+    env:
+      # Empty on forks/PRs and until the repo variables are configured; every
+      # signing step below is skipped while it is empty, so builds still ship
+      # (unsigned) rather than failing.
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
     steps:
       - uses: actions/checkout@v4
 
@@ -69,6 +79,43 @@ jobs:
                  Where-Object { $_.Name -like "10.*" } | Sort-Object Name | Select-Object -Last 1
           $dll = Join-Path $sdk.FullName "x64/d3dcompiler_47.dll"
           if (Test-Path $dll) { Copy-Item $dll dist/ } else { Write-Host "d3dcompiler_47.dll not found in $sdk" }
+
+      # --- Code signing (Azure Trusted Signing) -----------------------------
+      # CI artifacts are signed, not just release assets: Smart App Control is
+      # enforcing on stock Windows 11 and refuses unsigned binaries outright
+      # (measured — "An Application Control policy has blocked this file",
+      # CodeIntegrity 3077), so an unsigned dev build cannot be run on the
+      # machine it was built for. OIDC login as a managed identity, no stored
+      # secrets. Skipped while AZURE_CLIENT_ID is empty, so forks and PRs
+      # still build and just ship unsigned.
+      - name: Azure login (OIDC)
+        if: env.AZURE_CLIENT_ID != '' && github.event_name == 'push'
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign ybar.exe
+        if: env.AZURE_CLIENT_ID != '' && github.event_name == 'push'
+        uses: azure/trusted-signing-action@v0
+        with:
+          endpoint: https://eus.codesigning.azure.net/
+          trusted-signing-account-name: aegiosot
+          certificate-profile-name: release-signing
+          files-folder: ${{ github.workspace }}\dist
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Verify signature
+        if: env.AZURE_CLIENT_ID != '' && github.event_name == 'push'
+        run: |
+          $sig = Get-AuthenticodeSignature dist/ybar.exe
+          if ($sig.Status -ne 'Valid') { throw "signature status is $($sig.Status)" }
+          Write-Host "signed by: $($sig.SignerCertificate.Subject)"
+      # ----------------------------------------------------------------------
 
       - uses: actions/upload-artifact@v4
         with:
