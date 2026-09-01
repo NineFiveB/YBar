@@ -15,9 +15,13 @@
 // What UIA gives: the tooltip label, an InvokePattern (click activation, which
 // Explorer forwards to the owning app as the real tray callback), and a clean
 // visible/hidden split. What it does NOT give: the owning process (every
-// element reports Explorer) or the icon bitmap — those pixels come from
-// HKCU\Control Panel\NotifyIconSettings, whose IconSnapshot values are literal
-// PNG files, matched back to labels by string.
+// element reports Explorer) or the icon bitmap.
+//
+// Icon pixels are deliberately NOT sourced. They exist only in
+// HKCU\Control Panel\NotifyIconSettings as first-registration snapshots with
+// no id linking them to a UIA element, so they have to be matched by string —
+// which measured 6 of 14 labels matched, left the rest bare, and risks
+// pairing a label with the WRONG app's icon. The rows are text.
 
 #pragma once
 
@@ -27,9 +31,8 @@
 namespace ybar::providers {
 
 struct TrayIcon {
-    std::string name;      // UIA Name = the tooltip the user sees
-    std::string iconPath;  // extracted PNG, "" when no confident match
-    bool hidden = false;   // behind the overflow chevron
+    std::string name;    // UIA Name = the tooltip the user sees
+    bool hidden = false; // behind the overflow chevron
 };
 
 // One enumeration pass (~15-20 ms warm). Empty when the tray is unreadable.

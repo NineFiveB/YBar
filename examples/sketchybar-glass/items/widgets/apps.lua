@@ -14,14 +14,16 @@ local settings = require("settings")
 -- owning app as the real tray callback, exactly like clicking it in the
 -- taskbar.
 --
--- Icon pixels come from the registry's IconSnapshot PNGs, matched to labels by
--- string; roughly half match confidently, and the rest fall back to a neutral
--- glyph rather than risk showing the WRONG app's icon.
+-- Rows are TEXT ONLY, deliberately. UIA does not expose an icon bitmap; the
+-- pixels exist only as first-registration snapshots in the registry with no id
+-- tying them to a UIA element, so they have to be matched by string — which
+-- measured 6 of 14 labels matched, left the rest bare, and risks pairing a
+-- label with the WRONG app's icon. A clean list of names beats a half-iconned
+-- one that occasionally lies.
 
 local popup_width = 268
 local inset = 11
 local MAX_ROWS = 12
-local ICON_W = 26
 
 local tray = sbar.add("item", "widgets.apps", {
   position = "right",
@@ -71,9 +73,7 @@ local header = sbar.add("item", "widgets.apps.header", {
   background = { height = 2, color = colors.grey, y_offset = -13 },
 })
 
--- Fixed row pool. The image carries the tray icon's PNG when one matched; the
--- NAME lives in the icon part as plain text. Never mix a PUA glyph into a text
--- part — symbol fonts do not font-fall-back (see wifi.lua).
+-- Fixed row pool; the NAME lives in the icon part as plain text.
 local rows = {}
 for i = 1, MAX_ROWS do
   rows[i] = sbar.add("item", "widgets.apps.row." .. i, {
@@ -81,26 +81,13 @@ for i = 1, MAX_ROWS do
     drawing = false,
     width = popup_width,
     align = "left",
-    image = {
-      string = "",
-      size = 16,
-      drawing = false,
-      padding_left = inset,
-      padding_right = 8,
-      -- An image centers on the row's em box, but text ink sits ~4pt below
-      -- that centre, so an un-nudged icon floats above its label. Move the
-      -- IMAGE (positive-up, hence negative here) rather than the text: text
-      -- y_offset also resizes the row, which re-centres the image and never
-      -- converges (measured: the gap only closed from 8px to 6px).
-      y_offset = -4,
-    },
     icon = {
       string = "",
       align = "left",
       color = colors.white,
       font = { size = 11.5 },
-      width = popup_width - inset - ICON_W,
-      padding_left = 0,
+      width = popup_width - inset,
+      padding_left = inset,
     },
     label = { drawing = false },
   })
@@ -143,17 +130,9 @@ local function populate()
     if shown >= MAX_ROWS then break end
     shown = shown + 1
     cache[shown] = entry.name
-    local has_icon = entry.icon and entry.icon ~= ""
     rows[shown]:set({
       drawing = true,
-      image = { string = has_icon and entry.icon or "", drawing = has_icon or false },
-      icon = {
-        string = entry.name or "?",
-        -- No matched PNG: indent to the same column the icons occupy so the
-        -- labels still line up.
-        padding_left = has_icon and 0 or (ICON_W + inset),
-        color = colors.white,
-      },
+      icon = { string = entry.name or "?", color = colors.white },
     })
   end
   for i = shown + 1, MAX_ROWS do rows[i]:set({ drawing = false }) end
