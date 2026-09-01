@@ -89,7 +89,7 @@ jobs:
       # secrets. Skipped while AZURE_CLIENT_ID is empty, so forks and PRs
       # still build and just ship unsigned.
       - name: Azure login (OIDC)
-        if: env.AZURE_CLIENT_ID != '' && github.event_name == 'push'
+        if: env.AZURE_CLIENT_ID != '' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: azure/login@v3
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
@@ -97,7 +97,7 @@ jobs:
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Sign ybar.exe
-        if: env.AZURE_CLIENT_ID != '' && github.event_name == 'push'
+        if: env.AZURE_CLIENT_ID != '' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: azure/trusted-signing-action@v0
         with:
           endpoint: https://eus.codesigning.azure.net/
@@ -110,7 +110,7 @@ jobs:
           timestamp-digest: SHA256
 
       - name: Verify signature
-        if: env.AZURE_CLIENT_ID != '' && github.event_name == 'push'
+        if: env.AZURE_CLIENT_ID != '' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         run: |
           $sig = Get-AuthenticodeSignature dist/ybar.exe
           if ($sig.Status -ne 'Valid') { throw "signature status is $($sig.Status)" }
