@@ -35,7 +35,10 @@ local cpu = sbar.add("slider", "widgets.cpu", 52, {
     },
     knob = { drawing = false },
   },
-  icon = { string = icons.cpu, padding_left = 6, padding_right = 6 },
+  -- No padding_left here: the pill's left margin comes from the bracket below,
+  -- so that both sides are set by one number. padding_right is the gap between
+  -- the glyph and the meter, not a pill margin.
+  icon = { string = icons.cpu, padding_left = 0, padding_right = 7 },
   label = { drawing = false },
   -- Keeps the cpu->wifi gap on the shared inter-pill spacing (was paddings+5
   -- = 8, which made that gap double the others). Uses the theme setting so
@@ -45,6 +48,13 @@ local cpu = sbar.add("slider", "widgets.cpu", 52, {
 
 local cpu_bracket = sbar.add("bracket", "widgets.cpu.bracket", { cpu.name }, {
   background = { color = colors.bg1 },
+  -- Inner pill margin, and the ONLY lever that can put one on the right: a
+  -- pill is sized from its members' content boxes plus the BRACKET's padding,
+  -- so item padding lands outside the pill entirely. The icon supplies its own
+  -- left margin, a slider has none, so without this the meter ran straight
+  -- into the pill's rounded edge. Matches battery, the other slider pill.
+  padding_left = 9,
+  padding_right = 9,
   -- No fixed popup row height: gauge tiles size to their content.
   popup = { align = "center" }
 })
