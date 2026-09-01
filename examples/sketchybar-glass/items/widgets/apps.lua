@@ -165,6 +165,7 @@ local armed = nil  -- row index currently asking for confirmation
 local arm_gen = 0  -- invalidates any pending auto-disarm timer
 
 local confirm_width = 46
+local closing_width = 62
 
 local function disarm()
   if armed and rows[armed] then
@@ -268,11 +269,40 @@ for i = 1, MAX_ROWS do
     end
     disarm()
     sbar.tray(name, "close")
-    -- Repopulate rather than closing the popup: the list should visibly lose
-    -- the row. The close escalates over ~5s, so re-read once it has settled.
-    sbar.delay(6, function()
-      if tray_bracket:query().popup.drawing == "on" then populate() end
-    end)
+
+    -- Mark the row NOW. Without this the confirming click produced no visible
+    -- change whatsoever: the app takes up to ~5s to go, so the row sat there
+    -- looking unclicked — which is what makes a working close feel broken.
+    --
+    -- Greyed IN PLACE rather than hidden: removing it would shift every row
+    -- below it up by one, and a quick follow-up click would then land on a
+    -- different app than the one under the pointer a moment earlier. The
+    -- reconcile below is what actually removes it, or restores it if the
+    -- close failed.
+    rows[i]:set({
+      icon = { color = colors.grey, width = popup_width - gutter - closing_width },
+      label = {
+        drawing = true,
+        string = "closing…",
+        align = "right",
+        color = colors.grey,
+        font = { size = 10.5 },
+        width = closing_width,
+        padding_right = inset,
+      },
+    })
+    cache[i] = nil -- further clicks on a closing row do nothing
+
+    -- Reconcile repeatedly, and early. One late pass was useless in practice:
+    -- moving the pointer off the popup fires mouse.exited.global, which hides
+    -- it, and the pass was gated on the popup still being open — so the list
+    -- only refreshed on the NEXT open, which is why closing the popup looked
+    -- like a required step.
+    for _, at in ipairs({ 1.5, 4, 7 }) do
+      sbar.delay(at, function()
+        if tray_bracket:query().popup.drawing == "on" then populate() end
+      end)
+    end
   end)
 end
 
