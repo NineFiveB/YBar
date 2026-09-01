@@ -266,6 +266,7 @@ void emitImage(DisplayList& list, const ybar::model::ImageState& image, double& 
         quad.uvSize = {entry->uvSizeX, entry->uvSizeY};
         quad.color = {1, 1, 1, 1}; // color page carries its own pixels
         quad.flags |= kGlyphFlagColor;
+        if (image.desaturate) quad.flags |= kGlyphFlagDesaturate;
         list.glyphs.push_back(quad);
     }
     penX += image.size + image.paddingRight;

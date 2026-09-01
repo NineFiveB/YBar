@@ -165,7 +165,6 @@ local armed = nil  -- row index currently asking for confirmation
 local arm_gen = 0  -- invalidates any pending auto-disarm timer
 
 local confirm_width = 46
-local closing_width = 62
 
 local function disarm()
   if armed and rows[armed] then
@@ -224,7 +223,7 @@ local function populate()
       drawing = true,
       -- An empty source simply draws nothing, so a row with no resolvable
       -- icon degrades to the old text-only look rather than breaking.
-      image = { string = entry.icon or "" },
+      image = { string = entry.icon or "", desaturate = false },
       icon = { string = entry.name or "?", color = colors.white, width = popup_width - gutter },
       label = { drawing = false },
     })
@@ -280,16 +279,12 @@ for i = 1, MAX_ROWS do
     -- reconcile below is what actually removes it, or restores it if the
     -- close failed.
     rows[i]:set({
-      icon = { color = colors.grey, width = popup_width - gutter - closing_width },
-      label = {
-        drawing = true,
-        string = "closing…",
-        align = "right",
-        color = colors.grey,
-        font = { size = 10.5 },
-        width = closing_width,
-        padding_right = inset,
-      },
+      icon = { color = colors.grey },
+      -- The app icon goes to luminance too, so the WHOLE row dims rather than
+      -- a grey name sitting next to a full-colour logo. Needs the renderer's
+      -- desaturate path: colour images are sampled straight off the colour
+      -- atlas, so a tint has nowhere to apply without it.
+      image = { desaturate = true },
     })
     cache[i] = nil -- further clicks on a closing row do nothing
 

@@ -88,6 +88,10 @@ struct ImageState {
     // list row needs this to put an icon on the text's OPTICAL centre —
     // nudging the text instead also moves the row box and never converges.
     double yOffset = 0;
+    // Renders a colour image at luminance — the "this row is not live" look.
+    // Only affects colour-page images; a mask glyph already takes its colour
+    // from the part, so greying one is just a colour change.
+    bool desaturate = false;
     char align = 'l';    // 'r' = image trails the label
 
     double advance() const {

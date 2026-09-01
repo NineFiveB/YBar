@@ -26,6 +26,8 @@ inline constexpr std::uint32_t kQuadFlagGlass = 1u << 1;
 inline constexpr std::uint32_t kQuadFlagArc = 1u << 2;
 inline constexpr std::uint32_t kQuadFlagHoles = 1u << 3;
 inline constexpr std::uint32_t kGlyphFlagColor = 1u << 0;
+// Colour images only: render at luminance, for a disabled/pending row.
+inline constexpr std::uint32_t kGlyphFlagDesaturate = 1u << 1;
 
 struct QuadInstance {
     Float2 origin;
