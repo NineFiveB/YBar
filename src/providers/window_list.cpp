@@ -7,7 +7,6 @@
 #include <dwmapi.h>
 #include <propsys.h>
 #include <shlobj.h>
-#include <shobjidl_core.h> // SHGetPropertyStoreForWindow
 // clang-format on
 
 #include <algorithm>
@@ -81,12 +80,25 @@ bool isRootOwner(HWND hwnd) {
 // reparented into the frame, so a live app's frame has only same-pid
 // children and the child test would drop a running app.
 bool hasAppUserModelId(HWND hwnd) {
-    // Defined locally rather than pulled from propkey.h so the build does not
-    // need propsys.lib for one constant.
+    // PKEY_AppUserModel_ID defined locally (propkey.h would drag in
+    // propsys.lib for one constant), and SHGetPropertyStoreForWindow resolved
+    // at runtime: its declaration sits behind an NTDDI guard that this
+    // toolchain's headers did not expose, and shell32 has exported it since
+    // Windows 7 regardless.
     static const PROPERTYKEY kAppUserModelId = {
         {0x9F4C2855, 0x9F79, 0x4B39, {0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3}}, 5};
+    using GetStoreFn = HRESULT(WINAPI*)(HWND, REFIID, void**);
+    static const GetStoreFn getStore = [] {
+        const HMODULE shell = GetModuleHandleW(L"shell32.dll");
+        return shell ? reinterpret_cast<GetStoreFn>(reinterpret_cast<void*>(
+                           GetProcAddress(shell, "SHGetPropertyStoreForWindow")))
+                     : nullptr;
+    }();
+    // Without the export, treat every frame as live: dropping real apps is a
+    // far worse failure than keeping the occasional suspended one.
+    if (!getStore) return true;
     IPropertyStore* store = nullptr;
-    if (FAILED(SHGetPropertyStoreForWindow(hwnd, IID_PPV_ARGS(&store))) || !store) return false;
+    if (FAILED(getStore(hwnd, IID_PPV_ARGS(&store))) || !store) return false;
     PROPVARIANT value;
     PropVariantInit(&value);
     bool present = false;
