@@ -8,22 +8,21 @@ local settings = require("settings")
 --
 -- These are NOT windows: they are Shell_NotifyIcon registrations owned by
 -- Explorer, so the running-apps enumeration cannot see them. `ybar --query
--- tray` reads them through UI Automation (see src/providers/tray_icons.cpp;
--- the legacy ToolbarWindow32 technique is dead on Windows 11 22H2+), and
--- `ybar --tray "<name>" invoke` activates one — Explorer forwards that to the
--- owning app as the real tray callback, exactly like clicking it in the
--- taskbar.
+-- tray` reads Explorer's registration list and reports the entries whose owner
+-- is running; `ybar --tray "<name>" invoke` activates one. See
+-- src/providers/tray_icons.cpp for why that beats the UI Automation walk it
+-- replaced (which saw only the icons promoted onto the taskbar — 1 of 11 here —
+-- and reported an empty label for a third of the rest).
 --
--- Rows are TEXT ONLY, deliberately. UIA does not expose an icon bitmap; the
--- pixels exist only as first-registration snapshots in the registry with no id
--- tying them to a UIA element, so they have to be matched by string — which
--- measured 6 of 14 labels matched, left the rest bare, and risks pairing a
--- label with the WRONG app's icon. A clean list of names beats a half-iconned
--- one that occasionally lies.
+-- Rows are TEXT ONLY, deliberately. The icon pixels exist only as
+-- first-registration snapshots in the registry, with no id tying them to a live
+-- entry, so they have to be matched by string — which measured 6 of 14 labels
+-- matched, left the rest bare, and risks pairing a label with the WRONG app's
+-- icon. A clean list of names beats a half-iconned one that occasionally lies.
 
 local popup_width = 268
 local inset = 11
-local MAX_ROWS = 12
+local MAX_ROWS = 16
 
 local tray = sbar.add("item", "widgets.apps", {
   position = "right",

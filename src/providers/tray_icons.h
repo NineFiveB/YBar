@@ -1,27 +1,42 @@
 // Notification-area (system tray) icons — Windows extension, supersedes the
 // "impossible" note in spec 10.6.
 //
-// The classic technique (Shell_TrayWnd > TrayNotifyWnd > SysPager >
-// ToolbarWindow32 + cross-process TB_GETBUTTON/TRAYDATA) is DEAD on Windows 11
-// 22H2 Moment 2 and later: TrayNotifyWnd is an empty leaf and there is no
-// ToolbarWindow32 anywhere in the session (verified on 26200.9168). The XAML
-// tray instead publishes every icon through UI Automation.
+// Source of record is HKCU\Control Panel\NotifyIconSettings — the registration
+// list Explorer keeps for every Shell_NotifyIcon owner — filtered to the
+// entries whose executable is currently running. That combination is silent,
+// needs no cooperation from Explorer, and reports promoted and overflow icons
+// alike.
 //
-// The catch that makes this look impossible: ElementFromHandle(Shell_TrayWnd)
-// returns a Pane with ZERO children while the taskbar is hidden — which is
-// exactly this bar's configuration. The elements hang off the tray's
-// Windows.UI.Composition.DesktopWindowContentBridge CHILD window instead.
+// It replaced a UI Automation walk, which had two disqualifying faults:
 //
-// What UIA gives: the tooltip label, an InvokePattern (click activation, which
-// Explorer forwards to the owning app as the real tray callback), and a clean
-// visible/hidden split. What it does NOT give: the owning process (every
-// element reports Explorer) or the icon bitmap.
+//   1. Overflow icons live in TopLevelWindowForOverflowXamlIsland, a window
+//      Explorer only creates while the "Show Hidden Icons" flyout is open. With
+//      the taskbar hidden it does not exist, so UIA saw ONLY promoted icons —
+//      measured 1 of 11 here. Forcing it open means invoking the chevron and
+//      flashing Explorer's flyout on screen for every refresh.
+//   2. Even with the flyout open, UIA reports an EMPTY Name for a good share of
+//      icons — measured 3 of 10, and they were AMD Software, CurseForge and
+//      iCloud, i.e. exactly the ones a user notices missing. The registry names
+//      all three.
 //
-// Icon pixels are deliberately NOT sourced. They exist only in
-// HKCU\Control Panel\NotifyIconSettings as first-registration snapshots with
-// no id linking them to a UIA element, so they have to be matched by string —
-// which measured 6 of 14 labels matched, left the rest bare, and risks
-// pairing a label with the WRONG app's icon. The rows are text.
+// The registry trades a little precision for that: liveness is inferred from
+// "the owning executable is running", so an app that is running with its tray
+// icon switched off still lists. That is the better failure — a stray row beats
+// a missing one, and the alternative under-reported by an order of magnitude.
+//
+// Liveness matches on executable BASENAME, not full path: NVIDIA's icon is
+// owned by NVDisplay.Container.exe running as SYSTEM, whose full path a normal
+// process cannot read, and path matching silently dropped it.
+//
+// Explorer's own icons (Safely Remove Hardware, Bluetooth Devices) are omitted.
+// They all report ExecutablePath=explorer.exe with FileDescription "Windows
+// Explorer", so they can only be rendered as duplicate meaningless rows; the
+// bar already carries Bluetooth and network as first-class pills.
+//
+// UIA is still used for activation, where it is the correct mechanism: Explorer
+// forwards an Invoke to the owning app as the real tray callback. It only
+// reaches icons whose element currently exists, so activation falls back to
+// launching the owning executable.
 
 #pragma once
 
@@ -31,18 +46,19 @@
 namespace ybar::providers {
 
 struct TrayIcon {
-    std::string name;    // UIA Name = the tooltip the user sees
-    bool hidden = false; // behind the overflow chevron
+    std::string name;    // tooltip, else the executable's FileDescription
+    bool hidden = false; // not promoted onto the taskbar (behind the chevron)
+    std::string exePath; // owning executable, for activation fallback
 };
 
-// One enumeration pass (~15-20 ms warm). Empty when the tray is unreadable.
+// One enumeration pass. Empty when the registration list is unreadable.
 std::vector<TrayIcon> trayIcons();
 
-// JSON for `--query tray`.
+// JSON for `--query tray`: name and hidden only.
 std::string serializeTrayIcons(const std::vector<TrayIcon>& icons);
 
-// `--tray "<name>" invoke` — re-enumerates and invokes the matching element.
-// Returns "" on success, an error message otherwise.
+// `--tray "<name>" invoke` — UI Automation when the element is reachable,
+// otherwise launches the owning executable. "" on success, else a message.
 std::string invokeTrayIcon(const std::string& name);
 
 } // namespace ybar::providers
