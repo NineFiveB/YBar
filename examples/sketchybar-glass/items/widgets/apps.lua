@@ -137,7 +137,10 @@ local taskmgr_row = sbar.add("item", "widgets.apps.taskmgr", {
     align = "left",
     color = colors.white,
     font = { size = 10.5 },
-    width = popup_width / 2,
+    -- 0.38/0.62, not half-and-half: the hint's ink is ~150pt at 9.5pt and a
+    -- fixed slot clips from the ALIGNED side, so an even split shipped the
+    -- hint as "k to open ...". "Task Manager" needs far less than half.
+    width = popup_width * 0.38,
     padding_left = inset,
   },
   -- Neither gesture is discoverable on its own, and the cost of guessing the
@@ -148,7 +151,7 @@ local taskmgr_row = sbar.add("item", "widgets.apps.taskmgr", {
     align = "right",
     color = colors.grey,
     font = { size = 9.5 },
-    width = popup_width / 2,
+    width = popup_width * 0.62,
     padding_right = inset,
   },
 })
