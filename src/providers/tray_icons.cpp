@@ -297,7 +297,8 @@ struct CloseTarget {
 
 struct MainWindowSearch {
     DWORD pid;
-    HWND found;
+    HWND iconic;  // minimised: unambiguously the app, put away by the user
+    HWND visible; // already on screen: just needs raising
 };
 
 BOOL CALLBACK findMainWindow(HWND hwnd, LPARAM param) {
@@ -305,23 +306,33 @@ BOOL CALLBACK findMainWindow(HWND hwnd, LPARAM param) {
     DWORD owner = 0;
     GetWindowThreadProcessId(hwnd, &owner);
     if (owner != search->pid) return TRUE;
-    if (GetWindow(hwnd, GW_OWNER)) return TRUE; // an owned dialog, not the app
+    if (GetWindow(hwnd, GW_OWNER)) return TRUE;       // an owned dialog, not the app
     if (GetWindowTextLengthW(hwnd) == 0) return TRUE; // message-only/helper windows
-    search->found = hwnd;
-    return FALSE;
+    if (IsIconic(hwnd)) {
+        if (!search->iconic) search->iconic = hwnd;
+    } else if (IsWindowVisible(hwnd)) {
+        if (!search->visible) search->visible = hwnd;
+    }
+    return TRUE; // keep scanning: rank the candidates, do not take the first
 }
 
-// Brings an app back from minimised OR from hidden-to-tray. Both are what a
-// user means by "open it": a tray app that hid itself has a window that still
-// exists, just without WS_VISIBLE.
+// Un-minimises the app, or raises it if it is already up.
+//
+// Deliberately does NOT show a window that is merely HIDDEN. A titled hidden
+// window is usually not the thing the user wants to see: OneDrive keeps a
+// "GDI+ Window (OneDrive.exe)", SecurityHealthSystray and Radeon Software each
+// keep their own, and showing one of those pops an internal window the app
+// took care to hide. An app in that state gets left to the ShellExecute path,
+// where its own single-instance handling decides what to surface.
 bool restoreWindowOf(DWORD pid) {
-    MainWindowSearch search{pid, nullptr};
+    MainWindowSearch search{pid, nullptr, nullptr};
     EnumWindows(findMainWindow, reinterpret_cast<LPARAM>(&search));
-    if (!search.found) return false;
-    ShowWindow(search.found, IsIconic(search.found) ? SW_RESTORE : SW_SHOW);
-    // Best-effort: foreground is refused unless the caller owns it, and the
-    // window is un-minimised either way, which is the part that matters.
-    SetForegroundWindow(search.found);
+    HWND target = search.iconic ? search.iconic : search.visible;
+    if (!target) return false;
+    if (IsIconic(target)) ShowWindow(target, SW_RESTORE);
+    // Best-effort: the foreground right is refused unless the caller owns it,
+    // and the window is un-minimised either way, which is the part that counts.
+    SetForegroundWindow(target);
     return true;
 }
 
