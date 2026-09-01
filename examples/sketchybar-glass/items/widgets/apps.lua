@@ -31,7 +31,7 @@ local MAX_ROWS = 16
 -- Leading gutter for the icon column, matched to the bluetooth popup's 35pt
 -- glyph column so both popups' text columns start at the same x.
 local gutter = 35
-local icon_size = 14
+local icon_size = 16
 
 local tray = sbar.add("item", "widgets.apps", {
   position = "right",
@@ -81,7 +81,10 @@ local header = sbar.add("item", "widgets.apps.header", {
   background = { height = 2, color = colors.grey, y_offset = -13 },
 })
 
--- Fixed row pool; the NAME lives in the icon part as plain text.
+-- Fixed row pool. The image carries the tray icon PNG; the NAME lives in the
+-- icon part as plain text. Never mix a PUA glyph into a text part — symbol
+-- fonts do not font-fall-back (see wifi.lua), which is why the icon is an
+-- image component rather than a glyph.
 local rows = {}
 for i = 1, MAX_ROWS do
   rows[i] = sbar.add("item", "widgets.apps.row." .. i, {
@@ -98,7 +101,7 @@ for i = 1, MAX_ROWS do
       -- centre, so the icon has to come DOWN (y_offset is positive-up) to land
       -- on the label's optical centre. Nudging the text instead also resizes
       -- the row, which never converges.
-      y_offset = -1.5,
+      y_offset = -4,
     },
     icon = {
       string = "",
