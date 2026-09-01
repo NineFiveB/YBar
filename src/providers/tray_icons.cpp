@@ -198,6 +198,15 @@ void collectFrom(IUIAutomation* automation, HWND host, bool hidden,
                 if (SUCCEEDED(element->get_CurrentName(&name)) && name && *name) {
                     TrayIcon icon;
                     icon.name = narrow(name);
+                    // Tooltips are multi-line ("OneDrive - Personal\r\nBacked
+                    // up and synced"); a bar row shows the first line only.
+                    const auto brk = icon.name.find_first_of("\r\n");
+                    if (brk != std::string::npos) icon.name.erase(brk);
+                    if (icon.name.empty()) {
+                        SysFreeString(name);
+                        element->Release();
+                        continue;
+                    }
                     icon.hidden = hidden;
                     out.push_back(std::move(icon));
                     if (elements) {

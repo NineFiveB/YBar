@@ -83,6 +83,11 @@ struct ImageState {
     double paddingLeft = 0;
     double paddingRight = 0;
     double rotation = 0; // clockwise degrees
+    // Positive-up, same convention as a text part's y_offset. An image
+    // centers on the row's em box while text ink sits below that center, so a
+    // list row needs this to put an icon on the text's OPTICAL centre —
+    // nudging the text instead also moves the row box and never converges.
+    double yOffset = 0;
     char align = 'l';    // 'r' = image trails the label
 
     double advance() const {

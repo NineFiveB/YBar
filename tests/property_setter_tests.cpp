@@ -212,3 +212,17 @@ TEST_CASE("position parsing accepts aliases and rejects popup") {
     CHECK_FALSE(parsePosition("popup"));
     CHECK_FALSE(parsePosition("top"));
 }
+
+TEST_CASE("image y_offset nudges an icon onto the text's optical centre") {
+    // An image centres on the row's em box while text ink sits below it, so a
+    // list row needs to move the IMAGE. Moving the text instead also resizes
+    // the row, which re-centres the image (measured: never converges).
+    auto item = makeItem();
+    CHECK_FALSE(PropertySetter::set(item, "image.string", "exe.C:/x.exe"));
+    REQUIRE(item.image.has_value());
+    CHECK(item.image->yOffset == 0); // centred by default
+    CHECK_FALSE(PropertySetter::set(item, "image.y_offset", "-4"));
+    CHECK(item.image->yOffset == -4);
+    CHECK_FALSE(PropertySetter::set(item, "image.y_offset", "2.5"));
+    CHECK(item.image->yOffset == 2.5);
+}

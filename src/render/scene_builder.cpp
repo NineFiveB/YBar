@@ -258,8 +258,9 @@ void emitImage(DisplayList& list, const ybar::model::ImageState& image, double& 
     penX += image.paddingLeft;
     if (entry) {
         GlyphInstance quad;
-        quad.origin = {static_cast<float>(snap(penX, scale)),
-                       static_cast<float>(snap(contentBox.midY() - image.size / 2, scale))};
+        quad.origin = {
+            static_cast<float>(snap(penX, scale)),
+            static_cast<float>(snap(contentBox.midY() - image.size / 2 - image.yOffset, scale))};
         quad.size = {static_cast<float>(entry->widthPx), static_cast<float>(entry->heightPx)};
         quad.uvOrigin = {entry->uvOriginX, entry->uvOriginY};
         quad.uvSize = {entry->uvSizeX, entry->uvSizeY};

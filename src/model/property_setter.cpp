@@ -445,6 +445,7 @@ Result setImage(Item& item, const Segments& segs, std::size_t at, const std::str
     if (key == "padding_left") return setFloat(image.paddingLeft, value);
     if (key == "padding_right") return setFloat(image.paddingRight, value);
     if (key == "rotation") return setFloat(image.rotation, value);
+    if (key == "y_offset") return setFloat(image.yOffset, value);
     if (key == "align") {
         image.align = (!value.empty() && value.front() == 'r') ? 'r' : 'l';
         return ok;

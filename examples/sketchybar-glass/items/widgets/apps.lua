@@ -87,6 +87,12 @@ for i = 1, MAX_ROWS do
       drawing = false,
       padding_left = inset,
       padding_right = 8,
+      -- An image centers on the row's em box, but text ink sits ~4pt below
+      -- that centre, so an un-nudged icon floats above its label. Move the
+      -- IMAGE (positive-up, hence negative here) rather than the text: text
+      -- y_offset also resizes the row, which re-centres the image and never
+      -- converges (measured: the gap only closed from 8px to 6px).
+      y_offset = -4,
     },
     icon = {
       string = "",
