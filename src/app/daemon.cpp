@@ -43,6 +43,7 @@
 #include "providers/komorebi.h"
 #include "providers/media.h"
 #include "providers/network.h"
+#include "providers/window_list.h"
 #include "providers/ytile.h"
 #include "render/font_cache.h"
 #include "render/glyph_atlas.h"
@@ -1934,6 +1935,15 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
                 rects[state.surfaces[i]->monitor().arrangementIndex] = *frame;
         }
         return rects;
+    };
+    // Running-app list for the tray widget (spec 10.6). Both run inline: the
+    // IPC request is already marshaled to this thread, and an enumeration
+    // pass is milliseconds.
+    hooks.runningApps = [] {
+        return ybar::providers::serializeRunningApps(ybar::providers::runningApps());
+    };
+    hooks.windowAction = [](long long hwnd, const std::string& action) {
+        return ybar::providers::windowAction(hwnd, action);
     };
     state.handler = std::make_unique<ybar::ipc::CommandHandler>(state.store, state.settings,
                                                                 state.bus, hooks,

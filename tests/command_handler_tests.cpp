@@ -187,3 +187,47 @@ TEST_CASE("hotload validates its boolean and reaches the hook") {
     CHECK(handler.handle({"--hotload", "on"}).empty());
     CHECK(hotload);
 }
+
+TEST_CASE("--window validates its arguments and reaches the hook") {
+    // The tray widget's action verb (spec 10.6). Argument validation must
+    // happen before the hook so a malformed hwnd can never reach Win32.
+    Fixture f;
+    CHECK(f.run({"--window"}) == "[!] usage: --window <hwnd> close|kill");
+    CHECK(f.run({"--window", "123"}) == "[!] usage: --window <hwnd> close|kill");
+    CHECK(f.run({"--window", "notanumber", "close"}) == "[!] invalid hwnd: notanumber");
+    CHECK(f.run({"--window", "0", "close"}) == "[!] invalid hwnd: 0");
+    // Trailing garbage must not parse as a valid handle.
+    CHECK(f.run({"--window", "12x", "close"}) == "[!] invalid hwnd: 12x");
+    // No hook wired (headless): reports unavailable rather than crashing.
+    CHECK(f.run({"--window", "4242", "close"}) == "[!] window actions are not available");
+
+    long long seen = 0;
+    std::string seenAction;
+    ItemStore store;
+    BarSettings settings;
+    ybar::events::EventBus bus;
+    DaemonHooks hooks;
+    hooks.windowAction = [&](long long hwnd, const std::string& action) {
+        seen = hwnd;
+        seenAction = action;
+        return std::string{};
+    };
+    CommandHandler handler{store, settings, bus, hooks};
+    CHECK(handler.handle({"--window", "4242", "kill"}).empty());
+    CHECK(seen == 4242);
+    CHECK(seenAction == "kill");
+}
+
+TEST_CASE("--query windows returns the running-app list from the hook") {
+    Fixture f;
+    // Unwired (headless) yields an empty JSON array, never an item lookup.
+    CHECK(f.run({"--query", "windows"}) == "[]");
+
+    ItemStore store;
+    BarSettings settings;
+    ybar::events::EventBus bus;
+    DaemonHooks hooks;
+    hooks.runningApps = [] { return std::string("[{\"name\":\"Warp\"}]"); };
+    CommandHandler handler{store, settings, bus, hooks};
+    CHECK(handler.handle({"--query", "windows"}) == "[{\"name\":\"Warp\"}]");
+}

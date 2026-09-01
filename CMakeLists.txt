@@ -80,6 +80,7 @@ add_library(ybar_win
   src/providers/komorebi.cpp
   src/providers/media.cpp
   src/providers/network.cpp
+  src/providers/window_list.cpp
   src/providers/ytile.cpp
   src/render/font_cache.cpp
   src/render/glyph_atlas.cpp

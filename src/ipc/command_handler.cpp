@@ -1,6 +1,7 @@
 #include "ipc/command_handler.h"
 
 #include <charconv>
+#include <cstdlib>
 
 #include "model/property_setter.h"
 
@@ -317,6 +318,11 @@ std::string CommandHandler::handleBatch(const Batch& batch,
         if (target == "displays")
             return ybar::model::serializeDisplays(hooks_.displays ? hooks_.displays()
                                                                   : std::vector<ybar::model::DisplayInfo>{});
+        // Windows extension: the running-app list for the tray widget. Placed
+        // before the item lookup so it reaches Lua through the existing query
+        // trampoline (which JSON-parses the reply into a table) unchanged.
+        if (target == "windows")
+            return hooks_.runningApps ? hooks_.runningApps() : std::string("[]");
         auto* item = store_.find(target);
         if (!item) return "[!] no item named " + target;
         return ybar::model::serializeItem(
@@ -398,6 +404,15 @@ std::string CommandHandler::handleBatch(const Batch& batch,
         if (!hooks_.komorebiMessage || !hooks_.komorebiMessage(args[0]))
             return "[!] komorebi is not available";
         return {};
+    }
+
+    if (batch.domain == "window") { // ybar-win extension (spec 10.6)
+        if (args.size() != 2) return "[!] usage: --window <hwnd> close|kill";
+        char* end = nullptr;
+        const long long hwnd = std::strtoll(args[0].c_str(), &end, 10);
+        if (!end || *end != '\0' || hwnd == 0) return "[!] invalid hwnd: " + args[0];
+        if (!hooks_.windowAction) return "[!] window actions are not available";
+        return hooks_.windowAction(hwnd, args[1]);
     }
 
     if (batch.domain == "exit") {

@@ -44,6 +44,12 @@ struct DaemonHooks {
     std::function<double(const ybar::model::Item&, bool isIcon)> measureNaturalPartWidth;
     std::function<std::vector<ybar::model::DisplayInfo>()> displays;
     std::function<ybar::model::BoundingRects(const ybar::model::Item&)> boundingRects;
+    // Windows extension (spec 10.6): `--query windows` lists running apps and
+    // `--window <hwnd> close|kill` acts on one. Both run inline on the UI
+    // thread — an enumeration pass is milliseconds, well under the IPC round
+    // trip that carries it.
+    std::function<std::string()> runningApps;
+    std::function<std::string(long long, const std::string&)> windowAction;
 };
 
 class CommandHandler {
