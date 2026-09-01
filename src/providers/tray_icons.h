@@ -49,12 +49,13 @@ struct TrayIcon {
     std::string name;    // tooltip, else the executable's FileDescription
     bool hidden = false; // not promoted onto the taskbar (behind the chevron)
     std::string exePath; // owning executable, for activation fallback
+    std::string iconSource; // cached PNG path, else "exe.<path>" for the atlas
 };
 
 // One enumeration pass. Empty when the registration list is unreadable.
 std::vector<TrayIcon> trayIcons();
 
-// JSON for `--query tray`: name and hidden only.
+// JSON for `--query tray`: name, hidden and icon.
 std::string serializeTrayIcons(const std::vector<TrayIcon>& icons);
 
 // `--tray "<name>" invoke` — UI Automation when the element is reachable,

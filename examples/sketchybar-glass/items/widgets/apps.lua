@@ -14,15 +14,24 @@ local settings = require("settings")
 -- replaced (which saw only the icons promoted onto the taskbar — 1 of 11 here —
 -- and reported an empty label for a third of the rest).
 --
--- Rows are TEXT ONLY, deliberately. The icon pixels exist only as
--- first-registration snapshots in the registry, with no id tying them to a live
--- entry, so they have to be matched by string — which measured 6 of 14 labels
--- matched, left the rest bare, and risks pairing a label with the WRONG app's
--- icon. A clean list of names beats a half-iconned one that occasionally lies.
+-- Rows carry the real tray icon. That only became possible when the list moved
+-- to the registry: the pixels live in the SAME key as the name (IconSnapshot,
+-- a literal PNG), so there is nothing to match. While the list came from UI
+-- Automation the two had no id in common and had to be paired by string, which
+-- matched 6 of 14 and risked showing the WRONG app's icon — hence the earlier
+-- text-only rows. `--query tray` now hands back a ready path per row.
+--
+-- Caveat worth knowing: the snapshot is captured at FIRST registration, so an
+-- icon that encodes live state (sync progress, battery) can render stale. For
+-- app identity — which is all this list is for — it is exactly right.
 
 local popup_width = 268
 local inset = 11
 local MAX_ROWS = 16
+-- Leading gutter for the icon column, matched to the bluetooth popup's 35pt
+-- glyph column so both popups' text columns start at the same x.
+local gutter = 35
+local icon_size = 14
 
 local tray = sbar.add("item", "widgets.apps", {
   position = "right",
@@ -80,13 +89,24 @@ for i = 1, MAX_ROWS do
     drawing = false,
     width = popup_width,
     align = "left",
+    image = {
+      string = "",
+      size = icon_size,
+      padding_left = inset,
+      padding_right = gutter - inset - icon_size,
+      -- An image centres on the row's em box, but text ink sits below that
+      -- centre, so the icon has to come DOWN (y_offset is positive-up) to land
+      -- on the label's optical centre. Nudging the text instead also resizes
+      -- the row, which never converges.
+      y_offset = -1.5,
+    },
     icon = {
       string = "",
       align = "left",
       color = colors.white,
       font = { size = 11.5 },
-      width = popup_width - inset,
-      padding_left = inset,
+      width = popup_width - gutter,
+      padding_left = 0,
     },
     label = { drawing = false },
   })
@@ -131,6 +151,9 @@ local function populate()
     cache[shown] = entry.name
     rows[shown]:set({
       drawing = true,
+      -- An empty source simply draws nothing, so a row with no resolvable
+      -- icon degrades to the old text-only look rather than breaking.
+      image = { string = entry.icon or "" },
       icon = { string = entry.name or "?", color = colors.white },
     })
   end

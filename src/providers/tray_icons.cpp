@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
@@ -136,6 +137,78 @@ std::string fileDescription(const std::wstring& path) {
             return narrow(std::wstring(text, wcsnlen(text, length)));
     }
     return {};
+}
+
+std::vector<std::byte> regBinary(HKEY key, const wchar_t* name) {
+    DWORD size = 0;
+    if (RegGetValueW(key, nullptr, name, RRF_RT_REG_BINARY, nullptr, nullptr, &size) !=
+            ERROR_SUCCESS ||
+        size == 0)
+        return {};
+    std::vector<std::byte> blob(size);
+    if (RegGetValueW(key, nullptr, name, RRF_RT_REG_BINARY, nullptr, blob.data(), &size) !=
+        ERROR_SUCCESS)
+        return {};
+    blob.resize(size);
+    return blob;
+}
+
+// IconSnapshot is a literal PNG, so the renderer can load it straight off disk
+// (GlyphAtlas::image decodes a bare file-path source through WIC).
+//
+// The file is named after a hash of its own CONTENT, which is load-bearing in
+// three ways. The atlas caches by the source string alone and never restats the
+// file, so an icon that changed under a stable name would render the old pixels
+// forever; content addressing gives changed pixels a new path. It also sidesteps
+// naming entirely — labels carry colons, U+2024 and other characters Windows
+// forbids in filenames — and it deduplicates apps that share an icon.
+std::string cacheIconPng(const std::vector<std::byte>& blob) {
+    static constexpr std::byte kPngMagic[] = {std::byte{0x89}, std::byte{0x50}, std::byte{0x4E},
+                                              std::byte{0x47}};
+    if (blob.size() < sizeof(kPngMagic) ||
+        !std::equal(std::begin(kPngMagic), std::end(kPngMagic), blob.begin()))
+        return {};
+
+    std::uint64_t hash = 1469598103934665603ull; // FNV-1a
+    for (const std::byte b : blob) {
+        hash ^= static_cast<std::uint8_t>(b);
+        hash *= 1099511628211ull;
+    }
+
+    PWSTR localAppData = nullptr;
+    if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_DEFAULT, nullptr,
+                                    &localAppData)) ||
+        !localAppData)
+        return {};
+    std::wstring directory = localAppData;
+    CoTaskMemFree(localAppData);
+    directory += L"\\ybar\\tray";
+    // Alongside the daemon's socket; SHCreateDirectoryExW makes intermediates.
+    const int made = SHCreateDirectoryExW(nullptr, directory.c_str(), nullptr);
+    if (made != ERROR_SUCCESS && made != ERROR_ALREADY_EXISTS && made != ERROR_FILE_EXISTS)
+        return {};
+
+    wchar_t leaf[32];
+    swprintf_s(leaf, L"\\%016llx.png", static_cast<unsigned long long>(hash));
+    const std::wstring path = directory + leaf;
+
+    // Identical content means an identical name, so an existing file is already
+    // byte-for-byte what we would write.
+    if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        const HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                                        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE) return {};
+        DWORD written = 0;
+        const bool ok = WriteFile(file, blob.data(), static_cast<DWORD>(blob.size()), &written,
+                                  nullptr) &&
+                        written == blob.size();
+        CloseHandle(file);
+        if (!ok) {
+            DeleteFileW(path.c_str()); // never leave a truncated PNG behind
+            return {};
+        }
+    }
+    return narrow(path);
 }
 
 std::set<std::wstring> runningExecutables() {
@@ -292,6 +365,12 @@ std::vector<TrayIcon> trayIcons() {
             candidate.icon.name = std::move(label);
             candidate.icon.hidden = !regFlag(entry, L"IsPromoted");
             candidate.icon.exePath = narrow(path);
+            // The registered snapshot IS the tray icon the user recognises.
+            // Where there is none, the shell icon of the owning executable is
+            // the closest honest stand-in.
+            candidate.icon.iconSource = cacheIconPng(regBinary(entry, L"IconSnapshot"));
+            if (candidate.icon.iconSource.empty())
+                candidate.icon.iconSource = "exe." + candidate.icon.exePath;
             keep(byExecutable, lower(path), std::move(candidate));
         }
         RegCloseKey(entry);
@@ -324,7 +403,7 @@ std::vector<TrayIcon> trayIcons() {
 std::string serializeTrayIcons(const std::vector<TrayIcon>& icons) {
     nlohmann::json out = nlohmann::json::array();
     for (const auto& icon : icons)
-        out.push_back({{"name", icon.name}, {"hidden", icon.hidden}});
+        out.push_back({{"name", icon.name}, {"hidden", icon.hidden}, {"icon", icon.iconSource}});
     return out.dump(2);
 }
 
