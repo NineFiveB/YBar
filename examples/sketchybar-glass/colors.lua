@@ -14,17 +14,19 @@ return {
   transparent = 0x00000000,
 
   bar = {
-    bg = 0xfa29292c,         -- Fluent minimal: dark gray, ~98% opaque strip
+    bg = 0xfa0a0a0c,         -- near-black strip, ~98% opaque
     border = 0x00000000,
   },
   popup = {
     bg = 0xf51c1c20,         -- solid dark panel (no backdrop blur behind it)
     border = 0x2effffff,
   },
-  -- Fluent surfaces: subtle single-tone white fills over the dark strip —
-  -- no glass rim, no backdrop; brightness alone separates rest/selected.
-  bg1 = 0x17ffffff,          -- ~9% white: resting pill fill
-  bg2 = 0x24ffffff,          -- ~14% white: raised/selected surface
+  -- Pill surfaces are OPAQUE tones, not white overlays. Expressed as a
+  -- percentage of white they took their lightness from whatever sat behind
+  -- the strip, so a pill could only ever be LIGHTER than the bar; fixed tones
+  -- let the pills sit darker than the strip, which is the intent here.
+  bg1 = 0xff1a1a1c,          -- resting pill fill
+  bg2 = 0xff26262a,          -- raised/selected surface
 
   with_alpha = function(color, alpha)
     if alpha > 1.0 or alpha < 0.0 then return color end

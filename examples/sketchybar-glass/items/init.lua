@@ -11,6 +11,9 @@
 -- require to bring it back.
 -- require("items.apple")
 require("items.spaces")
-require("items.front_app")
+-- items/front_app.lua is not loaded: the focused app's name earns no room on
+-- the strip, and the macOS click-through to that app's menu titles has no
+-- Windows equivalent, so the label was inert. Uncomment to bring it back.
+-- require("items.front_app")
 require("items.calendar")
 require("items.widgets")

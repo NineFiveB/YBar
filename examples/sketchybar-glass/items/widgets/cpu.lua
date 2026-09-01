@@ -15,29 +15,28 @@ local settings = require("settings")
 local popup_width = 211
 local inset = 11
 
--- ── Bar item: small CPU graph in the menu bar ─────────────────────────────
-local cpu = sbar.add("graph", "widgets.cpu", 42, {
+-- ── Bar item: CPU load as a progress bar ──────────────────────────────────
+-- The rolling history graph now lives only in the popup; the strip carries a
+-- plain fill meter, which reads at a glance where 42px of history did not.
+-- The popup still has the full graph and the exact percentage.
+local cpu = sbar.add("slider", "widgets.cpu", 52, {
   position = "right",
-  graph = { color = colors.blue },
-  background = {
-    height = 19,
-    color = { alpha = 0 },
-    border_color = { alpha = 0 },
-    drawing = true,
-  },
-  icon = { string = icons.cpu },
-  label = {
-    string = "cpu ??%",
-    font = {
-      family = settings.font.numbers,
-      style = settings.font.style_map["Bold"],
-      size = 8,
+  slider = {
+    percentage = 0,
+    -- Read-only meter: without this a mouse-down rewrites the percentage from
+    -- the pointer x, so the pill would show a fabricated load (see
+    -- battery.lua, where exactly that shipped).
+    interactive = false,
+    highlight_color = colors.blue,
+    background = {
+      height = 9,
+      corner_radius = 5, -- half the height: fully rounded ends
+      color = colors.with_alpha(colors.white, 0.10), -- empty body
     },
-    align = "right",
-    padding_right = 0,
-    width = 0,
-    y_offset = 4
+    knob = { drawing = false },
   },
+  icon = { string = icons.cpu, padding_left = 6, padding_right = 6 },
+  label = { drawing = false },
   -- Keeps the cpu->wifi gap on the shared inter-pill spacing (was paddings+5
   -- = 8, which made that gap double the others). Uses the theme setting so
   -- retuning group_paddings still moves this gap with the rest.
@@ -244,17 +243,11 @@ end
 -- ── Events ────────────────────────────────────────────────────────────────
 cpu:subscribe("system_stats", function(env)  -- YBAR PORT: built-in provider
   local load = tonumber(env.CPU_USAGE) or 0
-  cpu:push({ load / 100. })
   -- The popup graph samples continuously (2 s cadence), so it opens with
   -- history already on screen — Task Manager behavior.
   cpu_hist:push({ load / 100. })
 
-  local color = cpu_color_for(load)
-
-  cpu:set({
-    graph = { color = color },
-    label = "cpu " .. load .. "%",
-  })
+  cpu:set({ slider = { percentage = load, highlight_color = cpu_color_for(load) } })
 
   last_stats = env
   if cpu_bracket:query().popup.drawing == "on" then
