@@ -71,26 +71,28 @@ open -g ~/Applications/YBar.app --args -c <your ybarrc.lua>
 
 YBar has a native **Windows 11** port — a separate C++ engine with the same soul. It lives on the [`windows` branch](../../tree/windows) (an orphan branch with its own toolchain and release cadence) and speaks the exact same command grammar, IPC protocol, and embedded Lua 5.4 API, so themes, configs, and shell scripts carry over with only OS-inherent edits (shell commands, glyph fonts, window-manager adapter).
 
-![The Windows bar: workspace pills tracking komorebi/YTile with a live front-app label and CPU graph](docs/media/ybar-win-bar.gif)
+![The Windows bar: workspace pills tracking komorebi/YTile, with CPU and battery fill meters and the tray widget](docs/media/ybar-win-bar.gif)
 
 *The `sketchybar-glass` theme on Windows 11, restyled to Fluent: workspace
-pills tracking the active YTile/komorebi workspace, the front-app label and
-CPU graph updating live — a flat, opaque strip that follows the system
-Transparency setting.*
+pills tracking the active YTile/komorebi workspace (empty workspaces hide
+their pills), with the CPU and battery pills as continuous fill meters, the
+notification-area tray widget, and a flat, near-black strip that follows the
+system Transparency setting.*
 
-![Windows popups: system monitor, Wi-Fi, Bluetooth, calendar and battery flyouts](docs/media/ybar-win-popups.gif)
+![Windows popups: system monitor, Wi-Fi, Bluetooth, calendar, battery and tray flyouts](docs/media/ybar-win-popups.gif)
 
 *Popups are first-class items laid out by the same engine: a Task
 Manager-style system monitor with live CPU/GPU graphs, Fluent Wi-Fi and
-Bluetooth flyouts, a calendar month grid, and a battery panel. Network and
-device names in this recording are placeholders.*
+Bluetooth flyouts, a calendar month grid, a battery panel, and the tray
+widget — left-click opens an app, right-click quits it behind a confirm.
+Network and device names in this recording are placeholders.*
 
 - **Engine** — Direct3D 11 + a DirectWrite glyph atlas + DirectComposition, paced to the monitor's refresh rate (120 Hz verified), near-zero CPU while static: the macOS Metal engine's mirror.
 - **Window management** — [komorebi](https://github.com/LGUG2Z/komorebi) and YTile as first-class workspace adapters (replacing AeroSpace/yabai), driven by their event streams rather than CLI polling.
 - **Native providers** — battery/power, audio (WASAPI), network & Wi-Fi (`netsh` + WinRT), now-playing media (GSMTC), and in-process CPU/memory stats, all mapped to the same events as macOS.
 - **Look** — the flagship `sketchybar-glass` theme is ported and restyled to Windows 11 Fluent: flat pills, Acrylic and popup opacity that follow your system **Transparency** setting, and Fluent Wi-Fi / Bluetooth / system-monitor / calendar popups.
 
-**Install** — download `ybar-win.zip` from a [`win-*` release](../../releases) (or the latest CI build); winget and scoop manifests live under `packaging/` on the `windows` branch. Fresh unsigned builds may be gated by Smart App Control until code signing lands.
+**Install** — one line in PowerShell: `irm https://raw.githubusercontent.com/NineFiveB/YBar/windows/scripts/install.ps1 | iex` — or with [Scoop](https://scoop.sh): `scoop install https://raw.githubusercontent.com/NineFiveB/YBar/windows/packaging/scoop/ybar-win.json` — or download `ybar-win-<version>-x64.zip` from a [`win-v*` release](../../releases). Release binaries are Authenticode-signed (Azure Trusted Signing); a winget manifest is staged under `packaging/` on the `windows` branch.
 
 **Build** (Windows 11 22H2+, Visual Studio 2022 C++ tools, CMake ≥ 3.24, [vcpkg](https://github.com/microsoft/vcpkg) with `VCPKG_ROOT` set):
 
