@@ -365,7 +365,13 @@ struct LiveImages {
     std::set<std::wstring> basenames; // lowercased, for processes we could not
 };
 
-LiveImages liveImages() {
+// `interesting` limits the expensive half of this to the executables the
+// registry actually names. Resolving a path costs an OpenProcess plus a query
+// per process, and this box runs 337 of them: doing that for all of them put
+// ~50ms on the UI thread every time the popup opened, against ~20ms before.
+// Only a dozen or so basenames are ever candidates, and everything else can
+// stay a name we never look at.
+LiveImages liveImages(const std::set<std::wstring>& interesting) {
     LiveImages live;
     const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot == INVALID_HANDLE_VALUE) return live;
@@ -373,6 +379,8 @@ LiveImages liveImages() {
     entry.dwSize = sizeof(entry);
     if (Process32FirstW(snapshot, &entry)) {
         do {
+            const std::wstring leaf = lower(entry.szExeFile);
+            if (interesting.count(leaf) == 0) continue; // not a tray owner
             const HANDLE process =
                 OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.th32ProcessID);
             std::wstring path;
@@ -381,7 +389,7 @@ LiveImages liveImages() {
                 CloseHandle(process);
             }
             if (path.empty())
-                live.basenames.insert(lower(entry.szExeFile));
+                live.basenames.insert(leaf);
             else
                 live.paths.insert(std::move(path));
         } while (Process32NextW(snapshot, &entry));
@@ -483,7 +491,32 @@ std::vector<TrayIcon> trayIcons() {
                       &root) != ERROR_SUCCESS)
         return {};
 
-    const auto live = liveImages();
+    // First pass reads ONLY the executable paths. It exists to learn which
+    // basenames are worth resolving before the process scan, and it keeps the
+    // expensive per-entry work (version info, icon snapshot) out of the way of
+    // registrations that turn out not to be running.
+    std::vector<std::pair<std::wstring, std::wstring>> registrations; // key, path
+    std::set<std::wstring> interesting;
+    for (DWORD index = 0;; ++index) {
+        wchar_t keyName[256];
+        DWORD length = static_cast<DWORD>(std::size(keyName));
+        const LSTATUS status =
+            RegEnumKeyExW(root, index, keyName, &length, nullptr, nullptr, nullptr, nullptr);
+        if (status == ERROR_NO_MORE_ITEMS) break;
+        if (status != ERROR_SUCCESS) continue;
+        HKEY entry = nullptr;
+        if (RegOpenKeyExW(root, keyName, 0, KEY_READ, &entry) != ERROR_SUCCESS) continue;
+        std::wstring path = resolvePath(regString(entry, L"ExecutablePath"));
+        RegCloseKey(entry);
+        if (path.empty()) continue;
+        const std::wstring leaf = lower(baseName(path));
+        // Explorer's own icons cannot be told apart or named from here.
+        if (leaf == L"explorer.exe") continue;
+        interesting.insert(leaf);
+        registrations.emplace_back(keyName, std::move(path));
+    }
+
+    const auto live = liveImages(interesting);
 
     struct Candidate {
         TrayIcon icon;
@@ -508,24 +541,12 @@ std::vector<TrayIcon> trayIcons() {
 
     std::map<std::wstring, Candidate> byExecutable;
 
-    for (DWORD index = 0;; ++index) {
-        wchar_t keyName[256];
-        DWORD length = static_cast<DWORD>(std::size(keyName));
-        const LSTATUS status =
-            RegEnumKeyExW(root, index, keyName, &length, nullptr, nullptr, nullptr, nullptr);
-        if (status == ERROR_NO_MORE_ITEMS) break;
-        if (status != ERROR_SUCCESS) continue;
+    for (const auto& [keyName, path] : registrations) {
+        const std::wstring leaf = lower(baseName(path));
+        if (!isLive(live, lower(path), leaf)) continue;
 
         HKEY entry = nullptr;
-        if (RegOpenKeyExW(root, keyName, 0, KEY_READ, &entry) != ERROR_SUCCESS) continue;
-
-        const std::wstring path = resolvePath(regString(entry, L"ExecutablePath"));
-        const std::wstring leaf = lower(baseName(path));
-        // Explorer's own icons cannot be told apart or named from here.
-        if (path.empty() || leaf == L"explorer.exe" || !isLive(live, lower(path), leaf)) {
-            RegCloseKey(entry);
-            continue;
-        }
+        if (RegOpenKeyExW(root, keyName.c_str(), 0, KEY_READ, &entry) != ERROR_SUCCESS) continue;
 
         std::string label = narrow(regString(entry, L"InitialTooltip"));
         const auto brk = label.find_first_of("\r\n");

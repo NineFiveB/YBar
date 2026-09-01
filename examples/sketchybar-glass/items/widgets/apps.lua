@@ -6,8 +6,8 @@ local settings = require("settings")
 -- that hides the shell taskbar otherwise leaves no way to reach the icons that
 -- live there — NVIDIA Settings, Radeon Software, OneDrive, antivirus.
 --
--- Left-click a row quits the app, after the row asks to confirm; RIGHT-click
--- opens it, un-minimising the window it already has. Quitting is the point
+-- Left-click a row opens the app, un-minimising the window it already has.
+-- RIGHT-click quits it, after the row asks to confirm. Quitting is the point
 -- of a tray on a bar that hides the taskbar — a background app is otherwise
 -- unreachable — and it follows Task Manager's "End task" semantics: WM_CLOSE
 -- first, then a terminate for whatever ignored it (see closeTrayApp).
@@ -144,7 +144,7 @@ local taskmgr_row = sbar.add("item", "widgets.apps.taskmgr", {
   -- destructive one wrong is a killed app, so both are spelled out rather
   -- than left to be stumbled into.
   label = {
-    string = "click to quit · right-click to open",
+    string = "click to open · right-click to quit",
     align = "right",
     color = colors.grey,
     font = { size = 9.5 },
@@ -156,7 +156,7 @@ local taskmgr_row = sbar.add("item", "widgets.apps.taskmgr", {
 -- ── State ──────────────────────────────────────────────────────────────────
 local cache = {}   -- row index -> tray icon name
 
--- Left-click quits, but never on the first click: the row arms itself and asks
+-- Right-click quits, but never on the first click: the row arms itself and asks
 -- again. A tray list is a dense column of small targets and quitting is not
 -- undoable, so one stray click must not be able to kill an app. The prompt
 -- lives in the row's own label rather than a separate dialog, so the second
@@ -245,16 +245,24 @@ for i = 1, MAX_ROWS do
     if name:find('[%c"&|<>%^%%%$`\\]') then return end
     local quoted = '"' .. name .. '"'
 
-    if env and env.BUTTON == "right" then
-      -- Right-click opens: un-minimises the window the app already has, or
-      -- starts it if it has none. A right-click also cancels a pending quit,
-      -- so there is always a way out of the armed state that is not "wait".
+    if not (env and env.BUTTON == "right") then
+      -- LEFT-click opens: un-minimises the window the app already has, or
+      -- starts it if it has none. This is the common action, so it gets the
+      -- common button and happens on the first click.
+      if armed == i then
+        -- The row is asking "quit?" — a left click here means "no". Cancel and
+        -- stop, rather than also opening: escaping the prompt is what the user
+        -- is reaching for, and it keeps a mis-click from doing anything at all.
+        disarm()
+        return
+      end
       disarm()
       hide_popup()
       sbar.exec("ybar --tray " .. quoted .. " invoke")
       return
     end
 
+    -- RIGHT-click quits, and never on the first one.
     if armed ~= i then
       arm(i)
       return
