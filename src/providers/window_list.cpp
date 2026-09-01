@@ -7,6 +7,7 @@
 #include <dwmapi.h>
 #include <propsys.h>
 #include <shlobj.h>
+#include <shobjidl_core.h> // SHGetPropertyStoreForWindow
 // clang-format on
 
 #include <algorithm>
