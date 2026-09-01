@@ -28,6 +28,11 @@ LuaRuntime* g_current = nullptr; // UI-thread singleton, mirrors LuaRuntime.curr
 
 // The user-facing Lua API — byte-identical with the reference prelude
 // (LuaRuntime.swift, spec 3.7). Do not edit without editing both.
+//
+// ONE deliberate divergence: ybar.tray(name, action), a Windows-only addition
+// with no macOS counterpart — there is no notification area to act on there.
+// It exists so the config does not have to shell out to the CLI to reach a
+// daemon it is already running inside (see Trampolines::tray).
 constexpr char kPrelude[] = R"LUA(local raw = __ybar_raw
 __ybar_raw = nil
 
@@ -90,6 +95,7 @@ function ybar.push(name, values) raw.push(name, values) end
 function ybar.exec(cmd, fn) raw.exec(cmd, fn) end
 function ybar.add_event(name, notification) local e = raw.add_event(name, notification) if e then print(e) end end
 function ybar.query(target) return raw.query(target) end
+function ybar.tray(name, action) return raw.tray(name, action) end
 function ybar.remove(name) raw.remove(name) end
 
 function ybar.animate(curve, frames, fn)
@@ -435,6 +441,25 @@ struct Trampolines {
         return 1;
     }
 
+    // Tray actions in-process. The config used to reach these by shelling out
+    // to `ybar --tray ...`, which spawns cmd.exe, which spawns the CLI, which
+    // opens a socket back to THIS daemon — measured at 35-55 ms per click for
+    // a call the daemon can already make directly.
+    //
+    // It also removes the quoting problem at its root. The name is a registry
+    // tooltip written by an arbitrary application; building a shell command
+    // line out of it meant defending against shell metacharacters, whereas as
+    // an argument it is just a string.
+    static int tray(lua_State* L) {
+        const char* name = argCString(L, 1);
+        const char* action = argCString(L, 2);
+        if (!name || !action) {
+            lua_pushstring(L, "[!] tray(name, action) expects two strings");
+            return 1;
+        }
+        return pushReplyAsOptionalError(L, handleTokens({"--tray", name, action}));
+    }
+
     static int remove(lua_State* L) {
         const char* name = argCString(L, 1);
         if (!name) return 0;
@@ -514,6 +539,7 @@ void LuaRuntime::registerBridge() {
     set("query_item", Trampolines::queryItem);
     set("add_event", Trampolines::addEvent);
     set("query", Trampolines::query);
+    set("tray", Trampolines::tray);
     set("remove", Trampolines::remove);
     lua_setglobal(state_, "__ybar_raw");
 }

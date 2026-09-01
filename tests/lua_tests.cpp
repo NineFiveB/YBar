@@ -141,6 +141,26 @@ TEST_CASE("ybar.query returns JSON and query_table returns a table") {
     CHECK(f.store.find("q")->label.string == "text");
 }
 
+TEST_CASE("ybar.tray reaches the tray verb without shelling out") {
+    // This binding exists to stop the config spending 35-55 ms per click
+    // spawning cmd.exe and the CLI to reach the daemon already running it, so
+    // it has to stay wired to the verb. Results are routed through item labels
+    // because the fixture asserts on the store, not on Lua globals.
+    Fixture f;
+    f.run(R"(
+        ybar.add("item", "arity", "left", { label = tostring(ybar.tray("Discord")) })
+        ybar.add("item", "unwired", "left", { label = tostring(ybar.tray("Discord", "close")) })
+        ybar.add("item", "verb", "left", { label = tostring(ybar.tray("Discord", "poke")) })
+    )");
+    REQUIRE(f.store.find("arity"));
+    // Arity is checked before the verb, so a one-argument call never reaches
+    // the handler and cannot be mistaken for a close request.
+    CHECK(f.store.find("arity")->label.string == "[!] tray(name, action) expects two strings");
+    // No hooks in this fixture: the verb must report, not silently succeed.
+    CHECK(f.store.find("unwired")->label.string == "[!] tray actions are not available");
+    CHECK(f.store.find("verb")->label.string == "[!] usage: --tray <name> invoke|close");
+}
+
 TEST_CASE("ybar.animate applies sets directly when no scheduler is wired") {
     Fixture f;
     f.run(R"(

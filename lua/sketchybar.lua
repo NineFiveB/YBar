@@ -121,6 +121,8 @@ function compat.trigger(event, env) ybar.trigger(event, env) end
 function compat.animate(curve, frames, fn) ybar.animate(curve, frames, fn) end
 function compat.delay(seconds, fn) ybar.delay(seconds, fn) end
 function compat.query(name) return ybar.query_table(name) or {} end
+-- WINDOWS ONLY: tray actions in-process, instead of shelling out to the CLI.
+function compat.tray(name, action) return ybar.tray(name, action) end
 function compat.remove(name) ybar.remove(name) end
 
 -- No-ops: the daemon owns the lifecycle. end_config keeps SbarLua's

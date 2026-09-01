@@ -237,13 +237,12 @@ for i = 1, MAX_ROWS do
   rows[i]:subscribe("mouse.clicked", function(env)
     local name = cache[i]
     if not name then return end
-    -- The name comes from a registry tooltip an arbitrary app wrote, and it is
-    -- about to be interpolated into a shell command line. Stripping the quote
-    -- is not enough — &, |, >, ^ and % all mean something to cmd. Refuse the
-    -- row outright rather than build a command out of untrusted text; no real
-    -- tray label contains these, so this only ever fires on something hostile.
-    if name:find('[%c"&|<>%^%%%$`\\]') then return end
-    local quoted = '"' .. name .. '"'
+    -- sbar.tray() reaches the daemon directly. It replaced an
+    -- sbar.exec("ybar --tray ...") that spent 35-55 ms per click spawning
+    -- cmd.exe and then the CLI, to talk to the very process running this code.
+    -- It also retires a quoting hazard: the name is a registry tooltip written
+    -- by an arbitrary app, so building a shell command line out of it needed a
+    -- metacharacter guard. Passed as an argument it is just a string.
 
     if not (env and env.BUTTON == "right") then
       -- LEFT-click opens: un-minimises the window the app already has, or
@@ -258,7 +257,7 @@ for i = 1, MAX_ROWS do
       end
       disarm()
       hide_popup()
-      sbar.exec("ybar --tray " .. quoted .. " invoke")
+      sbar.tray(name, "invoke")
       return
     end
 
@@ -268,7 +267,7 @@ for i = 1, MAX_ROWS do
       return
     end
     disarm()
-    sbar.exec("ybar --tray " .. quoted .. " close")
+    sbar.tray(name, "close")
     -- Repopulate rather than closing the popup: the list should visibly lose
     -- the row. The close escalates over ~5s, so re-read once it has settled.
     sbar.delay(6, function()
