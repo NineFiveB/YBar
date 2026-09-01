@@ -354,11 +354,15 @@ HWND  WS_POPUP | (borderless)
   `QueryDisplayConfig` device path (EDID-stable), then rebuild debounced
   500 ms (the sledgehammer, kept). `display=active` = monitor of
   `GetForegroundWindow()`.
-- `fullscreen_show`: detection prefers komorebi state (monocle/maximized
-  container on that monitor) when the provider is live; else appbar
-  `ABN_FULLSCREENAPP` when registered; else the foreground-window-rect ==
-  monitor-rect heuristic (`SHQueryUserNotificationState` alone is unreliable
-  for borderless-fullscreen games). Re-evaluated on the 1 s tick, on
+- `fullscreen_show`: detection ANDs two signals —
+  `SHQueryUserNotificationState` in {`QUNS_BUSY`,
+  `QUNS_RUNNING_D3D_FULL_SCREEN`, `QUNS_PRESENTATION_MODE`} for *whether* a
+  real full-screen app owns the session, and foreground-window-rect ==
+  monitor-rect for *which* monitor. Neither alone is right: the shell state
+  has no per-monitor notion, and geometry alone cannot tell a full-screen app
+  from an ordinary borderless window that merely spans the display — hiding
+  the bar under a "Windowed (Fullscreen)" game and a maximized borderless
+  editor was user-reported. Re-evaluated on the 1 s tick, on
   `ABN_FULLSCREENAPP`, and on every workspace switch (a switch changes the
   foreground window). **Policy per monitor**: `fullscreen_show=on` elevates
   that surface to topmost *over* the fullscreen window (macOS parity);

@@ -586,9 +586,26 @@ void BarSurface::setHiddenForFullscreen(bool hidden) {
 }
 
 bool BarSurface::monitorHasFullscreenWindow() const {
-    // Borderless-fullscreen games never change the shell notification state,
-    // so the reliable test is geometry: the foreground window covering this
-    // monitor exactly (spec 6).
+    // Two signals, because neither is sufficient alone:
+    //
+    //  * SHQueryUserNotificationState says WHETHER the session is running a
+    //    genuine full-screen app, but says nothing about which monitor.
+    //  * The foreground-rect-covers-the-monitor test says WHERE, but cannot
+    //    tell a real full-screen app from an ordinary borderless window that
+    //    merely happens to span the display — a maximized borderless editor,
+    //    or a game running "Windowed (Fullscreen)". Hiding the bar under
+    //    those was user-reported: geometry alone is too eager.
+    //
+    // Requiring both means the bar yields to an actual full-screen app and
+    // stays put for a window that is merely large. QUNS_BUSY covers the
+    // generic full-screen case, _RUNNING_D3D_FULL_SCREEN exclusive-mode
+    // games, and _PRESENTATION_MODE projector sessions.
+    QUERY_USER_NOTIFICATION_STATE notification{};
+    if (FAILED(SHQueryUserNotificationState(&notification))) return false;
+    if (notification != QUNS_BUSY && notification != QUNS_RUNNING_D3D_FULL_SCREEN &&
+        notification != QUNS_PRESENTATION_MODE)
+        return false;
+
     const HWND foreground = GetForegroundWindow();
     if (!foreground || foreground == impl_->hwnd) return false;
     if (MonitorFromWindow(foreground, MONITOR_DEFAULTTONEAREST) !=

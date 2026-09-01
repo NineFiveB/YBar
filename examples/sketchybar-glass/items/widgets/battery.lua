@@ -166,11 +166,19 @@ local history = sbar.add("graph", "widgets.battery.history", history_buckets, {
   label = { drawing = false },
   padding_left = inset,
   padding_right = inset,
-  -- Lift the plot off the separator below it. The graph draws its own line
-  -- along the bottom of the box for zero samples, in a near-white stroke;
-  -- without this it lands on top of the dim separator and the two read as
-  -- one thick line.
-  y_offset = 8,
+})
+
+-- Breathing room UNDER the plot. The graph needs to clear the dim separator
+-- below it (its zero-line is a near-white stroke along the box's bottom edge,
+-- and the two otherwise read as one thick line) — but a y_offset lift moved
+-- the box's TOP up too, so a 100% spike collided with the "Battery Level"
+-- label. A spacer pushes the separator down instead, leaving both edges clear.
+sbar.add("item", {
+  position = popup_pos,
+  width = popup_width,
+  icon = { drawing = false },
+  label = { drawing = false },
+  background = { height = 8, color = colors.transparent, drawing = true },
 })
 
 local function push_history_sample(charge)
