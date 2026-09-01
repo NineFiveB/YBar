@@ -188,7 +188,7 @@ TEST_CASE("hotload validates its boolean and reaches the hook") {
     CHECK(hotload);
 }
 
-TEST_CASE("--window validates its arguments and reaches the hook") {
+TEST_CASE("window verb validates its arguments and reaches the hook") {
     // The tray widget's action verb (spec 10.6). Argument validation must
     // happen before the hook so a malformed hwnd can never reach Win32.
     Fixture f;
@@ -218,7 +218,7 @@ TEST_CASE("--window validates its arguments and reaches the hook") {
     CHECK(seenAction == "kill");
 }
 
-TEST_CASE("--query windows returns the running-app list from the hook") {
+TEST_CASE("query windows returns the running-app list from the hook") {
     Fixture f;
     // Unwired (headless) yields an empty JSON array, never an item lookup.
     CHECK(f.run({"--query", "windows"}) == "[]");
