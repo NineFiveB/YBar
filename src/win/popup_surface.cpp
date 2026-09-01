@@ -200,8 +200,24 @@ void PopupSurface::present(ybar::model::Size panelSize, const ybar::model::Rect&
     MONITORINFO info{sizeof(info)};
     if (GetMonitorInfoW(MonitorFromPoint(anchorPoint, MONITOR_DEFAULTTONEAREST), &info)) {
         const auto& bounds = info.rcMonitor;
-        if (x + widthPx > bounds.right) x = bounds.right - widthPx;
-        if (x < bounds.left) x = bounds.left;
+        // Stop short of the edge instead of sitting flush against it. A
+        // clamped popup otherwise touches the bezel while an unclamped one
+        // does not: the calendar right-aligns to its own pill and so inherits
+        // the inset the bar's rightmost pill already leaves, but the tray
+        // popup is centred on an item near the edge, overflows, and used to be
+        // pinned hard to bounds.right. This margin is that same inset, so a
+        // clamped popup lines up with one that never needed clamping. It is a
+        // theme-spacing constant, not a derived one: the bar's padding lives
+        // in Lua and never reaches this layer.
+        constexpr double kEdgeMarginPt = 7.0;
+        const double margin = kEdgeMarginPt * scale;
+        const double maxX = bounds.right - margin - widthPx;
+        const double minX = bounds.left + margin;
+        if (x > maxX) x = maxX;
+        // Applied second on purpose: a popup wider than the monitor then lands
+        // on the left margin and overflows to the right, instead of the clamp
+        // above shoving it off-screen to the left.
+        if (x < minX) x = minX;
         // Vertical flip rather than a slide: a panel overlapping its own host
         // swallows the clicks meant for it.
         if (y + heightPx > bounds.bottom) y = anchor.y - heightPx - yOffset * scale;
