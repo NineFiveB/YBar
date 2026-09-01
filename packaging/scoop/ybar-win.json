@@ -12,7 +12,7 @@
     "architecture": {
         "64bit": {
             "url": "https://github.com/NineFiveB/YBar/releases/download/win-v0.1.0/ybar-win-0.1.0-x64.zip",
-            "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+            "hash": "a3aa5dc30488ad2db632a8badbf6950769da70165833afbbaf7fc09d216a7df1"
         }
     },
     "bin": "ybar.exe",
