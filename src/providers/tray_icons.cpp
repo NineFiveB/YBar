@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -29,6 +30,7 @@
 #include <iterator>
 #include <map>
 #include <set>
+#include <thread>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -225,6 +227,30 @@ std::string cacheIconPng(const std::vector<std::byte>& blob) {
         }
     }
     return narrow(path);
+}
+
+std::vector<DWORD> processesForImage(const std::wstring& leafLower) {
+    std::vector<DWORD> pids;
+    const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return pids;
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    if (Process32FirstW(snapshot, &entry)) {
+        do {
+            if (lower(entry.szExeFile) == leafLower) pids.push_back(entry.th32ProcessID);
+        } while (Process32NextW(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+    return pids;
+}
+
+BOOL CALLBACK postCloseToOwned(HWND hwnd, LPARAM param) {
+    DWORD owner = 0;
+    GetWindowThreadProcessId(hwnd, &owner);
+    // Post, never Send: a hung app would otherwise block the bar's UI thread
+    // for the full SendMessage timeout.
+    if (owner == static_cast<DWORD>(param)) PostMessageW(hwnd, WM_CLOSE, 0, 0);
+    return TRUE;
 }
 
 std::set<std::wstring> runningExecutables() {
@@ -464,6 +490,44 @@ std::string invokeTrayIcon(const std::string& name) {
         return "[!] could not activate " + name;
     }
     return "[!] no tray icon named " + name;
+}
+
+std::string closeTrayApp(const std::string& name) {
+    std::string exePath;
+    for (const auto& icon : trayIcons())
+        if (icon.name == name) {
+            exePath = icon.exePath;
+            break;
+        }
+    if (exePath.empty()) return "[!] no tray icon named " + name;
+
+    const std::wstring leaf = lower(baseName(widen(exePath)));
+    // trayIcons() already drops explorer.exe, so this only fires if that ever
+    // changes — but killing the shell from a bar built to replace the taskbar
+    // is not a mistake worth leaving reachable.
+    if (leaf == L"explorer.exe") return "[!] refusing to close the Windows shell";
+
+    auto pids = processesForImage(leaf);
+    std::erase(pids, GetCurrentProcessId()); // never close the bar itself
+    if (pids.empty()) return "[!] " + name + " is not running";
+
+    for (const DWORD pid : pids) EnumWindows(postCloseToOwned, static_cast<LPARAM>(pid));
+
+    // Escalate off the UI thread: a tray app's usual answer to WM_CLOSE is to
+    // hide, so waiting for a clean exit and then forcing it is the only thing
+    // that actually removes it. OpenProcess failing is the natural guard on
+    // anything running at a higher integrity level than the bar — those simply
+    // survive rather than needing a blocklist.
+    std::thread([pids] {
+        std::this_thread::sleep_for(std::chrono::seconds(3));
+        for (const DWORD pid : pids) {
+            const HANDLE process = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pid);
+            if (!process) continue;
+            if (WaitForSingleObject(process, 0) == WAIT_TIMEOUT) TerminateProcess(process, 0);
+            CloseHandle(process);
+        }
+    }).detach();
+    return {};
 }
 
 } // namespace ybar::providers

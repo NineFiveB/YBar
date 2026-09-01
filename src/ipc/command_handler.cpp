@@ -418,8 +418,12 @@ std::string CommandHandler::handleBatch(const Batch& batch,
     }
 
     if (batch.domain == "tray") { // ybar-win extension (spec 10.6)
-        if (args.size() != 2 || args[1] != "invoke")
-            return "[!] usage: --tray <name> invoke";
+        if (args.size() != 2 || (args[1] != "invoke" && args[1] != "close"))
+            return "[!] usage: --tray <name> invoke|close";
+        if (args[1] == "close") {
+            if (!hooks_.trayClose) return "[!] tray actions are not available";
+            return hooks_.trayClose(args[0]);
+        }
         if (!hooks_.trayInvoke) return "[!] tray actions are not available";
         return hooks_.trayInvoke(args[0]);
     }

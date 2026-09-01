@@ -2018,6 +2018,9 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     hooks.trayInvoke = [](const std::string& name) {
         return ybar::providers::invokeTrayIcon(name);
     };
+    hooks.trayClose = [](const std::string& name) {
+        return ybar::providers::closeTrayApp(name);
+    };
     state.handler = std::make_unique<ybar::ipc::CommandHandler>(state.store, state.settings,
                                                                 state.bus, hooks,
                                                                 &state.scheduler);

@@ -62,4 +62,18 @@ std::string serializeTrayIcons(const std::vector<TrayIcon>& icons);
 // otherwise launches the owning executable. "" on success, else a message.
 std::string invokeTrayIcon(const std::string& name);
 
+// `--tray "<name>" close` — quits the app behind a tray icon, which is the
+// only way to reach a background app once the shell taskbar is hidden.
+//
+// Task Manager's "End task" semantics, deliberately: WM_CLOSE to every window
+// the owning processes have, then a terminate for whatever is still alive a
+// few seconds later. WM_CLOSE alone does not work here — a tray app's usual
+// response is to HIDE to the tray, which is precisely the state being escaped
+// — and terminating outright would rob apps that do quit cleanly of the
+// chance to save. The escalation runs on a detached thread so the caller
+// never blocks the UI.
+//
+// Returns "" once the request is issued (not once the app is gone).
+std::string closeTrayApp(const std::string& name);
+
 } // namespace ybar::providers

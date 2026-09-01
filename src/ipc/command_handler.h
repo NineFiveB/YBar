@@ -54,6 +54,7 @@ struct DaemonHooks {
     // activates one through UI Automation (spec 10.6).
     std::function<std::string()> trayIcons;
     std::function<std::string(const std::string&)> trayInvoke;
+    std::function<std::string(const std::string&)> trayClose;
 };
 
 class CommandHandler {

@@ -6,10 +6,15 @@ local settings = require("settings")
 -- that hides the shell taskbar otherwise leaves no way to reach the icons that
 -- live there — NVIDIA Settings, Radeon Software, OneDrive, antivirus.
 --
+-- Left-click a row opens the app; RIGHT-click quits it. Quitting is the point
+-- of a tray on a bar that hides the taskbar — a background app is otherwise
+-- unreachable — and it follows Task Manager's "End task" semantics: WM_CLOSE
+-- first, then a terminate for whatever ignored it (see closeTrayApp).
+--
 -- These are NOT windows: they are Shell_NotifyIcon registrations owned by
 -- Explorer, so the running-apps enumeration cannot see them. `ybar --query
 -- tray` reads Explorer's registration list and reports the entries whose owner
--- is running; `ybar --tray "<name>" invoke` activates one. See
+-- is running; `ybar --tray "<name>" invoke|close` acts on one. See
 -- src/providers/tray_icons.cpp for why that beats the UI Automation walk it
 -- replaced (which saw only the icons promoted onto the taskbar — 1 of 11 here —
 -- and reported an empty label for a third of the rest).
@@ -131,10 +136,20 @@ local taskmgr_row = sbar.add("item", "widgets.apps.taskmgr", {
     align = "left",
     color = colors.white,
     font = { size = 10.5 },
-    width = popup_width - inset,
+    width = popup_width / 2,
     padding_left = inset,
   },
-  label = { drawing = false },
+  -- Right-click to quit is not a discoverable gesture on its own, and the
+  -- consequence of finding it by accident is a killed app, so it is spelled
+  -- out rather than left to be stumbled into.
+  label = {
+    string = "right-click a row to quit",
+    align = "right",
+    color = colors.grey,
+    font = { size = 9.5 },
+    width = popup_width / 2,
+    padding_right = inset,
+  },
 })
 
 -- ── State ──────────────────────────────────────────────────────────────────
@@ -166,13 +181,28 @@ end
 
 -- ── Interactions ───────────────────────────────────────────────────────────
 for i = 1, MAX_ROWS do
-  rows[i]:subscribe("mouse.clicked", function()
+  rows[i]:subscribe("mouse.clicked", function(env)
     local name = cache[i]
     if not name then return end
+    local quoted = '"' .. name:gsub('"', "") .. '"'
+    if env and env.BUTTON == "right" then
+      -- Quitting is the whole point of a tray on a bar that hides the
+      -- taskbar: with no taskbar there is otherwise no way to reach a
+      -- background app at all. Right-click rather than a per-row button so it
+      -- cannot be hit by accident, and matching Windows, where the tray's
+      -- quit lives behind the right-click menu.
+      sbar.exec("ybar --tray " .. quoted .. " close")
+      -- Repopulate instead of closing: the list should visibly lose the row.
+      -- The close escalates over ~3s, so re-read after it has settled.
+      sbar.delay(4, function()
+        if tray_bracket:query().popup.drawing == "on" then populate() end
+      end)
+      return
+    end
     -- Invoke opens the app's own tray UI (its window or context menu), so the
     -- popup should get out of the way.
     hide_popup()
-    sbar.exec('ybar --tray "' .. name:gsub('"', "") .. '" invoke')
+    sbar.exec("ybar --tray " .. quoted .. " invoke")
   end)
 end
 
