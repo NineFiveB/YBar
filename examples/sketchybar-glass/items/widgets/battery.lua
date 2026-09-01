@@ -49,10 +49,13 @@ local battery = sbar.add("slider", "widgets.battery", 20, {
   -- wraps the members' CONTENT boxes; a slider has no icon padding to supply
   -- margin). Item padding lands OUTSIDE the pill, so it must MATCH the bracket
   -- padding for the pill to reserve its full width in the flow and keep the
-  -- inter-pill gaps uniform (~2pt each side + spacer). The 1px asymmetry offsets
-  -- the calendar's leading spacer so both battery gaps land on the shared 6pt.
+  -- inter-pill gaps uniform (spacer only).
+  -- This was 8, one short of the bracket, to offset the calendar's leading
+  -- spacer back when calendar was the pill after battery. The tray sits
+  -- between them now, so the correction was being applied to the wrong gap
+  -- and only made battery->tray 5pt against everyone else's 6.
   padding_left = 9,
-  padding_right = 8,
+  padding_right = 9,
 })
 
 local battery_bracket = sbar.add("bracket", "widgets.battery.bracket", { battery.name }, {

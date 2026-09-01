@@ -40,10 +40,15 @@ local cpu = sbar.add("slider", "widgets.cpu", 52, {
   -- the glyph and the meter, not a pill margin.
   icon = { string = icons.cpu, padding_left = 0, padding_right = 7 },
   label = { drawing = false },
-  -- Keeps the cpu->wifi gap on the shared inter-pill spacing (was paddings+5
-  -- = 8, which made that gap double the others). Uses the theme setting so
-  -- retuning group_paddings still moves this gap with the rest.
-  padding_right = settings.group_paddings
+  -- These MUST match the bracket's padding below. The pill is drawn at
+  -- content box + BRACKET padding while the item box is content box + ITEM
+  -- padding, so any difference is pill overhanging item, and it comes
+  -- straight out of the gap to the neighbour: at the previous value of 2
+  -- against a bracket 9 the CPU pill overhung by 7 and ended up 1pt ON TOP of
+  -- the wifi pill. Equal values make pill edge == item edge, which leaves the
+  -- inter-pill gap equal to the spacer item alone, like every other pill.
+  padding_left = 9,
+  padding_right = 9
 })
 
 local cpu_bracket = sbar.add("bracket", "widgets.cpu.bracket", { cpu.name }, {

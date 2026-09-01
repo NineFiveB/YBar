@@ -49,7 +49,14 @@ local cal = sbar.add("item", "calendar", {
   -- on the minute); os.date is cheap. A time-zone change updates instantly via
   -- WM_TIMECHANGE regardless (the daemon re-reads the zone and refreshes).
   update_freq = 10,
-  padding_left = 1,
+  -- padding_left is one LESS than padding_right on purpose. This is the only
+  -- pill painted by the ITEM's own background (its bracket is transparent),
+  -- and it is the only one with a border — a border whose colour is 15% black
+  -- over a near-black strip, i.e. invisible. So the edge the eye reads is the
+  -- bg2 fill, one point INSIDE the box the geometry reports, and matching the
+  -- gaps numerically left this one looking a point wider than the rest.
+  -- Measured at 2x: 12px like every other gap here, 14px at 1, 16px at 2.
+  padding_left = 0,
   padding_right = 1,
   background = {
     color = colors.bg2,
