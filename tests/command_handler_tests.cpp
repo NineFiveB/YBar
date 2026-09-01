@@ -234,14 +234,16 @@ TEST_CASE("query windows returns the running-app list from the hook") {
 
 TEST_CASE("tray verb validates its arguments and reaches the hook") {
     Fixture f;
-    CHECK(f.run({"--tray"}) == "[!] usage: --tray <name> invoke");
-    CHECK(f.run({"--tray", "OneDrive"}) == "[!] usage: --tray <name> invoke");
-    CHECK(f.run({"--tray", "OneDrive", "poke"}) == "[!] usage: --tray <name> invoke");
+    CHECK(f.run({"--tray"}) == "[!] usage: --tray <name> invoke|close");
+    CHECK(f.run({"--tray", "OneDrive"}) == "[!] usage: --tray <name> invoke|close");
+    CHECK(f.run({"--tray", "OneDrive", "poke"}) == "[!] usage: --tray <name> invoke|close");
     CHECK(f.run({"--tray", "OneDrive", "invoke"}) == "[!] tray actions are not available");
+    CHECK(f.run({"--tray", "OneDrive", "close"}) == "[!] tray actions are not available");
     // Unwired query yields an empty list, never an item lookup.
     CHECK(f.run({"--query", "tray"}) == "[]");
 
     std::string seen;
+    std::string closed;
     ItemStore store;
     BarSettings settings;
     ybar::events::EventBus bus;
@@ -250,9 +252,38 @@ TEST_CASE("tray verb validates its arguments and reaches the hook") {
         seen = name;
         return std::string{};
     };
+    hooks.trayClose = [&](const std::string& name) {
+        closed = name;
+        return std::string{};
+    };
     hooks.trayIcons = [] { return std::string("[{\"name\":\"NVIDIA Settings\"}]"); };
     CommandHandler handler{store, settings, bus, hooks};
     CHECK(handler.handle({"--tray", "NVIDIA Settings", "invoke"}).empty());
     CHECK(seen == "NVIDIA Settings");
     CHECK(handler.handle({"--query", "tray"}) == "[{\"name\":\"NVIDIA Settings\"}]");
+
+    // close must route to its OWN hook. The two verbs are not interchangeable:
+    // one raises a window, the other terminates processes, so a dispatch that
+    // confused them would be a genuinely dangerous bug.
+    CHECK(handler.handle({"--tray", "Discord", "close"}).empty());
+    CHECK(closed == "Discord");
+    CHECK(seen == "NVIDIA Settings"); // the invoke hook stayed untouched
+}
+
+TEST_CASE("tray close reports unavailable rather than falling back to invoke") {
+    // A partially wired build must say so. Falling through to trayInvoke would
+    // OPEN the app in response to a request to close it — the worst possible
+    // reading of the user's intent.
+    ItemStore store;
+    BarSettings settings;
+    ybar::events::EventBus bus;
+    DaemonHooks hooks;
+    bool invoked = false;
+    hooks.trayInvoke = [&](const std::string&) {
+        invoked = true;
+        return std::string{};
+    };
+    CommandHandler handler{store, settings, bus, hooks};
+    CHECK(handler.handle({"--tray", "Discord", "close"}) == "[!] tray actions are not available");
+    CHECK_FALSE(invoked);
 }
