@@ -655,10 +655,26 @@ document that these two escape the shell decision.
 `--add alias` and `ybar.add("alias", …)` return
 `[!] alias items are not supported on Windows`; `alias.*` property sets on
 nonexistent aliases keep the standard error; `--query` never reports
-`type=alias`. Rationale: menu-bar extras don't exist; tray icons are toolbar
-buttons inside Explorer with no per-icon capture API. A future tray widget
-(UIA over `TrayNotifyWnd` + `Windows.Graphics.Capture` crop) may revive the
-grammar — explicitly out of scope v1.
+`type=alias`. Rationale: menu-bar extras don't exist, and the notification
+area exposes no per-icon capture API.
+
+A **text** tray widget shipped instead (`src/providers/tray_icons.h`); it
+lists names, not captured pixels, so it does not revive the `alias` grammar.
+Two claims in this section's original rationale were measured false on
+26200.9168 and are recorded so they are not re-derived:
+
+- Tray icons are **not** toolbar buttons. The `TrayNotifyWnd` > `SysPager` >
+  `ToolbarWindow32` + `TB_GETBUTTON`/`TRAYDATA` technique is dead on 22H2
+  Moment 2+: `TrayNotifyWnd` is an empty leaf and no `ToolbarWindow32`
+  exists anywhere in the session.
+- UIA is **not** a sufficient source. It sees only the icons promoted onto
+  the taskbar (1 of 11 here), because the overflow flyout's host window is
+  created on demand and destroyed on dismiss; and even with that window
+  forced open it reported an empty `Name` for 3 of 10 overflow icons.
+
+The list therefore comes from `HKCU\Control Panel\NotifyIconSettings`
+filtered by process liveness. Activation still goes through UIA's
+InvokePattern where the element exists, falling back to launching the owner.
 
 ---
 
