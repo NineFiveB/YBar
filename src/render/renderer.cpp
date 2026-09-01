@@ -119,11 +119,34 @@ public:
 
     void resize(int widthPx, int heightPx) override {
         if (widthPx == width && heightPx == height) return;
+
+        // ResizeBuffers refuses while ANY reference to the back buffer is
+        // outstanding, and releasing our own ComPtr is not enough: draw() binds
+        // the RTV through OMSetRenderTargets and the output-merger holds a
+        // reference of its own. Unbound, every resize returned
+        // DXGI_ERROR_INVALID_CALL — unchecked — leaving the swap chain at its
+        // old size while createRtv() below re-viewed the stale back buffer.
+        rtv.Reset();
+        ComPtr<ID3D11DeviceContext> context;
+        device->GetImmediateContext(&context);
+        if (context) {
+            context->OMSetRenderTargets(0, nullptr, nullptr);
+            context->Flush(); // retire the reference the binding still defers
+        }
+
+        const HRESULT hr = swapChain->ResizeBuffers(
+            0, static_cast<UINT>(widthPx), static_cast<UINT>(heightPx), DXGI_FORMAT_UNKNOWN, 0);
+        if (FAILED(hr)) {
+            // Keep the old width/height so the equality check above does not
+            // swallow a retry at this same size, and still rebuild a view so
+            // the surface keeps drawing rather than going black.
+            std::fprintf(stderr, "[ybar] swap chain resize to %dx%d failed (0x%08lx)\n", widthPx,
+                         heightPx, static_cast<unsigned long>(hr));
+            createRtv();
+            return;
+        }
         width = widthPx;
         height = heightPx;
-        rtv.Reset();
-        swapChain->ResizeBuffers(0, static_cast<UINT>(widthPx), static_cast<UINT>(heightPx),
-                                 DXGI_FORMAT_UNKNOWN, 0);
         createRtv();
     }
 

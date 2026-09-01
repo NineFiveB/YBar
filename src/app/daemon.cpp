@@ -135,6 +135,12 @@ struct DaemonState {
     std::vector<std::unique_ptr<ybar::win::BarSurface>> surfaces;
     std::unordered_map<int, std::unique_ptr<ybar::render::GlyphAtlas>> atlases; // key: scale*100
     bool renderQueued = false;
+    // Surface-loss recovery (see recoverMissingSurfaces). The report is latched
+    // and the retry backs off, so a permanently dead GPU stack costs one
+    // rebuild a minute rather than one a second.
+    bool surfaceLossReported = false;
+    int surfaceRetryCountdown = 0; // ticks left before the next attempt
+    int surfaceRetryDelay = 1;     // seconds, doubles to a cap while failing
     // Windows "Transparency effects": gates DWM Acrylic and forces popup panels
     // opaque when off. Cached and refreshed on WM_SETTINGCHANGE (spec 7.6).
     bool systemTransparency = ybar::win::systemTransparencyEnabled();
@@ -223,6 +229,7 @@ struct DaemonState {
 
     void executeConfig();
     void rebuildSurfaces();
+    void recoverMissingSurfaces();
     bool tryAttachKomorebi();
     bool tryAttachYTile();
     void detachKomorebiIfReserveChanged();
@@ -536,6 +543,7 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                 }
                 // Per-second upkeep: none of these have a message to hang off.
                 g_state->updateFullscreenElevation();
+                g_state->recoverMissingSurfaces(); // a mode change can eat them
                 g_state->detachKomorebiIfReserveChanged(); // reserve left WM mode
                 g_state->tryAttachKomorebi(); // komorebi may have just started
                 g_state->tryAttachYTile();    // ytile likewise (komorebi absent)
@@ -844,7 +852,15 @@ void DaemonState::rebuildSurfaces() {
     for (const auto& monitor : ybar::win::enumerateMonitors()) {
         if (!settings.includesDisplay(monitor.arrangementIndex, monitor.primary)) continue;
         auto surface = ybar::win::BarSurface::create(*renderer, monitor, settings);
-        if (!surface) continue;
+        if (!surface) {
+            // Observed for real: a resolution change left every creation
+            // failing here, and because this was a silent `continue` the bar
+            // simply vanished for the rest of the session.
+            // recoverMissingSurfaces() on the 1 s tick retries.
+            std::fprintf(stderr, "[ybar] bar surface creation failed on display %d\n",
+                         monitor.arrangementIndex);
+            continue;
+        }
         surfaces.push_back(std::move(surface));
     }
     surfaceFrames.assign(surfaces.size(), {});
@@ -856,6 +872,47 @@ void DaemonState::rebuildSurfaces() {
     // foreground, so nothing else re-checks until the 1 s tick), re-apply the
     // fullscreen policy now so the rebuilt bar doesn't flash over it.
     updateFullscreenElevation();
+}
+
+// rebuildSurfaces() is a one-shot fired 500 ms after WM_DISPLAYCHANGE, and a
+// display-mode change can still have DXGI refusing to create a swap chain at
+// that point. When it does, every surface is already torn down and nothing
+// retries: the bar disappears until the daemon is restarted. This was not
+// theoretical — a 2880x1800 -> 1440x900 mode set killed the bar in exactly
+// this way, leaving a live daemon serving IPC with zero windows and an empty
+// log.
+//
+// So re-check from the 1 s tick, the same way komorebi is re-attached there.
+// A rebuild costs an enumerate + create per second only while surfaces are
+// actually missing, which is the situation where the alternative is no bar.
+void DaemonState::recoverMissingSurfaces() {
+    if (!renderer) return; // no GPU stack at all: IPC-only mode, nothing to do
+    std::size_t wanted = 0;
+    for (const auto& monitor : ybar::win::enumerateMonitors())
+        if (settings.includesDisplay(monitor.arrangementIndex, monitor.primary)) ++wanted;
+    // wanted == 0 is legitimate — every display excluded by config, or the
+    // session momentarily has no monitors — and must not drive a rebuild loop.
+    if (wanted == 0 || surfaces.size() >= wanted) {
+        surfaceLossReported = false;
+        surfaceRetryCountdown = 0;
+        surfaceRetryDelay = 1;
+        return;
+    }
+    if (surfaceRetryCountdown > 0) {
+        --surfaceRetryCountdown;
+        return;
+    }
+    if (!surfaceLossReported) {
+        std::fprintf(stderr, "[ybar] %zu of %zu bar surfaces missing — rebuilding\n",
+                     wanted - surfaces.size(), wanted);
+        surfaceLossReported = true;
+    }
+    rebuildSurfaces();
+    // Back off when the rebuild did not take. A transient mode change recovers
+    // on the first or second try; a removed device never does, and retrying it
+    // every second would only burn the GPU stack and the log.
+    surfaceRetryDelay = surfaces.size() < wanted ? (std::min)(surfaceRetryDelay * 2, 60) : 1;
+    surfaceRetryCountdown = surfaces.size() < wanted ? surfaceRetryDelay : 0;
 }
 
 // Subscribes to komorebi when it is running and we are not already attached.
