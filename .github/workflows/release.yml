@@ -14,6 +14,12 @@ on:
 jobs:
   release:
     runs-on: windows-latest
+    # The signing identity's federated credential matches the OIDC subject
+    # `repo:<org>/<repo>:environment:release` (the convention every repo on
+    # the shared signer uses). Without this line a tag push presents
+    # `ref:refs/tags/win-v*` instead and the Azure login fails with
+    # AADSTS700213 — seen live on the first win-v0.1.0 run.
+    environment: release
     permissions:
       # id-token: the OIDC token for the Azure signing login (no stored
       # secrets). contents: write publishes the release.
@@ -126,6 +132,9 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
+          # Explicit: a workflow_dispatch run's github.ref is a branch, and
+          # the action refuses non-tag refs without this.
+          tag_name: win-v${{ steps.version.outputs.value }}
           name: ybar-win ${{ steps.version.outputs.value }}
           files: ${{ steps.package.outputs.zip }}
           body: |
