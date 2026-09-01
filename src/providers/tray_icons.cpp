@@ -295,19 +295,53 @@ struct CloseTarget {
     DWORD pid;
 };
 
-std::set<std::wstring> runningExecutables() {
-    std::set<std::wstring> names;
+// What is running, described as precisely as the process will allow.
+//
+// Full paths are the real answer, but not every process yields one: NVIDIA's
+// tray icon belongs to NVDisplay.Container.exe running as SYSTEM, which a
+// normal process cannot open at all. Those degrade to a bare executable name,
+// which is why both sets exist.
+struct LiveImages {
+    std::set<std::wstring> paths;     // lowercased, for processes we could read
+    std::set<std::wstring> basenames; // lowercased, for processes we could not
+};
+
+LiveImages liveImages() {
+    LiveImages live;
     const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snapshot == INVALID_HANDLE_VALUE) return names;
+    if (snapshot == INVALID_HANDLE_VALUE) return live;
     PROCESSENTRY32W entry{};
     entry.dwSize = sizeof(entry);
     if (Process32FirstW(snapshot, &entry)) {
         do {
-            names.insert(lower(entry.szExeFile));
+            const HANDLE process =
+                OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.th32ProcessID);
+            std::wstring path;
+            if (process) {
+                path = lower(imagePathOf(process));
+                CloseHandle(process);
+            }
+            if (path.empty())
+                live.basenames.insert(lower(entry.szExeFile));
+            else
+                live.paths.insert(std::move(path));
         } while (Process32NextW(snapshot, &entry));
     }
     CloseHandle(snapshot);
-    return names;
+    return live;
+}
+
+// A registration counts as live when its exact executable is running, or when
+// something by that NAME is running whose path we were not allowed to read.
+//
+// The exact test is what stops phantom rows: this machine registers a tray
+// icon for the packaged Claude desktop app under Program Files, and separately
+// runs Claude Code CLI from AppData. Name-only matching called the desktop app
+// "running" on the strength of the CLI, listing a row for an app that was not
+// there — and worse, pointing it at unrelated processes.
+bool isLive(const LiveImages& live, const std::wstring& fullPathLower,
+            const std::wstring& leafLower) {
+    return live.paths.count(fullPathLower) > 0 || live.basenames.count(leafLower) > 0;
 }
 
 // ── UIA: activation only ──────────────────────────────────────────────────
@@ -390,7 +424,7 @@ std::vector<TrayIcon> trayIcons() {
                       &root) != ERROR_SUCCESS)
         return {};
 
-    const auto running = runningExecutables();
+    const auto live = liveImages();
 
     struct Candidate {
         TrayIcon icon;
@@ -429,7 +463,7 @@ std::vector<TrayIcon> trayIcons() {
         const std::wstring path = resolvePath(regString(entry, L"ExecutablePath"));
         const std::wstring leaf = lower(baseName(path));
         // Explorer's own icons cannot be told apart or named from here.
-        if (path.empty() || leaf == L"explorer.exe" || running.count(leaf) == 0) {
+        if (path.empty() || leaf == L"explorer.exe" || !isLive(live, lower(path), leaf)) {
             RegCloseKey(entry);
             continue;
         }
