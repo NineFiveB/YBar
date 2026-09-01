@@ -295,6 +295,54 @@ struct CloseTarget {
     DWORD pid;
 };
 
+struct MainWindowSearch {
+    DWORD pid;
+    HWND found;
+};
+
+BOOL CALLBACK findMainWindow(HWND hwnd, LPARAM param) {
+    auto* search = reinterpret_cast<MainWindowSearch*>(param);
+    DWORD owner = 0;
+    GetWindowThreadProcessId(hwnd, &owner);
+    if (owner != search->pid) return TRUE;
+    if (GetWindow(hwnd, GW_OWNER)) return TRUE; // an owned dialog, not the app
+    if (GetWindowTextLengthW(hwnd) == 0) return TRUE; // message-only/helper windows
+    search->found = hwnd;
+    return FALSE;
+}
+
+// Brings an app back from minimised OR from hidden-to-tray. Both are what a
+// user means by "open it": a tray app that hid itself has a window that still
+// exists, just without WS_VISIBLE.
+bool restoreWindowOf(DWORD pid) {
+    MainWindowSearch search{pid, nullptr};
+    EnumWindows(findMainWindow, reinterpret_cast<LPARAM>(&search));
+    if (!search.found) return false;
+    ShowWindow(search.found, IsIconic(search.found) ? SW_RESTORE : SW_SHOW);
+    // Best-effort: foreground is refused unless the caller owns it, and the
+    // window is un-minimised either way, which is the part that matters.
+    SetForegroundWindow(search.found);
+    return true;
+}
+
+// PIDs whose FULL image path matches, so an invoke cannot act on an unrelated
+// program that merely shares an executable name — the same rule the close path
+// enforces, for the same reason. Only query rights are taken here; the close
+// path deliberately opens its own handles with the terminate right instead of
+// reusing these, so that a PID cannot be recycled between check and kill.
+std::vector<DWORD> verifiedPids(const std::wstring& leafLower,
+                                const std::wstring& wantedPathLower) {
+    std::vector<DWORD> pids;
+    for (const DWORD pid : processesForImage(leafLower)) {
+        const HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        if (!process) continue;
+        const bool matches = lower(imagePathOf(process)) == wantedPathLower;
+        CloseHandle(process);
+        if (matches) pids.push_back(pid);
+    }
+    return pids;
+}
+
 // What is running, described as precisely as the process will allow.
 //
 // Full paths are the real answer, but not every process yields one: NVIDIA's
@@ -555,11 +603,19 @@ std::string invokeTrayIcon(const std::string& name) {
         }
     }
 
-    // 2. Otherwise launch the owner, which is what raises the window a tray
-    //    click would have raised for every app that keeps a single instance.
     for (const auto& icon : trayIcons()) {
         if (icon.name != name || icon.exePath.empty()) continue;
         const std::wstring path = widen(icon.exePath);
+
+        // 2. Un-minimise the window it already has. This is the case the UIA
+        //    path usually cannot reach: it only sees icons currently promoted
+        //    onto the taskbar or sitting in an open overflow flyout, so for
+        //    most rows the element does not exist and step 1 finds nothing.
+        for (const DWORD pid : verifiedPids(lower(baseName(path)), lower(path)))
+            if (restoreWindowOf(pid)) return {};
+
+        // 3. Nothing to restore, so start it. For a single-instance app this
+        //    is also what raises an existing window.
         const auto result = reinterpret_cast<INT_PTR>(
             ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
         if (result > 32) return {};

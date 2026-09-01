@@ -6,7 +6,8 @@ local settings = require("settings")
 -- that hides the shell taskbar otherwise leaves no way to reach the icons that
 -- live there — NVIDIA Settings, Radeon Software, OneDrive, antivirus.
 --
--- Left-click a row opens the app; RIGHT-click quits it. Quitting is the point
+-- Left-click a row quits the app, after the row asks to confirm; RIGHT-click
+-- opens it, un-minimising the window it already has. Quitting is the point
 -- of a tray on a bar that hides the taskbar — a background app is otherwise
 -- unreachable — and it follows Task Manager's "End task" semantics: WM_CLOSE
 -- first, then a terminate for whatever ignored it (see closeTrayApp).
@@ -139,11 +140,11 @@ local taskmgr_row = sbar.add("item", "widgets.apps.taskmgr", {
     width = popup_width / 2,
     padding_left = inset,
   },
-  -- Right-click to quit is not a discoverable gesture on its own, and the
-  -- consequence of finding it by accident is a killed app, so it is spelled
-  -- out rather than left to be stumbled into.
+  -- Neither gesture is discoverable on its own, and the cost of guessing the
+  -- destructive one wrong is a killed app, so both are spelled out rather
+  -- than left to be stumbled into.
   label = {
-    string = "right-click a row to quit",
+    string = "click to quit · right-click to open",
     align = "right",
     color = colors.grey,
     font = { size = 9.5 },
@@ -155,12 +156,63 @@ local taskmgr_row = sbar.add("item", "widgets.apps.taskmgr", {
 -- ── State ──────────────────────────────────────────────────────────────────
 local cache = {}   -- row index -> tray icon name
 
+-- Left-click quits, but never on the first click: the row arms itself and asks
+-- again. A tray list is a dense column of small targets and quitting is not
+-- undoable, so one stray click must not be able to kill an app. The prompt
+-- lives in the row's own label rather than a separate dialog, so the second
+-- click lands exactly where the first one did.
+local armed = nil  -- row index currently asking for confirmation
+local arm_gen = 0  -- invalidates any pending auto-disarm timer
+
+local confirm_width = 46
+
+local function disarm()
+  if armed and rows[armed] then
+    rows[armed]:set({
+      label = { drawing = false },
+      icon = { width = popup_width - gutter }, -- give the name its space back
+    })
+  end
+  armed = nil
+  arm_gen = arm_gen + 1
+end
+
+local function arm(i)
+  disarm()
+  armed = i
+  rows[i]:set({
+    -- The row is a fixed popup_width, and the parts have explicit widths, so
+    -- the prompt has to be taken OUT of the name's column rather than added
+    -- beside it — otherwise the row measures wider than the popup it sits in.
+    icon = { width = popup_width - gutter - confirm_width },
+    label = {
+      drawing = true,
+      string = "quit?",
+      align = "right",
+      color = colors.red, -- the theme's alert tone
+      font = { size = 10.5, style = settings.font.style_map["Bold"] },
+      width = confirm_width,
+      padding_right = inset,
+    },
+  })
+  local gen = arm_gen
+  -- Auto-disarm, so a row left armed cannot be confirmed by an unrelated click
+  -- arriving much later.
+  sbar.delay(4, function()
+    if gen == arm_gen and armed == i then disarm() end
+  end)
+end
+
 local function hide_popup()
+  disarm()
   tray_bracket:set({ popup = { drawing = false } })
 end
 
 local function populate()
   local list = sbar.query("tray") or {}
+  -- Rows are a reused pool, so a stale "quit?" would otherwise end up on
+  -- whichever app happens to land on that index next.
+  disarm()
   cache = {}
   local shown = 0
   for _, entry in ipairs(list) do
@@ -172,7 +224,8 @@ local function populate()
       -- An empty source simply draws nothing, so a row with no resolvable
       -- icon degrades to the old text-only look rather than breaking.
       image = { string = entry.icon or "" },
-      icon = { string = entry.name or "?", color = colors.white },
+      icon = { string = entry.name or "?", color = colors.white, width = popup_width - gutter },
+      label = { drawing = false },
     })
   end
   for i = shown + 1, MAX_ROWS do rows[i]:set({ drawing = false }) end
@@ -191,24 +244,28 @@ for i = 1, MAX_ROWS do
     -- tray label contains these, so this only ever fires on something hostile.
     if name:find('[%c"&|<>%^%%%$`\\]') then return end
     local quoted = '"' .. name .. '"'
+
     if env and env.BUTTON == "right" then
-      -- Quitting is the whole point of a tray on a bar that hides the
-      -- taskbar: with no taskbar there is otherwise no way to reach a
-      -- background app at all. Right-click rather than a per-row button so it
-      -- cannot be hit by accident, and matching Windows, where the tray's
-      -- quit lives behind the right-click menu.
-      sbar.exec("ybar --tray " .. quoted .. " close")
-      -- Repopulate instead of closing: the list should visibly lose the row.
-      -- The close escalates over ~3s, so re-read after it has settled.
-      sbar.delay(4, function()
-        if tray_bracket:query().popup.drawing == "on" then populate() end
-      end)
+      -- Right-click opens: un-minimises the window the app already has, or
+      -- starts it if it has none. A right-click also cancels a pending quit,
+      -- so there is always a way out of the armed state that is not "wait".
+      disarm()
+      hide_popup()
+      sbar.exec("ybar --tray " .. quoted .. " invoke")
       return
     end
-    -- Invoke opens the app's own tray UI (its window or context menu), so the
-    -- popup should get out of the way.
-    hide_popup()
-    sbar.exec("ybar --tray " .. quoted .. " invoke")
+
+    if armed ~= i then
+      arm(i)
+      return
+    end
+    disarm()
+    sbar.exec("ybar --tray " .. quoted .. " close")
+    -- Repopulate rather than closing the popup: the list should visibly lose
+    -- the row. The close escalates over ~5s, so re-read once it has settled.
+    sbar.delay(6, function()
+      if tray_bracket:query().popup.drawing == "on" then populate() end
+    end)
   end)
 end
 
