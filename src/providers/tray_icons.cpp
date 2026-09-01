@@ -4,6 +4,11 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+// UIAutomationCore.h builds on IAccessible and the OLE types, both of which
+// WIN32_LEAN_AND_MEAN excludes — without these it fails to parse its own
+// forward declarations (C2146 on IRawElementProviderSimple).
+#include <ole2.h>
+#include <oleacc.h>
 #include <uiautomation.h>
 #include <shlobj.h>
 // clang-format on
