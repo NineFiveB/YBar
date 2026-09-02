@@ -29,10 +29,14 @@ LuaRuntime* g_current = nullptr; // UI-thread singleton, mirrors LuaRuntime.curr
 // The user-facing Lua API — byte-identical with the reference prelude
 // (LuaRuntime.swift, spec 3.7). Do not edit without editing both.
 //
-// ONE deliberate divergence: ybar.tray(name, action), a Windows-only addition
-// with no macOS counterpart — there is no notification area to act on there.
-// It exists so the config does not have to shell out to the CLI to reach a
-// daemon it is already running inside (see Trampolines::tray).
+// TWO deliberate divergences, both Windows-only additions with no macOS
+// counterpart, both existing so the config does not have to shell out to the
+// CLI to reach a daemon it is already running inside:
+//   ybar.tray(name, action) — there is no notification area on macOS
+//     (see Trampolines::tray);
+//   ybar.volume(pct) — macOS themes shell `osascript -e 'set volume ...'`,
+//     while this daemon already holds the IAudioEndpointVolume
+//     (see Trampolines::volume).
 constexpr char kPrelude[] = R"LUA(local raw = __ybar_raw
 __ybar_raw = nil
 
@@ -96,6 +100,7 @@ function ybar.exec(cmd, fn) raw.exec(cmd, fn) end
 function ybar.add_event(name, notification) local e = raw.add_event(name, notification) if e then print(e) end end
 function ybar.query(target) return raw.query(target) end
 function ybar.tray(name, action) return raw.tray(name, action) end
+function ybar.volume(pct) return raw.volume(pct) end
 function ybar.remove(name) raw.remove(name) end
 
 function ybar.animate(curve, frames, fn)
@@ -460,6 +465,18 @@ struct Trampolines {
         return pushReplyAsOptionalError(L, handleTokens({"--tray", name, action}));
     }
 
+    // ybar.volume(pct) — the second in-process Windows verb (see the tray
+    // rationale above): the daemon already holds the audio endpoint, so a
+    // slider drag becomes one function call instead of a shell round trip.
+    static int volume(lua_State* L) {
+        const char* pct = argCString(L, 1);  // numbers convert in place
+        if (!pct) {
+            lua_pushstring(L, "[!] volume(percent) expects a number");
+            return 1;
+        }
+        return pushReplyAsOptionalError(L, handleTokens({"--volume", pct}));
+    }
+
     static int remove(lua_State* L) {
         const char* name = argCString(L, 1);
         if (!name) return 0;
@@ -540,6 +557,7 @@ void LuaRuntime::registerBridge() {
     set("add_event", Trampolines::addEvent);
     set("query", Trampolines::query);
     set("tray", Trampolines::tray);
+    set("volume", Trampolines::volume);
     set("remove", Trampolines::remove);
     lua_setglobal(state_, "__ybar_raw");
 }

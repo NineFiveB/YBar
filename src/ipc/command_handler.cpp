@@ -428,6 +428,17 @@ std::string CommandHandler::handleBatch(const Batch& batch,
         return hooks_.trayInvoke(args[0]);
     }
 
+    if (batch.domain == "volume") { // ybar-win extension (spec 10, Audio row)
+        if (args.size() != 1) return "[!] usage: --volume <0-100>";
+        char* end = nullptr;
+        const long long pct = std::strtoll(args[0].c_str(), &end, 10);
+        if (!end || *end != '\0' || end == args[0].c_str() || pct < 0 || pct > 100)
+            return "[!] invalid volume: " + args[0];
+        if (!hooks_.setVolume || !hooks_.setVolume(static_cast<int>(pct)))
+            return "[!] volume control is not available";
+        return {};
+    }
+
     if (batch.domain == "exit") {
         if (hooks_.exit) hooks_.exit();
         return {};

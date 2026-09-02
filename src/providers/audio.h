@@ -27,6 +27,12 @@ public:
     // when the value has not changed.
     bool refresh();
 
+    // Sets the default render endpoint's master volume (0-100). Mirrors the
+    // read path's muted->0 convention: 0 mutes (scalar kept), anything else
+    // sets the scalar then unmutes. The resulting OnNotify publishes the new
+    // value through the normal dedupe path, so no manual publish here.
+    bool setVolume(int percent);
+
 private:
     std::unique_ptr<AudioProviderImpl> impl_;
 };

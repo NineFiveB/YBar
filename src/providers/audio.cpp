@@ -224,4 +224,29 @@ bool AudioProvider::refresh() {
     return true;
 }
 
+bool AudioProvider::setVolume(int percent) {
+    if (!impl_->running && !start()) return false;
+    // Snapshot under publishMutex, call COM outside it (file rule above):
+    // the AddRef'd endpoint stays valid across a concurrent device swap,
+    // and IAudioEndpointVolume is free-threaded.
+    ComPtr<IAudioEndpointVolume> endpoint;
+    {
+        std::lock_guard<std::mutex> lock(impl_->publishMutex);
+        endpoint = impl_->volume;
+    }
+    if (!endpoint) return false;
+    const int clamped = percent < 0 ? 0 : (percent > 100 ? 100 : percent);
+    if (clamped == 0) {
+        // Keep the scalar: unmuting later restores the previous level, the
+        // same round trip the muted->0 read convention implies.
+        return SUCCEEDED(endpoint->SetMute(TRUE, nullptr));
+    }
+    // Scalar before unmute so a muted endpoint cannot blip its old level.
+    if (FAILED(endpoint->SetMasterVolumeLevelScalar(static_cast<float>(clamped) / 100.0f,
+                                                    nullptr)))
+        return false;
+    endpoint->SetMute(FALSE, nullptr);
+    return true;
+}
+
 } // namespace ybar::providers

@@ -287,3 +287,36 @@ TEST_CASE("tray close reports unavailable rather than falling back to invoke") {
     CHECK(handler.handle({"--tray", "Discord", "close"}) == "[!] tray actions are not available");
     CHECK_FALSE(invoked);
 }
+
+TEST_CASE("volume verb validates its argument and reaches the hook") {
+    Fixture f;
+    CHECK(f.run({"--volume"}) == "[!] usage: --volume <0-100>");
+    CHECK(f.run({"--volume", "40", "60"}) == "[!] usage: --volume <0-100>");
+    CHECK(f.run({"--volume", "loud"}) == "[!] invalid volume: loud");
+    CHECK(f.run({"--volume", ""}) == "[!] invalid volume: ");
+    CHECK(f.run({"--volume", "40x"}) == "[!] invalid volume: 40x");
+    CHECK(f.run({"--volume", "-5"}) == "[!] invalid volume: -5");
+    CHECK(f.run({"--volume", "101"}) == "[!] invalid volume: 101");
+    // Unwired: the verb must report, not pretend the set happened.
+    CHECK(f.run({"--volume", "40"}) == "[!] volume control is not available");
+
+    int seen = -1;
+    ItemStore store;
+    BarSettings settings;
+    ybar::events::EventBus bus;
+    DaemonHooks hooks;
+    hooks.setVolume = [&](int pct) {
+        seen = pct;
+        return true;
+    };
+    CommandHandler handler{store, settings, bus, hooks};
+    CHECK(handler.handle({"--volume", "0"}).empty());
+    CHECK(seen == 0);
+    CHECK(handler.handle({"--volume", "100"}).empty());
+    CHECK(seen == 100);
+    // A wired hook that FAILS (no endpoint, e.g. no audio device) must
+    // surface, not vanish.
+    hooks.setVolume = [](int) { return false; };
+    CommandHandler failing{store, settings, bus, hooks};
+    CHECK(failing.handle({"--volume", "40"}) == "[!] volume control is not available");
+}

@@ -202,6 +202,64 @@ end
 -- pair-from-CLI surface (macOS used `blueutil --inquiry` / `--pair`);
 -- discovery lives in ms-settings:bluetooth via the footer row.
 
+-- ── Audio mixer ────────────────────────────────────────────────────────────
+-- The system output slider, Windows-quick-settings style — the output is
+-- usually the connected headset when this flyout is open. Same geometry as
+-- the media popup's volume row (both popups are 264 wide), driven by the
+-- same pair of flows: volume_change pushes in, ybar.volume(pct) out — one
+-- in-process call, no shell round trip, no 2 % key quantization.
+sbar.add("item", "widgets.bluetooth.mixer.sep", {
+  position = popup_pos,
+  width = popup_width,
+  icon = { drawing = false },
+  label = { drawing = false },
+  background = { height = 2, color = colors.with_alpha(colors.grey, 0.3) },
+})
+
+local vol_slider = sbar.add("slider", "widgets.bluetooth.volume", 220, {
+  position = popup_pos,
+  width = popup_width,
+  padding_left = 0,
+  padding_right = 0,
+  align = "left",
+  icon = {
+    string = "sf:speaker.wave.2.fill",
+    color = colors.grey,
+    font = { size = 9.5 },
+    padding_left = inset,
+    padding_right = 7,
+  },
+  label = { drawing = false },
+  slider = {
+    percentage = 50,
+    highlight_color = colors.white,
+    background = {
+      height = 5,
+      corner_radius = 3,
+      color = colors.bg2,
+    },
+    knob = {
+      string = "●", -- text bullet; Segoe Fluent Icons maps no circle glyph
+      drawing = true,
+    },
+  },
+})
+
+-- Slider release delivers a plain mouse.clicked with PERCENTAGE (0-100).
+vol_slider:subscribe("mouse.clicked", function(env)
+  local pct = tonumber(env.PERCENTAGE or "")
+  if not pct then return end
+  -- Optimistic paint; the volume_change push from the set settles it.
+  vol_slider:set({ slider = { percentage = pct } })
+  ybar.volume(pct)
+end)
+
+vol_slider:subscribe("volume_change", function(env)
+  local vol = tonumber(env.INFO)
+  if not vol then return end
+  vol_slider:set({ slider = { percentage = vol } })
+end)
+
 -- ── Footer: More Bluetooth settings ────────────────────────────────────────
 sbar.add("item", "widgets.bluetooth.sep", {
   position = popup_pos,

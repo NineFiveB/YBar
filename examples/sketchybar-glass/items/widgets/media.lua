@@ -220,7 +220,7 @@ local vol_slider = sbar.add("slider", "widgets.media.volume", 220, {
 -- volume_change are push events, so nothing here polls.
 local current_app = nil       -- MEDIA_APP app id while something plays/pauses
 local current_key = nil       -- app|artist|album|title of the current track
-local current_volume = 50     -- last volume_change INFO, for slider tick deltas
+local current_volume = 50     -- last volume_change INFO (kept for reference)
 
 -- ── Small helpers ──────────────────────────────────────────────────────────
 local function trunc(s, max_chars)
@@ -240,17 +240,14 @@ local function media_key(code)
     .. "$w=New-Object -ComObject WScript.Shell; $w.SendKeys([char]" .. code .. ")'")
 end
 
--- System volume in 2 % ticks: [char]175 up, [char]174 down. The resulting
--- volume_change events snap the slider to the real value, so no optimistic
--- hold is needed — pushes are actual state, never a stale read.
+-- YBAR PORT, second pass: absolute sets ride the in-process ybar.volume()
+-- verb (the daemon already holds the audio endpoint), replacing the
+-- volume-key SendKeys ladder — no shell spawn per drag, no 2 % quantization.
+-- The volume_change push from the set still settles the slider on the real
+-- value. (Scroll-to-adjust in helpers/win.lua keeps the key ticks: relative
+-- nudges want the OS volume OSD that media keys bring.)
 local function set_system_volume(target)
-  local diff = target - current_volume
-  local ticks = math.floor(math.abs(diff) / 2 + 0.5)
-  if ticks == 0 then return end
-  local key = diff > 0 and 175 or 174
-  sbar.exec("powershell.exe -NoProfile -Command '"
-    .. "$w=New-Object -ComObject WScript.Shell; 1.." .. ticks
-    .. " | % { $w.SendKeys([char]" .. key .. ") }'")
+  ybar.volume(target)
 end
 
 -- ── Open / close ───────────────────────────────────────────────────────────
@@ -359,8 +356,7 @@ media:subscribe("mouse.exited.global", hide_popup)
 vol_slider:subscribe("mouse.clicked", function(env)
   local pct = tonumber(env.PERCENTAGE or "")
   if not pct then return end
-  -- Optimistic paint; the volume_change pushes that follow the key ticks
-  -- settle it on the real (2 %-quantized) value.
+  -- Optimistic paint; the volume_change push from the set settles it.
   vol_slider:set({ slider = { percentage = pct } })
   set_system_volume(pct)
 end)

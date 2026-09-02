@@ -55,6 +55,10 @@ struct DaemonHooks {
     std::function<std::string()> trayIcons;
     std::function<std::string(const std::string&)> trayInvoke;
     std::function<std::string(const std::string&)> trayClose;
+    // `--volume <0-100>` sets the default render endpoint's master volume
+    // through the audio provider (spec 10, Audio row). Inline on the UI
+    // thread; a WASAPI Set is microseconds.
+    std::function<bool(int)> setVolume;
 };
 
 class CommandHandler {

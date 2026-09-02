@@ -2021,6 +2021,13 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     hooks.trayClose = [](const std::string& name) {
         return ybar::providers::closeTrayApp(name);
     };
+    // Master-volume set (spec 10, Audio row). armAudio() first, matching the
+    // forcedQuery precedent, so --volume works before anything subscribes to
+    // volume_change; the resulting OnNotify publishes the new value back.
+    hooks.setVolume = [&state](int percent) {
+        state.armAudio();
+        return state.audio && state.audio->setVolume(percent);
+    };
     state.handler = std::make_unique<ybar::ipc::CommandHandler>(state.store, state.settings,
                                                                 state.bus, hooks,
                                                                 &state.scheduler);

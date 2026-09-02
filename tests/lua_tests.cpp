@@ -161,6 +161,23 @@ TEST_CASE("ybar.tray reaches the tray verb without shelling out") {
     CHECK(f.store.find("verb")->label.string == "[!] usage: --tray <name> invoke|close");
 }
 
+TEST_CASE("ybar.volume reaches the volume verb without shelling out") {
+    // Same rationale as ybar.tray: a slider drag becomes one in-process call.
+    // Numbers convert in place, so both ybar.volume(40) and ybar.volume("40")
+    // are the same request.
+    Fixture f;
+    f.run(R"(
+        ybar.add("item", "arity", "left", { label = tostring(ybar.volume()) })
+        ybar.add("item", "unwired", "left", { label = tostring(ybar.volume(40)) })
+        ybar.add("item", "range", "left", { label = tostring(ybar.volume(101)) })
+    )");
+    REQUIRE(f.store.find("arity"));
+    CHECK(f.store.find("arity")->label.string == "[!] volume(percent) expects a number");
+    // No hooks in this fixture: the verb must report, not silently succeed.
+    CHECK(f.store.find("unwired")->label.string == "[!] volume control is not available");
+    CHECK(f.store.find("range")->label.string == "[!] invalid volume: 101");
+}
+
 TEST_CASE("ybar.animate applies sets directly when no scheduler is wired") {
     Fixture f;
     f.run(R"(
