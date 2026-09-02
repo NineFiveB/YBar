@@ -119,6 +119,10 @@ std::string appNameForExecutablePath(const std::string& path) {
     return narrow(description);
 }
 
+std::string executablePathForProcess(unsigned long processId) {
+    return narrow(imagePathForProcess(static_cast<DWORD>(processId)));
+}
+
 std::string appNameForProcess(unsigned long processId) {
     const std::wstring path = imagePathForProcess(static_cast<DWORD>(processId));
     if (path.empty()) return {};

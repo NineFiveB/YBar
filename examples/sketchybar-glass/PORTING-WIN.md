@@ -25,7 +25,7 @@ installed via `ybar theme use` must be self-contained.
 | `aerospace workspace <ws>` clicks | `ybar --komorebi '{"type":"FocusNamedWorkspace",...}'` |
 | pmset / battery CLI | native `battery_change`/`power_source_change` events + one `Win32_Battery` WMI query for popup details |
 | networksetup / wifi_scan.py | native `wifi_change` event + `netsh wlan show interfaces` for popup details |
-| osascript volume | native `volume_change` event; absolute sets via in-process `ybar.volume(pct)` (sliders); volume media keys only for scroll-to-adjust, which wants the OS volume OSD |
+| osascript volume | native `volume_change` event; absolute sets via in-process `ybar.volume(pct)` (sliders); volume media keys only for scroll-to-adjust, which wants the OS volume OSD. The bluetooth flyout's chevron additionally opens a per-app mixer (`ybar.query_table("audio")` rows + `ybar.volume(pct, id)`) — a Windows-only addition: macOS has no per-app volume API, so the macOS theme has no counterpart to diverge from |
 | media artwork + app matching | `media_change` env (no artwork); transport via media-key synthesis |
 | `x-apple.systempreferences:` links | `explorer.exe "ms-settings:..."` deep links |
 | `open -a Calendar` | `explorer.exe outlookcal:` |

@@ -199,10 +199,12 @@ sorted keys, colors `0x%08x` lowercase. **Coordinate-space note:** `frame` and
 native convention); the macOS build reports AppKit y-up global points for
 `frame`. Document this — do not convert.
 
-Windows extension targets (both arrays, matched **before** item lookup so
+Windows extension targets (all arrays, matched **before** item lookup so
 they reach Lua through the existing query trampoline unchanged): `--query
-windows` returns the running-app list, and `--query tray` the
-notification-area registrations as `{name, hidden, icon}` rows (§10.6).
+windows` returns the running-app list, `--query tray` the notification-area
+registrations as `{name, hidden, icon}` rows (§10.6), and `--query audio`
+the default endpoint's audio-session groups as
+`{id, name, path, volume, muted, active}` rows (§10, Audio row).
 
 ### 3.7 Lua API (`LuaRuntime.swift` + prelude + sbar shim)
 
@@ -224,12 +226,15 @@ shell round trip into the daemon the config already runs inside (measured
 `ybar.tray(name, action)` (no macOS counterpart — there is no notification
 area to act on) routes the §10.6 tray verbs through the daemon's own
 token-dispatch path in-process, and also retires the shell-metacharacter
-guard an app-controlled registry tooltip once forced. And `ybar.volume(pct)`
+guard an app-controlled registry tooltip once forced. And `ybar.volume(pct[, app])`
 routes `--volume` (§10, Audio row): macOS themes shell
 `osascript -e 'set volume …'`, while this daemon already holds the
 `IAudioEndpointVolume` — the previous theme workaround synthesized volume-key
 ticks through PowerShell SendKeys, one shell spawn per adjustment at 2 %
-quantization.
+quantization. The optional app id (`--query audio`'s `id` field) routes the
+set to that app's audio-session group instead of the master endpoint —
+per-app volume has no macOS API at all, so this half of the verb has no
+reference analog either.
 
 ### 3.8 Animation
 
@@ -660,7 +665,7 @@ measurement anyway (Windows scales are commonly 1.0/1.25/1.5).
 | system_woke / system_will_sleep | `WM_POWERBROADCAST`: `PBT_APMRESUMEAUTOMATIC` / `PBT_APMSUSPEND` (+`RegisterSuspendResumeNotification` for modern standby) | |
 | app_launched / app_terminated | From komorebi `Show`/`Destroy` window events when available; else 2 s process-snapshot diff (`EnumProcesses`) | **Semantics change**: window-scoped with komorebi (background processes invisible); WMI tracing needs admin — rejected. Document. |
 | Power | `GetSystemPowerStatus` + `RegisterPowerSettingNotification(GUID_ACDC_POWER_SOURCE, GUID_BATTERY_PERCENTAGE_REMAINING)` → `PBT_POWERSETTINGCHANGE` | Push, no polling. `"AC"`/`"BATTERY"` strings + dedupe/forced split preserved; the third source condition `PoHot` (UPS) maps to `"AC"` |
-| Audio | `IMMDeviceEnumerator` → `IAudioEndpointVolume` (+`IAudioEndpointVolumeCallback`), `IMMNotificationClient::OnDefaultDeviceChanged` re-arm | Callbacks marshal to UI thread. Muted → 0, integer percent. **Write path (ybar-win extension, no macOS analog)**: `--volume <0-100>` / `ybar.volume(pct)` → `SetMasterVolumeLevelScalar` on the held endpoint (0 mutes keeping the scalar; >0 sets then unmutes, scalar first so a muted endpoint cannot blip its old level); the set's own `OnNotify` publishes the new value back through the normal path |
+| Audio | `IMMDeviceEnumerator` → `IAudioEndpointVolume` (+`IAudioEndpointVolumeCallback`), `IMMNotificationClient::OnDefaultDeviceChanged` re-arm | Callbacks marshal to UI thread. Muted → 0, integer percent. **Write path (ybar-win extension, no macOS analog)**: `--volume <0-100>` / `ybar.volume(pct)` → `SetMasterVolumeLevelScalar` on the held endpoint (0 mutes keeping the scalar; >0 sets then unmutes, scalar first so a muted endpoint cannot blip its old level); the set's own `OnNotify` publishes the new value back through the normal path. **Per-app sessions (ybar-win extension)**: `--query audio` / `--volume <0-100> <app>` enumerate `IAudioSessionManager2` on the default endpoint STATELESSLY per call (the tray_icons pattern — no session sinks, no lifetime surface; a fresh manager per call also always sees new sessions). Sessions group by lowercase exe stem (`system` = Explorer's system-sounds session, pinned last); Expired sessions and sessions whose process image path is unreadable (SYSTEM-owned, or the pid died while merely Inactive) are skipped so a group id is never empty; group volume is the max across sessions, muted only when all are. Reads mirror muted→0; writes mirror the master ordering (0 mutes keeping the scalar, >0 sets the scalar then unmutes). Session scalars are RELATIVE to master (100 = follow master) — the Windows 11 Settings mixer convention, kept as-is deliberately |
 | Network | `NotifyNetworkConnectivityHintChange` (or `INetworkListManager` events); SSID via `WlanQueryInterface(wlan_intf_opcode_current_connection)` | **Win11 24H2 gates SSID behind Location privacy** — degrade to `"connected"` exactly like macOS-without-authorization; `wifi_ssid_prompt=on` opens `ms-settings:privacy-location` |
 | SystemStats | `GetSystemTimes` deltas (busy = (kernel−idle)+user), `GlobalMemoryStatusEx` (Total−Avail)/Total; `GetDiskFreeSpaceExW` for `DISK_*_GB` | Microsoft explicitly recommends this over PDH for ≥1 Hz sampling. Same 2 s interval, 0–100 contract |
 | Media | **GSMTC** (`GlobalSystemMediaTransportControlsSessionManager`, C++/WinRT): `CurrentSessionChanged` + `MediaPropertiesChanged` + `PlaybackInfoChanged` → `media_change` with `MEDIA_APP/STATE/TITLE/ARTIST/ALBUM` | Strict superset of the macOS distributed-notification hack: covers Spotify, browsers, most players, plus artwork/seek/transport for a future now-playing popup. `MEDIA_APP` carries the session's app id — scripts matching `"Music"|"Spotify"` need the documented mapping table. Cached-env replay on reload preserved. Fails only under session-0 (not applicable) |
@@ -1396,7 +1401,8 @@ Catch2 suite now counts 188 test cases) and live-verified on hardware:
 
 Deliberate divergences (never 1:1): alias items but a tray widget + verbs +
 `ybar.tray` instead (§10.6, §3.7), the `--volume` verb + `ybar.volume`
-write path on the audio provider (§10, §3.7), the added `slider.interactive` /
+write path on the audio provider plus the `--query audio` /
+`--volume <pct> <app>` per-app session mixer (§10, §3.6, §3.7), the added `slider.interactive` /
 `image.desaturate` / `image.y_offset` keys (§3.3) with the desaturate
 shader flag behind them (§7.3), graph baseline clamping and squared plate
 bottoms (§3.9), per-item glass pills (§7.6), distributed-notification

@@ -15,6 +15,10 @@ namespace ybar::providers {
 // Display name for a process id ("" when the process is gone/inaccessible).
 std::string appNameForProcess(unsigned long processId);
 
+// Full executable path for a process id, UTF-8 ("" when the process is
+// gone/inaccessible — SYSTEM-owned processes cannot be opened at all).
+std::string executablePathForProcess(unsigned long processId);
+
 // Display name for a top-level window, unwrapping the UWP frame host.
 std::string appNameForWindow(void* hwnd);
 

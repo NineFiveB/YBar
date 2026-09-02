@@ -16,6 +16,7 @@
 #include "events/event_bus.h"
 #include "model/item.h"
 #include "providers/app_info.h"
+#include "providers/audio_sessions.h"
 #include "providers/ytile.h"
 
 using ybar::events::EventBus;
@@ -50,6 +51,30 @@ TEST_CASE("a live process resolves to a usable display name") {
     const auto name = ybar::providers::appNameForProcess(GetCurrentProcessId());
     REQUIRE_FALSE(name.empty());
     REQUIRE(name.find(".exe") == std::string::npos); // extension always stripped
+}
+
+TEST_CASE("a live process resolves to its executable path") {
+    // Our own pid is always openable; the path must be absolute and real.
+    const auto path = ybar::providers::executablePathForProcess(GetCurrentProcessId());
+    REQUIRE_FALSE(path.empty());
+    REQUIRE(path.find(":\\") != std::string::npos);
+    REQUIRE(ybar::providers::executablePathForProcess(0xFFFFFFF0).empty());
+}
+
+TEST_CASE("audio session groups serialize to the --query audio contract") {
+    // The enumeration itself needs a live endpoint (CI has none), so what is
+    // pinned is the pure serializer: key set and value round-trip.
+    std::vector<ybar::providers::AudioSessionGroup> groups(2);
+    groups[0] = {"chrome", "Google Chrome", "C:\\apps\\chrome.exe", 57, false, true};
+    groups[1] = {"system", "System sounds", "", 0, true, false};
+    const auto json = ybar::providers::serializeAudioSessionGroups(groups);
+    REQUIRE(json.find("\"id\": \"chrome\"") != std::string::npos);
+    REQUIRE(json.find("\"name\": \"Google Chrome\"") != std::string::npos);
+    REQUIRE(json.find("\"path\": \"C:\\\\apps\\\\chrome.exe\"") != std::string::npos);
+    REQUIRE(json.find("\"volume\": 57") != std::string::npos);
+    REQUIRE(json.find("\"muted\": true") != std::string::npos);
+    REQUIRE(json.find("\"active\": true") != std::string::npos);
+    REQUIRE(ybar::providers::serializeAudioSessionGroups({}) == "[]");
 }
 
 TEST_CASE("an invalid process id yields an empty name, never a crash") {

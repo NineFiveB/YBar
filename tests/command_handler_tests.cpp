@@ -290,8 +290,8 @@ TEST_CASE("tray close reports unavailable rather than falling back to invoke") {
 
 TEST_CASE("volume verb validates its argument and reaches the hook") {
     Fixture f;
-    CHECK(f.run({"--volume"}) == "[!] usage: --volume <0-100>");
-    CHECK(f.run({"--volume", "40", "60"}) == "[!] usage: --volume <0-100>");
+    CHECK(f.run({"--volume"}) == "[!] usage: --volume <0-100> [app]");
+    CHECK(f.run({"--volume", "40", "app", "x"}) == "[!] usage: --volume <0-100> [app]");
     CHECK(f.run({"--volume", "loud"}) == "[!] invalid volume: loud");
     CHECK(f.run({"--volume", ""}) == "[!] invalid volume: ");
     CHECK(f.run({"--volume", "40x"}) == "[!] invalid volume: 40x");
@@ -319,4 +319,53 @@ TEST_CASE("volume verb validates its argument and reaches the hook") {
     hooks.setVolume = [](int) { return false; };
     CommandHandler failing{store, settings, bus, hooks};
     CHECK(failing.handle({"--volume", "40"}) == "[!] volume control is not available");
+}
+
+TEST_CASE("volume verb routes an app token to the session hook") {
+    Fixture f;
+    // Percent validation still runs first, and an unwired session hook
+    // reports like the unwired master hook.
+    CHECK(f.run({"--volume", "loud", "chrome"}) == "[!] invalid volume: loud");
+    CHECK(f.run({"--volume", "40", "chrome"}) == "[!] volume control is not available");
+
+    ItemStore store;
+    BarSettings settings;
+    ybar::events::EventBus bus;
+    DaemonHooks hooks;
+    std::string seenApp;
+    int seenPct = -1;
+    bool masterCalled = false;
+    hooks.setVolume = [&](int) {
+        masterCalled = true;
+        return true;
+    };
+    hooks.setAppVolume = [&](const std::string& app, int pct) {
+        seenApp = app;
+        seenPct = pct;
+        return true;
+    };
+    CommandHandler handler{store, settings, bus, hooks};
+    CHECK(handler.handle({"--volume", "40", "chrome"}).empty());
+    CHECK(seenApp == "chrome");
+    CHECK(seenPct == 40);
+    // The app path never touches the master hook.
+    CHECK_FALSE(masterCalled);
+    // No such session group: user-actionable, distinct from unavailable.
+    hooks.setAppVolume = [](const std::string&, int) { return false; };
+    CommandHandler missing{store, settings, bus, hooks};
+    CHECK(missing.handle({"--volume", "40", "nope"}) == "[!] no audio session: nope");
+}
+
+TEST_CASE("query audio serves the session hook before the item lookup") {
+    Fixture f;
+    // Unwired: same "[]" contract as the tray and windows targets.
+    CHECK(f.run({"--query", "audio"}) == "[]");
+
+    ItemStore store;
+    BarSettings settings;
+    ybar::events::EventBus bus;
+    DaemonHooks hooks;
+    hooks.audioSessions = [] { return std::string("[{\"id\": \"chrome\"}]"); };
+    CommandHandler handler{store, settings, bus, hooks};
+    CHECK(handler.handle({"--query", "audio"}) == "[{\"id\": \"chrome\"}]");
 }

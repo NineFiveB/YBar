@@ -24,7 +24,7 @@ constexpr char kHelp[] =
     "  ybar --subscribe clock system_woke\n"
     "  ybar --animate tanh 30 --set clock label.color=0xffff0000\n"
     "  ybar --query bar\n"
-    "  ybar --volume 40\n"
+    "  ybar --volume 40           (add an app id from --query audio for one app)\n"
     "\n"
     "  ybar theme list|current|use <name>\n"
     "  ybar autostart enable|disable|status\n"

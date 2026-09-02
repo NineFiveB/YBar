@@ -59,6 +59,11 @@ struct DaemonHooks {
     // through the audio provider (spec 10, Audio row). Inline on the UI
     // thread; a WASAPI Set is microseconds.
     std::function<bool(int)> setVolume;
+    // Per-app sessions (spec 10, Audio row): `--query audio` lists the
+    // default endpoint's session groups; `--volume <0-100> <app>` sets one
+    // group. Both are stateless enumeration passes inline on the UI thread.
+    std::function<std::string()> audioSessions;
+    std::function<bool(const std::string&, int)> setAppVolume;
 };
 
 class CommandHandler {

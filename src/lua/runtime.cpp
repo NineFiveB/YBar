@@ -34,9 +34,10 @@ LuaRuntime* g_current = nullptr; // UI-thread singleton, mirrors LuaRuntime.curr
 // CLI to reach a daemon it is already running inside:
 //   ybar.tray(name, action) — there is no notification area on macOS
 //     (see Trampolines::tray);
-//   ybar.volume(pct) — macOS themes shell `osascript -e 'set volume ...'`,
-//     while this daemon already holds the IAudioEndpointVolume
-//     (see Trampolines::volume).
+//   ybar.volume(pct[, app]) — macOS themes shell `osascript -e 'set
+//     volume ...'`, while this daemon already holds the IAudioEndpointVolume;
+//     the optional app id routes to that app's audio-session group instead
+//     (per-app volume has no macOS API at all — see Trampolines::volume).
 constexpr char kPrelude[] = R"LUA(local raw = __ybar_raw
 __ybar_raw = nil
 
@@ -100,7 +101,7 @@ function ybar.exec(cmd, fn) raw.exec(cmd, fn) end
 function ybar.add_event(name, notification) local e = raw.add_event(name, notification) if e then print(e) end end
 function ybar.query(target) return raw.query(target) end
 function ybar.tray(name, action) return raw.tray(name, action) end
-function ybar.volume(pct) return raw.volume(pct) end
+function ybar.volume(pct, app) return raw.volume(pct, app) end
 function ybar.remove(name) raw.remove(name) end
 
 function ybar.animate(curve, frames, fn)
@@ -465,16 +466,25 @@ struct Trampolines {
         return pushReplyAsOptionalError(L, handleTokens({"--tray", name, action}));
     }
 
-    // ybar.volume(pct) — the second in-process Windows verb (see the tray
-    // rationale above): the daemon already holds the audio endpoint, so a
-    // slider drag becomes one function call instead of a shell round trip.
+    // ybar.volume(pct[, app]) — the second in-process Windows verb (see the
+    // tray rationale above): the daemon already holds the audio endpoint, so
+    // a slider drag becomes one function call instead of a shell round trip.
+    // With an app id (--query audio's `id` field) the set routes to that
+    // app's audio-session group instead of the master endpoint.
     static int volume(lua_State* L) {
         const char* pct = argCString(L, 1);  // numbers convert in place
         if (!pct) {
             lua_pushstring(L, "[!] volume(percent) expects a number");
             return 1;
         }
-        return pushReplyAsOptionalError(L, handleTokens({"--volume", pct}));
+        if (lua_isnoneornil(L, 2))
+            return pushReplyAsOptionalError(L, handleTokens({"--volume", pct}));
+        const char* app = argCString(L, 2);
+        if (!app) {
+            lua_pushstring(L, "[!] volume(percent, app) expects a string app");
+            return 1;
+        }
+        return pushReplyAsOptionalError(L, handleTokens({"--volume", pct, app}));
     }
 
     static int remove(lua_State* L) {

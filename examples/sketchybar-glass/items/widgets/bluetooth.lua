@@ -105,7 +105,14 @@ local bt_icon = sbar.add("item", "widgets.bluetooth", {
 
 local bt_bracket = sbar.add("bracket", "widgets.bluetooth.bracket", { bt_icon.name }, {
   background = { color = colors.bg1 },
-  popup = { align = "center", height = 26 },
+  -- wrap_width turns the popup into flow layout so the volume row can seat
+  -- two items on one line (slider + mixer chevron, and the mixer panel's
+  -- icon + slider pairs). It is popup_width + 4 and NOT popup_width: the
+  -- engine's line advance is padding_left + width + padding_right, and every
+  -- full-width row inherits the theme default item paddings (2/2), so rows
+  -- advance 268. 268 also reproduces the no-wrap panel exactly (widest
+  -- advance 268 + 2x6 engine inset = 280 wide), pixel-identical to before.
+  popup = { align = "center", height = 26, wrap_width = popup_width + 4 },
 })
 
 sbar.add("item", "widgets.bluetooth.padding", {
@@ -203,11 +210,21 @@ end
 -- discovery lives in ms-settings:bluetooth via the footer row.
 
 -- ── Audio mixer ────────────────────────────────────────────────────────────
--- The system output slider, Windows-quick-settings style — the output is
--- usually the connected headset when this flyout is open. Same geometry as
--- the media popup's volume row (both popups are 264 wide), driven by the
--- same pair of flows: volume_change pushes in, ybar.volume(pct) out — one
--- in-process call, no shell round trip, no 2 % key quantization.
+-- The system output slider, Windows-quick-settings style, with the
+-- quick-settings chevron beside it: the chevron swaps the row for the
+-- per-app volume mixer (one slider per audio-session group from
+-- `--query audio`), exactly like pressing the chevron next to the Windows 11
+-- volume slider. Master flows: volume_change pushes in, ybar.volume(pct)
+-- out; per-app rows call ybar.volume(pct, id) — all in-process, no shell
+-- round trip, no 2 % key quantization.
+--
+-- Line arithmetic (engine advance = padding_left + width + padding_right,
+-- line cap = wrap_width 268): master row = slider 232 (paddings 0) + chevron
+-- 32 (default paddings 2/2, advance 36) = 268 — the chevron's right edge
+-- lands at the same x as every full-width row's. Mixer rows = icon 35
+-- (paddings 2/0, advance 37, content starting at x=2 like the device rows)
+-- + slider 229 (paddings 0) = 266. The mixer-open back row is the same
+-- chevron item restyled to full width (advance 268, its own line).
 sbar.add("item", "widgets.bluetooth.mixer.sep", {
   position = popup_pos,
   width = popup_width,
@@ -216,9 +233,9 @@ sbar.add("item", "widgets.bluetooth.mixer.sep", {
   background = { height = 2, color = colors.with_alpha(colors.grey, 0.3) },
 })
 
-local vol_slider = sbar.add("slider", "widgets.bluetooth.volume", 220, {
+local vol_slider = sbar.add("slider", "widgets.bluetooth.volume", 188, {
   position = popup_pos,
-  width = popup_width,
+  width = popup_width - 32,
   padding_left = 0,
   padding_right = 0,
   align = "left",
@@ -265,6 +282,204 @@ vol_slider:subscribe("volume_change", function(env)
   if not vol then return end
   vol_slider:set({ slider = { percentage = vol } })
 end)
+
+-- The chevron: collapsed it is a 32-wide button sharing the master slider's
+-- line; open_mixer() restyles it into the panel's full-width back row
+-- (chevron.left + "Volume mixer"), which is also what keeps the flow layout
+-- sane — a 32-wide row with the slider hidden would let the first app icon
+-- join its line and stagger every pair after it.
+local mixer_btn = sbar.add("item", "widgets.bluetooth.mixer.btn", {
+  position = popup_pos,
+  align = "left",
+  width = 32,
+  icon = {
+    string = "sf:chevron.right",
+    color = colors.grey,
+    font = { size = 10.5 },
+    width = 32,
+    align = "center",
+    padding_left = 0,
+    padding_right = 0,
+  },
+  label = {
+    drawing = false,
+    string = "Volume mixer",
+    align = "left",
+    color = colors.white,
+    font = { size = 10.5, style = settings.font.style_map["Semibold"] },
+    width = popup_width - 35 - inset,
+  },
+})
+
+-- ── Per-app mixer panel: fixed pool, hidden until the chevron opens it ─────
+-- Each row is TWO items (icon, then slider) sharing a wrapped line. The app
+-- icon deliberately lives OUTSIDE the slider item: the engine maps any
+-- click inside a slider item to a track position clamped to 0-100
+-- (reference parity), so an icon inside the slider would set the app's
+-- volume to zero when clicked. A separate item is inert.
+local MAX_MIX = 8
+local mix_icons, mix_sliders, mix_ids = {}, {}, {}
+for i = 1, MAX_MIX do
+  mix_icons[i] = sbar.add("item", "widgets.bluetooth.mix.icon." .. i, {
+    position = popup_pos,
+    drawing = false,
+    width = 35,
+    padding_left = 2, -- line the glyph column up with the device rows
+    padding_right = 0,
+    icon = {
+      -- Glyph face for the "system" group (system sounds have no exe icon);
+      -- app groups swap to the image part instead.
+      string = "sf:speaker.wave.2",
+      color = colors.grey,
+      font = { size = 12.5 },
+      width = 35,
+      align = "center",
+      padding_left = 0,
+      padding_right = 0,
+      drawing = false,
+    },
+    label = { drawing = false },
+    image = { drawing = false, size = 16 },
+  })
+  mix_sliders[i] = sbar.add("slider", "widgets.bluetooth.mix." .. i, 190, {
+    position = popup_pos,
+    drawing = false,
+    width = popup_width - 35,
+    padding_left = 0,
+    padding_right = 0,
+    align = "left",
+    icon = { drawing = false },
+    label = { drawing = false },
+    slider = {
+      percentage = 50,
+      highlight_color = colors.white,
+      background = {
+        height = 5,
+        corner_radius = 3,
+        color = colors.bg2,
+      },
+      knob = {
+        string = "●", -- same face and lift as the master slider's knob
+        y_offset = 1.25,
+        drawing = true,
+      },
+    },
+  })
+end
+
+local mix_empty = sbar.add("item", "widgets.bluetooth.mix.empty", {
+  position = popup_pos,
+  drawing = false,
+  width = popup_width,
+  icon = {
+    string = "Nothing is playing audio",
+    align = "left",
+    color = colors.grey,
+    font = { size = 10.5 },
+    width = popup_width - inset,
+    padding_left = inset,
+  },
+  label = { drawing = false },
+})
+
+local mixer_open = false
+local mix_gen = 0 -- bumped on every open/close; stale poll closures bail
+
+-- Bind the pool to the current session groups. Re-sets BOTH faces every
+-- time: a row can flip identity between an app (image) and the system
+-- group (glyph) across binds.
+local function bind_mixer()
+  local groups = ybar.query_table("audio") or {}
+  local shown = 0
+  for i = 1, MAX_MIX do
+    local g = groups[i]
+    if g then
+      shown = shown + 1
+      mix_ids[i] = g.id
+      if g.id == "system" then
+        mix_icons[i]:set({
+          drawing = true,
+          icon = { drawing = true },
+          image = { drawing = false },
+        })
+      else
+        mix_icons[i]:set({
+          drawing = true,
+          icon = { drawing = false },
+          -- Inactive groups (paused players) grey out via the desaturate
+          -- shader flag, the apps-popup idiom.
+          image = { drawing = true, string = "exe." .. g.path, desaturate = not g.active },
+        })
+      end
+      -- Mid-drag sets are vetoed by the engine, so a poll landing during a
+      -- drag cannot fight the knob.
+      mix_sliders[i]:set({ drawing = true, slider = { percentage = g.volume } })
+    else
+      mix_ids[i] = nil
+      mix_icons[i]:set({ drawing = false })
+      mix_sliders[i]:set({ drawing = false })
+    end
+  end
+  mix_empty:set({ drawing = shown == 0 })
+end
+
+-- 1 Hz refresh while the panel is open (the wifi scan-loop idiom): catches
+-- sessions appearing/dying and volumes changed elsewhere. Guards: the
+-- generation kills stale closures from a close-reopen inside one second,
+-- and popup.drawing is a STRING ("on"/"off").
+local function mixer_poll()
+  local gen = mix_gen
+  sbar.delay(1, function()
+    if gen ~= mix_gen or not mixer_open then return end
+    if bt_bracket:query().popup.drawing ~= "on" then return end
+    bind_mixer()
+    mixer_poll()
+  end)
+end
+
+local function open_mixer()
+  mix_gen = mix_gen + 1
+  mixer_open = true
+  vol_slider:set({ drawing = false })
+  mixer_btn:set({
+    width = popup_width,
+    icon = { string = "sf:chevron.left", width = 35 },
+    label = { drawing = true },
+  })
+  bind_mixer()
+  mixer_poll()
+end
+
+local function close_mixer()
+  mix_gen = mix_gen + 1
+  mixer_open = false
+  for i = 1, MAX_MIX do
+    mix_icons[i]:set({ drawing = false })
+    mix_sliders[i]:set({ drawing = false })
+  end
+  mix_empty:set({ drawing = false })
+  vol_slider:set({ drawing = true })
+  mixer_btn:set({
+    width = 32,
+    icon = { string = "sf:chevron.right", width = 32 },
+    label = { drawing = false },
+  })
+end
+
+mixer_btn:subscribe("mouse.clicked", function()
+  if mixer_open then close_mixer() else open_mixer() end
+end)
+
+for i = 1, MAX_MIX do
+  mix_sliders[i]:subscribe("mouse.clicked", function(env)
+    local pct = tonumber(env.PERCENTAGE or "")
+    local id = mix_ids[i]
+    if not pct or not id then return end
+    -- Optimistic paint; the next 1 Hz bind settles on the real value.
+    mix_sliders[i]:set({ slider = { percentage = pct } })
+    ybar.volume(pct, id)
+  end)
+end
 
 -- ── Footer: More Bluetooth settings ────────────────────────────────────────
 sbar.add("item", "widgets.bluetooth.sep", {
@@ -392,6 +607,11 @@ end
 -- ── Interactions ───────────────────────────────────────────────────────────
 local function collapse_popup()
   bt_bracket:set({ popup = { drawing = false } })
+  -- Reopen always shows the master view. Guarded: mouse.exited.global lands
+  -- here on every bar hover-exit, and close_mixer() is ~20 property sets —
+  -- a stale-true flag after a silent engine close still passes, and the
+  -- never-opened common case pays nothing.
+  if mixer_open then close_mixer() end
 end
 
 local function open_bt_settings()
@@ -414,6 +634,10 @@ settings_row:subscribe("mouse.clicked", open_bt_settings)
 local function toggle_popup()
   local should_draw = bt_bracket:query().popup.drawing == "off"
   if should_draw then
+    -- The engine can close this popup silently (auto-close on a bar press
+    -- elsewhere runs no Lua), so the collapse-side reset is not enough —
+    -- reset to the master view on the way in too.
+    close_mixer()
     bt_bracket:set({ popup = { drawing = true } })
     populate()      -- last snapshot first, then the fresh round trip
     refresh_paired()

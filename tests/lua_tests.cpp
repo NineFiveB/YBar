@@ -178,6 +178,24 @@ TEST_CASE("ybar.volume reaches the volume verb without shelling out") {
     CHECK(f.store.find("range")->label.string == "[!] invalid volume: 101");
 }
 
+TEST_CASE("ybar.volume routes an app id to the session verb") {
+    // The optional second argument targets one app's audio-session group
+    // (--query audio's id field). A table can never be an app id — numbers
+    // would coerce through argCString, so the guard is exercised with one.
+    Fixture f;
+    f.run(R"(
+        ybar.add("item", "guard", "left", { label = tostring(ybar.volume(40, {})) })
+        ybar.add("item", "unwired", "left", { label = tostring(ybar.volume(40, "chrome")) })
+        ybar.add("item", "master", "left", { label = tostring(ybar.volume(40)) })
+    )");
+    REQUIRE(f.store.find("guard"));
+    CHECK(f.store.find("guard")->label.string == "[!] volume(percent, app) expects a string app");
+    // No hooks in this fixture: both routes must report, not silently succeed.
+    CHECK(f.store.find("unwired")->label.string == "[!] volume control is not available");
+    // The one-argument path still reaches the master verb unchanged.
+    CHECK(f.store.find("master")->label.string == "[!] volume control is not available");
+}
+
 TEST_CASE("ybar.animate applies sets directly when no scheduler is wired") {
     Fixture f;
     f.run(R"(

@@ -40,6 +40,7 @@
 #include "providers/app_info.h"
 #include "providers/app_lifecycle.h"
 #include "providers/audio.h"
+#include "providers/audio_sessions.h"
 #include "providers/komorebi.h"
 #include "providers/media.h"
 #include "providers/network.h"
@@ -2027,6 +2028,15 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     hooks.setVolume = [&state](int percent) {
         state.armAudio();
         return state.audio && state.audio->setVolume(percent);
+    };
+    // Per-app session groups (spec 10, Audio row). Stateless enumeration
+    // passes, independent of the master AudioProvider — no armAudio().
+    hooks.audioSessions = [] {
+        return ybar::providers::serializeAudioSessionGroups(
+            ybar::providers::audioSessionGroups());
+    };
+    hooks.setAppVolume = [](const std::string& id, int percent) {
+        return ybar::providers::setAudioSessionVolume(id, percent);
     };
     state.handler = std::make_unique<ybar::ipc::CommandHandler>(state.store, state.settings,
                                                                 state.bus, hooks,

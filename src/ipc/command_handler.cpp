@@ -325,6 +325,8 @@ std::string CommandHandler::handleBatch(const Batch& batch,
             return hooks_.runningApps ? hooks_.runningApps() : std::string("[]");
         if (target == "tray")
             return hooks_.trayIcons ? hooks_.trayIcons() : std::string("[]");
+        if (target == "audio")
+            return hooks_.audioSessions ? hooks_.audioSessions() : std::string("[]");
         auto* item = store_.find(target);
         if (!item) return "[!] no item named " + target;
         return ybar::model::serializeItem(
@@ -429,11 +431,17 @@ std::string CommandHandler::handleBatch(const Batch& batch,
     }
 
     if (batch.domain == "volume") { // ybar-win extension (spec 10, Audio row)
-        if (args.size() != 1) return "[!] usage: --volume <0-100>";
+        if (args.empty() || args.size() > 2) return "[!] usage: --volume <0-100> [app]";
         char* end = nullptr;
         const long long pct = std::strtoll(args[0].c_str(), &end, 10);
         if (!end || *end != '\0' || end == args[0].c_str() || pct < 0 || pct > 100)
             return "[!] invalid volume: " + args[0];
+        if (args.size() == 2) { // per-app session group (spec 10, Audio row)
+            if (!hooks_.setAppVolume) return "[!] volume control is not available";
+            if (!hooks_.setAppVolume(args[1], static_cast<int>(pct)))
+                return "[!] no audio session: " + args[1];
+            return {};
+        }
         if (!hooks_.setVolume || !hooks_.setVolume(static_cast<int>(pct)))
             return "[!] volume control is not available";
         return {};
