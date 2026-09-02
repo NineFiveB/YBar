@@ -207,11 +207,13 @@ local vol_slider = sbar.add("slider", "widgets.media.volume", 220, {
     knob = {
       -- YBAR PORT: the macOS knob was a literal SF-Symbols circle glyph;
       -- Segoe Fluent Icons has no mapped circle, so a plain text bullet
-      -- (rendered by the label font) stands in. Its ink sits low in its em
-      -- (unlike the SF circle), so lift it onto the track centre — the
-      -- measured value from the bluetooth mixer's pixel sweep.
+      -- (rendered by the label font) stands in. 18pt for a 16px circle at
+      -- 2x (the default 11.5 was flush with the track); its ink sits low
+      -- in its em (unlike the SF circle), lift measured by the bluetooth
+      -- flyout's held-open pixel sweep at this size.
       string = "●",
-      y_offset = 1.25,
+      font = { size = 18 },
+      y_offset = 2.25,
       drawing = true,
     },
   },
