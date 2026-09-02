@@ -83,9 +83,11 @@ system Transparency setting.*
 
 *Popups are first-class items laid out by the same engine: a Task
 Manager-style system monitor with live CPU/GPU graphs, Fluent Wi-Fi and
-Bluetooth flyouts, a calendar month grid, a battery panel, and the tray
-widget — left-click opens an app, right-click quits it behind a confirm.
-Network and device names in this recording are placeholders.*
+Bluetooth flyouts (the Bluetooth one carries the system volume mixer — drag
+sets the output volume through the daemon itself), a calendar month grid, a
+battery panel, and the tray widget — left-click opens an app, right-click
+quits it behind a confirm. Network and device names in this recording are
+placeholders.*
 
 - **Engine** — Direct3D 11 + a DirectWrite glyph atlas + DirectComposition, paced to the monitor's refresh rate (120 Hz verified), near-zero CPU while static: the macOS Metal engine's mirror.
 - **Window management** — [komorebi](https://github.com/LGUG2Z/komorebi) and YTile as first-class workspace adapters (replacing AeroSpace/yabai), driven by their event streams rather than CLI polling.
