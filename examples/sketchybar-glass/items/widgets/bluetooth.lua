@@ -240,6 +240,12 @@ local vol_slider = sbar.add("slider", "widgets.bluetooth.volume", 220, {
     },
     knob = {
       string = "●", -- text bullet; Segoe Fluent Icons maps no circle glyph
+      -- The knob em-centres like every text part (reference math), but the
+      -- Segoe bullet's ink sits low in its em — measured 1.75px sag at 2x,
+      -- and 1.25pt lifts it onto the track centre to the quarter-pixel
+      -- (pixel-sampled sweep, 2026-09-02). macOS never showed this: the SF
+      -- circle's ink is symmetric in its em.
+      y_offset = 1.25,
       drawing = true,
     },
   },
