@@ -1399,6 +1399,37 @@ Catch2 suite now counts 188 test cases) and live-verified on hardware:
   `utf8.len` for a constant ~45 pt/s reading pace (the fixed 100-frame
   default raced long titles).
 
+**Release + mixer pass (2026-09-01 → 09-02)**, CI-green (the Catch2 suite
+now counts 195 test cases) and live-verified on hardware:
+
+- **win-v0.1.0 shipped**: the release workflow signs under
+  `environment: release` (the OIDC subject the federated credential
+  actually matches — the first run failed on the tag-subject mismatch);
+  install channels are the `scripts/install.ps1` one-liner (SHA256 +
+  Authenticode-verified) and the raw scoop manifest, both README-led.
+- **Slider knob centred** (§3.3 theme note): the Segoe `●` stand-in's ink
+  sits ~1.75 px low in its em at 2× (the SF circle's is symmetric), so both
+  themes' knobs carry `y_offset = 1.25`, measured by a held-open pixel
+  sweep — re-probing popups between captures shifts layout sub-pixel and
+  poisons deltas; sweep with the popup held open.
+- **Per-app mixer** (§10 Audio row, §3.6, §3.7): `--query audio` /
+  `--volume <0-100> [app]` / `ybar.volume(pct[, app])` over a stateless
+  per-call `IAudioSessionManager2` enumeration (tray_icons pattern — no
+  session sinks, no lifetime surface), grouped by lowercase exe stem with
+  unreadable-path and Expired sessions skipped so a group id is never
+  empty. The bluetooth flyout's volume row gains the quick-settings
+  chevron; the popup moved to wrap-flow (`wrap_width = popup_width + 4` —
+  line advance includes the default 2/2 item paddings, reproducing the
+  vertical layout pixel-for-pixel) so the master line seats slider +
+  chevron and each mixer row seats icon + slider, icons deliberately
+  outside the slider items (slider clicks clamp x to 0-100, reference
+  parity — an inset icon would be click-to-mute). The panel resets to the
+  master view on open because auto-close popups close on silent paths that
+  run no Lua. Live-verified end to end: query contract against three real
+  groups, set/mute/restore round trips, chevron open, back row, and a
+  synthetic 65 %-mark drag on the Chrome row landing at exactly 65 with
+  the master untouched.
+
 Deliberate divergences (never 1:1): alias items but a tray widget + verbs +
 `ybar.tray` instead (§10.6, §3.7), the `--volume` verb + `ybar.volume`
 write path on the audio provider plus the `--query audio` /
