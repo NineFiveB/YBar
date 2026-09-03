@@ -41,12 +41,12 @@ YBar is a full engine, not a wrapper: GPU-rendered items and popups, a component
 ## Install
 
 ```sh
-brew tap AegiosOT/ybar      # github.com/AegiosOT/homebrew-ybar
+brew tap NineFiveB/ybar     # github.com/NineFiveB/homebrew-ybar
 brew install ybar           # latest tagged release; --HEAD builds current main
 ```
 
 (Recent Homebrew asks you to confirm trusting a third-party tap on first
-install — that prompt is expected; `brew trust AegiosOT/ybar` pre-approves it.)
+install — that prompt is expected; `brew trust NineFiveB/ybar` pre-approves it.)
 
 See [docs/INSTALL.md](docs/INSTALL.md) for the release-zip route, first-run privacy-permission walkthrough, stable local signing (keeps TCC grants across rebuilds), and login autostart.
 
@@ -74,8 +74,9 @@ YBar has a native **Windows 11** port — a separate C++ engine with the same so
 ![The Windows bar: workspace pills tracking komorebi/YTile, with CPU and battery fill meters and the tray widget](docs/media/ybar-win-bar.gif)
 
 *The `sketchybar-glass` theme on Windows 11, restyled to Fluent: workspace
-pills tracking the active YTile/komorebi workspace (empty workspaces hide
-their pills), with the CPU and battery pills as continuous fill meters, the
+pills tracking the active YTile/komorebi workspace (under YTile, empty
+workspaces hide their pills), with the CPU and battery pills as continuous
+fill meters, the
 notification-area tray widget, and a flat, near-black strip that follows the
 system Transparency setting.*
 
@@ -91,12 +92,12 @@ placeholders.*
 
 - **Engine** — Direct3D 11 + a DirectWrite glyph atlas + DirectComposition, paced to the monitor's refresh rate (120 Hz verified), near-zero CPU while static: the macOS Metal engine's mirror.
 - **Window management** — [komorebi](https://github.com/LGUG2Z/komorebi) and YTile as first-class workspace adapters (replacing AeroSpace/yabai), driven by their event streams rather than CLI polling.
-- **Native providers** — battery/power, audio (WASAPI), network & Wi-Fi (`netsh` + WinRT), now-playing media (GSMTC), and in-process CPU/memory stats, all mapped to the same events as macOS.
+- **Native providers** — battery/power, audio (WASAPI), network & Wi-Fi (`wlanapi` + connectivity-hint notifications; the Wi-Fi flyout's network list shells `netsh`), now-playing media (GSMTC), and in-process CPU/memory stats, all mapped to the same events as macOS.
 - **Look** — the flagship `sketchybar-glass` theme is ported and restyled to Windows 11 Fluent: flat pills, Acrylic and popup opacity that follow your system **Transparency** setting, and Fluent Wi-Fi / Bluetooth / system-monitor / calendar popups.
 
 **Install** — one line in PowerShell: `irm https://raw.githubusercontent.com/NineFiveB/YBar/windows/scripts/install.ps1 | iex` — or with [Scoop](https://scoop.sh): `scoop install https://raw.githubusercontent.com/NineFiveB/YBar/windows/packaging/scoop/ybar-win.json` — or download `ybar-win-<version>-x64.zip` from a [`win-v*` release](../../releases). Release binaries are Authenticode-signed (Azure Trusted Signing); a winget manifest is staged under `packaging/` on the `windows` branch.
 
-**Build** (Windows 11 22H2+, Visual Studio 2022 C++ tools, CMake ≥ 3.24, [vcpkg](https://github.com/microsoft/vcpkg) with `VCPKG_ROOT` set):
+**Build** (Windows 11 22H2+, Visual Studio 2022 C++ tools, CMake ≥ 3.25, [vcpkg](https://github.com/microsoft/vcpkg) with `VCPKG_ROOT` set):
 
 ```powershell
 cmake --preset default
