@@ -54,6 +54,18 @@ TEST_CASE("bool grammar and toggle") {
     CHECK(PropertySetter::set(item, "drawing", "maybe") == "[!] invalid boolean: maybe");
 }
 
+TEST_CASE("image.drawing error strings follow the reference wording") {
+    // PropertySetter.swift: the item-level image names the key, the
+    // background image keeps the plain boolean error. They were swapped once.
+    auto item = makeItem();
+    CHECK(PropertySetter::set(item, "image.drawing", "maybe") ==
+          "[!] invalid image.drawing: maybe");
+    CHECK(PropertySetter::set(item, "background.image.drawing", "maybe") ==
+          "[!] invalid boolean: maybe");
+    CHECK_FALSE(PropertySetter::set(item, "image.drawing", "on"));
+    CHECK(item.image->drawing);
+}
+
 TEST_CASE("width accepts numbers and the dynamic sentinel") {
     auto item = makeItem();
     CHECK_FALSE(PropertySetter::set(item, "width", "120"));

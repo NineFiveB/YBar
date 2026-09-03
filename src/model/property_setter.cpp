@@ -277,10 +277,9 @@ Result setBackground(BackgroundStyle& bg, const Segments& segs, std::size_t at,
             bg.imageScale = *parsed;
             return ok;
         }
-        if (sub == "drawing") {
-            const auto result = setBool(bg.imageDrawing, value);
-            return result ? Result("[!] invalid image.drawing: " + value) : ok;
-        }
+        // Reference wording: a plain `[!] invalid boolean:` here; the
+        // `[!] invalid image.drawing:` form belongs to the item-level image.
+        if (sub == "drawing") return setBool(bg.imageDrawing, value);
         return ok; // background.image.<anything else> accepted-and-ignored
     }
     if (key == "shadow") return setShadow(bg.shadow, segs, at + 1, value, fullPath);
@@ -435,7 +434,13 @@ Result setImage(Item& item, const Segments& segs, std::size_t at, const std::str
     if (at >= segs.size()) { image.source = value; return ok; } // bare = source
     const auto key = segs[at];
     if (key == "string") { image.source = value; return ok; }
-    if (key == "drawing") return setBool(image.drawing, value);
+    if (key == "drawing") {
+        // Reference wording (PropertySetter.swift): `[!] invalid image.drawing:`
+        // for the item-level image; background.image.drawing keeps the plain
+        // boolean error. The two were swapped until the 2026-09 doc audit.
+        const auto result = setBool(image.drawing, value);
+        return result ? Result("[!] invalid image.drawing: " + value) : ok;
+    }
     if (key == "size") {
         const auto parsed = parseFloat(value);
         if (!parsed) return errNumber(value);

@@ -1855,9 +1855,11 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
         } else if (event == "media_change") {
             state.armMedia();
         } else if (event == "app_launched" || event == "app_terminated") {
-            // komorebi already feeds these from Show/Destroy; the poller is
-            // only for the WM-less case (spec 10).
-            if (!state.komorebi && !state.appLifecycleArmed) {
+            // komorebi (Show/Destroy) and YTile (manage/unmanage diffs) already
+            // feed these; the poller is only for the WM-less case (spec 10).
+            // Testing komorebi alone let the poller arm beside a live YTile
+            // subscription, so every launch fired twice with different names.
+            if (!state.komorebi && !state.ytile && !state.appLifecycleArmed) {
                 state.appLifecycleArmed = true;
                 state.appLifecycle.prime(); // never announce the existing world
                 SetTimer(state.messageWindow, kAppsTimer, 2000, nullptr);
