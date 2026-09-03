@@ -1,4 +1,4 @@
-# THIS FILE IS THE SOURCE OF TRUTH — github.com/AltimG/homebrew-ybar mirrors
+# THIS FILE IS THE SOURCE OF TRUTH — github.com/NineFiveB/homebrew-ybar mirrors
 # it verbatim (Formula/ybar.rb there); copy it over on every release, after
 # updating the url tag + sha256 below.
 #
@@ -9,14 +9,14 @@
 # runtime, so no Xcode dependency.
 class Ybar < Formula
   desc "Metal-rendered, sketchybar-compatible macOS status bar"
-  homepage "https://github.com/AltimG/YBar"
-  url "https://github.com/AltimG/YBar/archive/refs/tags/v0.1.0.tar.gz"
+  homepage "https://github.com/NineFiveB/YBar"
+  url "https://github.com/NineFiveB/YBar/archive/refs/tags/v0.1.0.tar.gz"
   # SOURCE tarball hash (curl -L <url above> | shasum -a 256) - NOT the
   # app-zip hash that `make release` prints, which is a different,
   # machine-signed artifact. Regenerate on every new tag.
   sha256 "88bf58485b702f9d4f1db7d618728bd04457693594696ae0bc1e79fe9db9693c"
   license "GPL-3.0-only"
-  head "https://github.com/AltimG/YBar.git", branch: "main"
+  head "https://github.com/NineFiveB/YBar.git", branch: "main"
 
   depends_on macos: :sonoma
 
@@ -68,7 +68,7 @@ class Ybar < Formula
           #{opt_prefix}/YBar.app
 
       First-run permission walkthrough and autostart LaunchAgent:
-      https://github.com/AltimG/YBar/blob/main/docs/INSTALL.md
+      https://github.com/NineFiveB/YBar/blob/main/docs/INSTALL.md
     EOS
   end
 

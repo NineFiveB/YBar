@@ -39,7 +39,8 @@ adapter). Concretely:
   creation returns a clear error (§10.6).
 - Feature parity with macOS-26 Liquid Glass. `glass=on` maps to Acrylic (§7.6).
 - Wayland/Linux, other WMs (GlazeWM etc. can integrate the AeroSpace way —
-  config-side — but get no native provider in v1).
+  config-side — but get no native provider in v1). YTile, the sibling WM, is the
+  one exception: it has an in-tree `YTileProvider` (named-pipe NDJSON; §15).
 
 ---
 
@@ -51,13 +52,13 @@ adapter). Concretely:
 | D2 | Repo | **Orphan branch `windows`** in the YBar repo, worktree checkout | One repo/issue tracker; own root history so the two lines never merge; per-branch CI; themes+examples copied in, contract doc shared |
 | D3 | Renderer | **D3D11** + DXGI flip-model composition swap chain + **DirectComposition**; HLSL compiled at runtime via `D3DCompile` | Only clean per-pixel premultiplied-alpha path (`WS_EX_NOREDIRECTIONBITMAP`); preserves "no shader toolchain at build time" |
 | D4 | Text | **DirectWrite** full stack; **grayscale AA forced** | ClearType subpixel breaks the R8 coverage atlas and transparent composition |
-| D5 | WinRT/COM | **C++/WinRT** (GSMTC media) + **WIL** (COM lifetime) | Header-only, MS-maintained |
+| D5 | WinRT/COM | **C++/WinRT** (GSMTC media) + **WRL `ComPtr`** (COM lifetime; `wil` is listed in vcpkg.json but unused) | Header-only, ships with the Windows SDK |
 | D6 | Lua | Vendored **Lua 5.4 built as C**, raw C-API bridge mirroring `LuaRuntime.swift` incl. the non-raising-trampoline invariant | `lua_error` longjmp through C++ frames skips destructors — same UB class the Swift bridge engineered around |
 | D7 | IPC | **AF_UNIX** (Winsock, `afunix.h`), socket at `%LOCALAPPDATA%\ybar\` | Wire-format parity with macOS; komorebi proves AF_UNIX in production and uses the same location convention |
 | D8 | komorebi | **Native `KomorebiProvider`** speaking the socket protocol directly (no Rust crate) | C++ can't link `komorebi-client`; protocol is simple (one JSON per connection, §11) |
 | D9 | Space reservation | komorebi **`MonitorWorkAreaOffset`** handshake by default; **SHAppBarMessage appbar** as opt-in fallback for non-komorebi users | komorebi-bar precedent; double reservation (appbar + offset) must be impossible |
-| D10 | Scripts | `sh -c` when `sh.exe` resolves (Git Bash / bundled **busybox-w32**), else PowerShell; `YBAR_SHELL` override | Every shipped config writes POSIX sh; komorebi users almost universally have Git installed |
-| D11 | Icons | Keep `sf:`/`sf.` grammar; resolver maps names via shipped JSON table to **Segoe Fluent Icons**, bundled **fluentui-system-icons** font as fallback | SF Symbols are Apple-proprietary; grammar is the contract, artwork is swappable |
+| D10 | Scripts | `sh -c` when `sh.exe` resolves (PATH, else Git for Windows via its `GitForWindows` registry `InstallPath`), else PowerShell `-NoProfile`; `YBAR_SHELL` override (POSIX sh / PowerShell / cmd, classified by basename) | Every shipped config writes POSIX sh; komorebi users almost universally have Git installed |
+| D11 | Icons | Keep `sf:`/`sf.` grammar; resolver maps names via a compiled-in table (`render/icon_map.cpp`) to **Segoe Fluent Icons**, falling back to **Segoe MDL2 Assets** then an installed **FluentSystemIcons-Resizable** face (nothing is bundled) | SF Symbols are Apple-proprietary; grammar is the contract, artwork is swappable |
 | D12 | JSON | **nlohmann/json** | `--query` output + komorebi State parsing; tolerant of unknown fields |
 | D13 | Tests | **Catch2**, porting the ~90 platform-neutral Swift Testing contract tests | The Swift suite is the executable spec of the compat surface |
 
@@ -98,6 +99,14 @@ prefix stripped. `--animate <curve> <frames>` is message-scoped and applies to
 subsequent `--set`/`--bar` batches; `--default` never animates. `--exit`
 replies first, terminates ~0.15 s later.
 
+Windows-specific **added** verbs (ybar-win extensions, absent from the
+reference): `--komorebi <socket-message-json>` (§11.5), `--tray <name>
+invoke|close` (§10.6), `--volume <0-100> [app]` (§10, Audio row), and
+`--window <hwnd> close|kill` — `close` posts `WM_CLOSE` (never sent, so a
+hung app cannot stall the bar), `kill` is `TerminateProcess`; the `hwnd`
+comes from `--query windows` (§3.6). Any other domain still replies
+`[!] unknown domain: --<name>`.
+
 ### 3.3 Property namespace (`PropertySetter.swift`, `BarPropertySetter.swift`)
 
 The complete dotted-path grammar, verbatim — including every
@@ -107,13 +116,19 @@ color channel addressing (`.alpha/.red/.green/.blue/.hex`), `0xAARRGGBB`
 colors, bool grammar (`on/off/true/false/yes/no/1/0` + `toggle` on bool
 leaves), `width=dynamic` (-1 sentinel with measured-width animation seeding),
 auto-enable of `background.drawing` on color set, lazy `gauge.*`/`image.*`
-component attachment, and the exact `[!]`/`[?]` error string formats.
+component attachment, and the exact `[!]`/`[?]` error string formats (one
+known slip to close in code, not in this contract: the port replies
+`[!] invalid boolean:` for `image.drawing` and `[!] invalid image.drawing:`
+for `background.image.drawing` — the reverse of the reference).
 
 Windows-specific accepted no-ops: `notch_width`, `notch_offset`,
-`notch_display_height` (no notched hardware — parsed, stored, never affect
-layout), `wifi_ssid_prompt` (SSID needs no location grant from Win32 — but see
-§10.4 for the 24H2 caveat), `font_smoothing`. No-op keys accept any value
-without validation (their values are never read).
+`notch_display_height` (no notched hardware — number-validated, stored and
+animated like every other bar float leaf and echoed by `--query bar`, but
+layout always runs with a notch width of 0) and `font_smoothing` (accepts any
+value; never read — a no-op in the reference too). `wifi_ssid_prompt` is
+**not** a no-op: it is bool-validated (no `toggle`) and `on` opens
+`ms-settings:privacy-location`, the Windows stand-in for the reference's Core
+Location request (§10, Network row, for the 24H2 caveat).
 
 Windows-specific **added** keys (deliberate divergences; each absent from the
 reference namespace, listed again in §15's divergence roll-up):
@@ -136,6 +151,15 @@ reference namespace, listed again in §15's divergence roll-up):
   text changes the row height, which re-centres the image and chases the
   gap. The tray rows drop their icon onto the label's optical centre with
   `-4`.
+- bar `reserve` (`auto|komorebi|appbar|off`, default `auto`): which mechanism
+  reserves the bar's strip — the tiling WM's work-area offset (komorebi's
+  `MonitorWorkAreaOffset`, or YTile's `reserve` verb when ytiled answers
+  instead), the shell's `SHAppBarMessage`, or nothing; `auto` resolves to
+  the WM path when one is detected, else off, and `komorebi` behaves the
+  same (§6.1). `off`/`appbar` also suppress the WM subscription entirely.
+  Any other value replies `[!] invalid reserve: <value>`. Absent from the
+  reference `BarPropertySetter`, where it falls to the `[?] unknown bar
+  property` arm.
 
 **Ambiguity rulings** (resolved 2026-08 after the compliance audit found the
 spec's letter and the reference's behavior disagreeing):
@@ -168,9 +192,21 @@ system_will_sleep, mouse.entered, mouse.exited, mouse.clicked, mouse.scrolled,
 volume_change, power_source_change, battery_change, wifi_change, system_stats,
 mouse.exited.global, mouse.entered.global, modifier_change, app_launched,
 app_terminated, media_change`. Order is a contract — `--query` exposes raw
-`update_mask` values. The forced-query `--trigger` interception set is
-identical: `volume_change, power_source_change, battery_change, wifi_change,
-front_app_switched, display_change, system_stats, media_change`.
+`update_mask` values. The forced-query `--trigger` interception set carries
+the reference's eight — `volume_change, power_source_change, battery_change,
+wifi_change, front_app_switched, display_change, system_stats, media_change`
+— plus the Windows workspace re-queries `komorebi_workspace_change` and
+`ytile_workspace_change` (§11.3).
+
+Two custom events are registered by the daemon itself, not the config, when
+a tiling WM is detected and `reserve` is not `off`/`appbar` (§6.1):
+`komorebi_workspace_change` (fired by both the komorebi and the YTile path,
+so themes work unchanged) and `ytile_workspace_change` (YTile only). They are
+re-registered on every reload before the config runs, so a config's own
+`--add event` bits follow them. Both carry `FOCUSED_WORKSPACE`,
+`PREV_WORKSPACE`, `FOCUSED_MONITOR_INDEX`, `WORKSPACES`,
+`FOCUSED_WORKSPACE_INDEX`, and the built-in `space_change` fires alongside
+them with the same env (§11.3; YTile parity paragraph in §15).
 
 ### 3.5 Script environment
 
@@ -179,10 +215,11 @@ front_app_switched, display_change, system_stats, media_change`.
 shift>ctrl>alt>cmd — **`cmd` maps to the Windows key**), `SCROLL_DELTA`,
 `PERCENTAGE`, `CONFIG_DIR`, `BAR_NAME`, plus the per-event extras
 (`CPU_USAGE/CPU_FRACTION/MEMORY_*/DISK_*_GB/THERMAL_STATE`, `MEDIA_*`,
-`FOCUSED_WORKSPACE/PREV_WORKSPACE`). `NAME/SENDER/INFO` are applied last and
-cannot be spoofed by `--trigger` extras. INFO payload shapes per event are
-identical (e.g. `system_stats` = `{"cpu": N, "memory": N}` with the space after
-the colon; `mouse.clicked` INFO = compact `{"button":"…","modifier":"…"}`).
+`FOCUSED_WORKSPACE/PREV_WORKSPACE/FOCUSED_MONITOR_INDEX/WORKSPACES/FOCUSED_WORKSPACE_INDEX`).
+`NAME/SENDER/INFO` are applied last and cannot be spoofed by `--trigger`
+extras. INFO payload shapes per event are identical (e.g. `system_stats` =
+`{"cpu": N, "memory": N}` with the space after the colon; `mouse.clicked`
+INFO = compact `{"button":"…","modifier":"…"}`).
 `THERMAL_STATE` is always `nominal` on Windows (no public equivalent) — the
 variable stays so scripts don't break.
 
@@ -192,17 +229,20 @@ All shapes byte-compatible modulo JSON number formatting: `bar`, `defaults`,
 `events` (`{"name": {"bit": n, "notification": "(null)"}}`), `displays`
 (keys `arrangement-id`, `frame{x,y,w,h}`, `scale`, `main`, `DirectDisplayID` —
 key names verbatim; on Windows `DirectDisplayID` carries a stable numeric id
-derived from the monitor device path hash, documented as platform-defined),
+derived from an FNV-1a hash of the monitor device name
+(`MONITORINFOEX.szDevice`, e.g. `\\.\DISPLAY1`), documented as platform-defined),
 and per-item (geometry/icon/label/scripting/bounding_rects/…). Pretty-printed,
 sorted keys, colors `0x%08x` lowercase. **Coordinate-space note:** `frame` and
 `bounding_rects` values are y-down device-independent points on Windows (the
 native convention); the macOS build reports AppKit y-up global points for
 `frame`. Document this — do not convert.
 
-Windows extension targets (both arrays, matched **before** item lookup so
+Windows extension targets (all arrays, matched **before** item lookup so
 they reach Lua through the existing query trampoline unchanged): `--query
-windows` returns the running-app list, and `--query tray` the
-notification-area registrations as `{name, hidden, icon}` rows (§10.6).
+windows` returns the running-app list, `--query tray` the notification-area
+registrations as `{name, hidden, icon}` rows (§10.6), and `--query audio`
+the default endpoint's audio-session groups as
+`{id, name, path, volume, muted, active}` rows (§10, Audio row).
 
 ### 3.7 Lua API (`LuaRuntime.swift` + prelude + sbar shim)
 
@@ -210,22 +250,32 @@ The whole surface: `ybar.bar/default/set/subscribe/delay/update/query_table/
 trigger/push/exec/add_event/query/remove/animate/add/item`, item handles
 (`h:set/subscribe/push/query`, `h.name`), nested-table flattening, valstr
 coercion (booleans → `on`/`off`, integral floats → integer strings), the
-16-trampoline raw bridge, registry-ref subscriptions keyed per item per
-event, generation-guarded `exec`/`delay` completions, SENDER=forced →
-`routine` handler fallback, Lua-first-then-shell dispatch, and the pure-Lua
-`sketchybar` compat shim shipped verbatim. The Lua prelude is plain Lua source
-and ships **byte-identical**. Bridge invariants preserved: no
-`luaL_check*`/`luaL_error` in trampolines (longjmp/destructor UB), key-copy
-before stringify in table walks, `lua_State` generation counter.
+18-trampoline raw bridge (the reference's 16 plus the two Windows additions
+below), registry-ref subscriptions keyed per item per event,
+generation-guarded `exec`/`delay` completions, SENDER=forced → `routine`
+handler fallback, Lua-first-then-shell dispatch, and the pure-Lua `sketchybar`
+compat shim shipped verbatim except for one Windows-only addition,
+`sbar.tray(name, action)`, which forwards to `ybar.tray`. The Lua prelude is
+plain Lua source and ships **byte-identical** apart from the two inserted
+lines that expose `ybar.tray`/`ybar.volume` (below). Bridge invariants
+preserved: no `luaL_check*`/`luaL_error` in trampolines (longjmp/destructor
+UB), key-copy before stringify in table walks, `lua_State` generation counter.
 
-One deliberate Windows **addition** rides the raw bridge: `ybar.tray(name,
-action)` (no macOS counterpart — there is no notification area to act on)
-routes the §10.6 tray verbs through the daemon's own token-dispatch path
-in-process. Shelling `ybar --tray` from a click script instead measured
-35–54 ms of `cmd.exe` plus 41–44 ms of CLI-socket round trip back into the
-daemon the config already runs inside, and forced a shell-metacharacter
-guard on names an app controls via its registry tooltip; the binding
-retires both.
+Two deliberate Windows **additions** ride the raw bridge, both replacing a
+shell round trip into the daemon the config already runs inside (measured
+35–54 ms of `cmd.exe` plus 41–44 ms of CLI socket per call):
+`ybar.tray(name, action)` (no macOS counterpart — there is no notification
+area to act on) routes the §10.6 tray verbs through the daemon's own
+token-dispatch path in-process, and also retires the shell-metacharacter
+guard an app-controlled registry tooltip once forced. And `ybar.volume(pct[, app])`
+routes `--volume` (§10, Audio row): macOS themes shell
+`osascript -e 'set volume …'`, while this daemon already holds the
+`IAudioEndpointVolume` — the previous theme workaround synthesized volume-key
+ticks through PowerShell SendKeys, one shell spawn per adjustment at 2 %
+quantization. The optional app id (`--query audio`'s `id` field) routes the
+set to that app's audio-session group instead of the master endpoint —
+per-app volume has no macOS API at all, so this half of the verb has no
+reference analog either.
 
 ### 3.8 Animation
 
@@ -243,20 +293,21 @@ fixed-width slot semantics with unclamped align slack, the sketchybar text
 width formula **`width = (int)(glyphPathBounds.width + 1.5)`** over tight ink
 bounds (§7.4), ink-vs-em vertical centering rules, marquee (cycle = ink+24pt,
 duration frames/60), paint order (bar bg → brackets → per item shadow → bg →
-image → icon → graph/slider/gauge → label; all quads → all triangles → all
-glyphs), pixel snapping (origin and size rounded independently), hard offset
-shadows (no blur — do not "improve"), `background.clip` holes (max 16),
-graph right-to-left on right-side positions, gauge 270° dial with label
-centered inside contributing zero width. Deliberate graph deviations: the
-reference centers a zero sample's stroke ON the box bottom (half the line
-hangs outside — under a bordered plate it overpaints the border and reads
-as a baseline under the stadium, user-reported); the port clamps line
-centers to [minY+half, maxY−half] and insets the graph box by the plate's
-border width, so stroke and fill stay inside the frame. And a graph item's
-own plate (and its shadow) squares its BOTTOM corners — only the top two
-keep the theme's corner_radius — so the flush baseline meets a 90° frame
-instead of being cut by the bottom rounding (chart-frame look, per the
-maintainer).
+image → icon → graph/slider/gauge → label, the image trailing the label
+instead when `image.align=r`; all quads → all triangles → all glyphs), pixel
+snapping (origin and size rounded independently), hard offset shadows (no
+blur — do not "improve"), `background.clip` holes (max 16), graph
+right-to-left on the leftward-flowing cursors (`right` and `q`), gauge 270°
+dial with label centered inside contributing zero width. Deliberate graph
+deviations: the reference centers a zero sample's stroke ON the box bottom
+(half the line hangs outside — under a bordered plate it overpaints the
+border and reads as a baseline under the stadium, user-reported); the port
+clamps line centers to [minY+half, maxY−half] and insets the graph box by
+the plate's border width, so stroke and fill stay inside the frame. And a
+graph item's own plate (and its shadow) squares its BOTTOM corners — only
+the top two keep the theme's corner_radius — so the flush baseline meets a
+90° frame instead of being cut by the bottom rounding (chart-frame look, per
+the maintainer).
 
 ---
 
@@ -267,24 +318,46 @@ Root of the `windows` branch (`git worktree add ..\ybar-win windows`):
 ```
 ybar-win/
   CMakeLists.txt            — C++20, MSVC, vcpkg manifest (nlohmann-json, wil, catch2)
+  CMakePresets.json         — Ninja + vcpkg toolchain, x64-windows-static;
+                              `default` (Debug, tests) and `release` presets
+  vcpkg.json                — manifest: catch2, nlohmann-json, wil
+  .github/workflows/        — ci.yml (build, ctest, signed artifact, komorebi
+                              schema canary); release.yml (`win-v*` tags →
+                              signed zip)
   src/
     main.cpp                — argv → client | daemon (mirrors ybar/main.swift)
     app/                    — daemon lifecycle, message loop, config exec, hotload
     ipc/                    — wire format, server (accept thread), client, parser, handler
     model/                  — Item, Style, Components, Layout, PropertySetter, Serialize
+    events/                 — EventBus: 20 built-in names in contract order +
+                              custom events, u64 bitmask
     anim/                   — curves, scheduler (compositor-clock driven)
     render/                 — D3D11 device/swapchains, SceneBuilder, GlyphAtlas,
                               FontCache (DirectWrite), Instances (shared GPU ABI)
     win/                    — BarSurface (HWND+DComp), PopupSurface, DisplayManager,
                               MouseRouter, backdrop, appbar
-    providers/              — audio, power, network, stats, media (GSMTC), workspace,
-                              komorebi (subscription + work-area + commands)
-    lua/                    — CLua vendored (C), bridge, prelude.lua (byte-copy)
-  shaders/ybar.hlsl         — shipped as a resource file, D3DCompile at startup
-  themes/                   — copied from YBar; komorebi variants of workspace widgets
+    providers/              — audio (+ audio_sessions mixer), network, media (GSMTC),
+                              app_info, app_lifecycle, window_list, tray_icons, and the
+                              komorebi + ytile WM adapters (subscription + work-area +
+                              commands; komorebi outranks). Power, stats and the
+                              front-app hook are polled inline by app/daemon.cpp
+    lua/                    — Lua 5.4.8 vendored (C) under vendor/; runtime.cpp bridge,
+                              prelude embedded as a string constant (the reference
+                              prelude + Windows-only ybar.tray/ybar.volume bindings)
+  shaders/ybar.hlsl         — shipped loose beside the exe, D3DCompile at startup
+  themes/                   — placeholder (README only); the shipped themes live under
+                              examples/. `ybar theme list` searches examples/ + themes/
+                              beside the exe, then ~/.config/ybar/themes
   examples/
     komorebi-whkd/          — replaces yabai-skhd: pairing guide + whkd bindings
+    catppuccin-komorebi/    — shipped flagship theme (declarative ybarrc.jsonc)
+    sketchybar-glass/       — port of the macOS flagship Lua theme + PORTING-WIN.md
   tests/                    — Catch2 port of the Swift contract tests
+  lua/sketchybar.lua        — SbarLua compat shim (`sbar` API over the embedded runtime);
+                              byte-identical to examples/sketchybar-glass/sketchybar.lua
+  packaging/                — winget (NineFiveB.ybar-win.*.yaml) + scoop (ybar-win.json)
+                              manifests, release how-to
+  scripts/install.ps1       — the README install one-liner
   docs/WINDOWS-PORT.md      — this file (copy)
 ```
 
@@ -298,14 +371,24 @@ independent instance.
 
 ## 5. Process model & lifecycle
 
-- `main.cpp`: argv non-empty and not `-c/--config|-h|-v` → thin client
-  (serialize argv → socket → print reply). Else daemon.
-- Daemon boot order (mirrors `Daemon.swift`): bind socket (instance lock) →
-  create hidden message-only window + per-display bar windows → start
-  always-on providers (workspace, power, media, **komorebi if detected**) →
-  wire EventBus + lazy providers → start 1 s routine timer (`SetTimer` or a
-  timer queue posting to the UI thread) → start IPC accept thread → execute
-  config → enter `GetMessage` loop.
+- `main.cpp`: empty argv or a leading `-c/--config` → daemon; `-h/--help` and
+  `-v/--version` print locally; `theme …`/`autostart …` are handled in-process
+  (only `theme use` sends a `--reload <entry>` over the socket). Anything else
+  → thin client (strip a leading `-m/--message`, fold `AEROSPACE_*`/`YABAI_*`/
+  `KOMOREBI_*` env on `--trigger`, serialize argv → socket → print reply; `[!]`
+  replies go to stderr, exit 1).
+- Daemon boot order (mirrors `Daemon.swift`): `CoInitializeEx` (STA) → create
+  hidden message-only window → bind socket (instance lock, before any shared
+  state is touched) → renderer + per-display bar windows (headless if the GPU
+  stack fails) → wire EventBus + mouse routing → attach **YTile, then komorebi
+  if detected** (komorebi outranks; both gated by `reserve`) → always-on
+  providers (power notifications, front-app hook, low-level mouse hook) → lazy
+  providers (audio, network, media, stats, app lifecycle) armed on first
+  subscription (audio/network/media also by an explicit `--trigger`) → build
+  CommandHandler + Lua runtime → start IPC accept thread → start 1 s routine
+  timer (`SetTimer`) → execute config → first frame → enter the message loop
+  (a `PeekMessage` drain followed by `MsgWaitForMultipleObjectsEx` on the
+  frame-due event, not a plain `GetMessage` loop).
 - **Threading model** (replaces `@MainActor`): all model/state mutation happens
   on the UI thread. Worker threads (IPC accept, providers with COM callbacks,
   komorebi subscription reader) marshal via `PostMessage(WM_APP_*)` +
@@ -316,11 +399,15 @@ independent instance.
 - COM: UI thread is STA (`RO_INIT_SINGLETHREADED` /
   `CoInitializeEx(COINIT_APARTMENTTHREADED)`); audio/media callbacks arrive on
   MTA worker threads and marshal to the UI thread.
-- Config discovery, identical order with `<name>` = instance name:
-  `-c <path>` (with `~` → `%USERPROFILE%` expansion) →
-  `%XDG_CONFIG_HOME%\<name>\` → `~/.config/<name>/` → `~/.<name>rc(.lua)`,
-  `.lua` preferred per directory. `~/.config` works fine on Windows and keeps
-  theme docs identical.
+- Config discovery, reference order plus two ybar-win additions, with `<name>`
+  = instance name: `-c <path>` (with `~` → `%USERPROFILE%` expansion; a
+  missing file runs configless rather than falling through) → `current-theme`
+  (default `ybar` instance only, resolved to the theme's entry file; a stale
+  name falls through; `ybar theme reset` clears it) → `%XDG_CONFIG_HOME%\<name>\`
+  → `~/.config/<name>/` → `~/.<name>rc(.lua)`; per directory `<name>rc.lua` →
+  `<name>rc` → `<name>rc.jsonc` → `<name>.jsonc` (JSONC entries are first-class
+  on ybar-win; the home dot-file tier is `.lua`/bare only). `~/.config` works
+  fine on Windows and keeps theme docs identical.
 - Hotload: `ReadDirectoryChangesW` on the config **directory**
   (`FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NAME`), which sees in-place writes
   *and* atomic rename-saves — the dual vnode watch from macOS collapses to one
@@ -328,23 +415,39 @@ independent instance.
   suppression window verbatim (config runs write into the watched directory
   and would loop; the "drops saves within 1 s of a reload" tradeoff is
   documented behavior, not a bug).
-- Shutdown (`--exit`, `WM_ENDSESSION`): zero the komorebi work-area offset
-  (§11.4), stop IPC, destroy windows, exit 0.
+- `--reload [path]`: a path that exists (tilde-expanded) becomes the sticky
+  config source for this and every later reload; a missing path is refused
+  and the current config re-runs (reference behavior). After `--reload
+  <path>` or `ybar theme use`, the hotload watcher re-points at the new
+  config's directory.
+- Shutdown (`--exit`, `WM_ENDSESSION`): `--exit` replies first and quits from a
+  150 ms timer that stops the komorebi/YTile subscription and zeroes its
+  work-area offset (§11.4; `WM_ENDSESSION` zeroes it directly); then unhook,
+  stop IPC, destroy windows, exit 0.
+- Diagnostics: `YBAR_DEBUG` (any value) traces daemon bring-up, surface/DPI
+  geometry, per-frame render stats and the measured animation frame rate to
+  stderr; the DComp scale override `YBAR_DCOMP_SCALE` is documented in §7.1.
 
 ### 5.1 IPC endpoint
 
 `%LOCALAPPDATA%\ybar\<instance>_<user>.sock` (AF_UNIX, `SOCK_STREAM`;
 `sun_path` limit 108 bytes — if exceeded, fall back to
-`%TEMP%\<instance>_<user>.sock` and log). Access control: the socket file gets
-an explicit DACL restricted to the current user SID (the macOS `chmod 0600`
+`%TEMP%\<instance>_<user>.sock`, or `C:\Windows\Temp` when `%TEMP%` is unset —
+silently, nothing is logged). Access control: the socket file gets an
+explicit DACL restricted to the current user SID (the macOS `chmod 0600`
 is security-relevant — this is unauthenticated command execution). Delete
 stale file before bind; `closesocket` not `_close`; no `SIGPIPE` on Windows
 (`send` returns `WSAECONNRESET`).
 
 **Cross-component coupling**: the theme switcher must use the same path. The
-POSIX `scripts/ybar-theme` becomes `ybar-theme.ps1` (or a built-in
-`ybar theme …` subcommand — preferred) preserving verbs, messages, and the
-`~/.config/ybar/themes/` + `current-theme` state file layout.
+POSIX `scripts/ybar-theme` became the built-in `ybar theme
+list|current|use <name>|reset` subcommand (no `.ps1`; `install <git-url>` is
+not ported, `reset` is new). `use` records `current-theme` and sends
+`--reload <entry>` over the same socket, falling back to "recorded; start ybar
+to apply" when no daemon answers (the next start picks it up through config
+discovery, §5). The `~/.config/ybar/themes/` + `current-theme` state file
+layout is preserved; shipped themes are found in `examples/` or `themes/`
+beside the exe (or `../examples` from a build tree).
 
 ---
 
@@ -370,13 +473,18 @@ HWND  WS_POPUP | (borderless)
   on `WM_WINDOWPOSCHANGING`, and **only useful when the strip is reserved**
   (komorebi offset or appbar) since maximized windows would otherwise cover
   it. Popups/tooltips: `HWND_TOPMOST` ordered above their bar.
-- `sticky=on` (default): pin to all virtual desktops via
-  `IVirtualDesktopManager`/`VirtualDesktopPinnedApps` when available; with
-  komorebi, workspaces are komorebi's own concept and a topmost tool window is
-  visible across them anyway — degrade gracefully if the undocumented pinning
-  interface is missing. `sticky=off` = no pinning.
-- DPI: manifest `PerMonitorV2`; scale = `GetDpiForWindow()/96`; handle
-  `WM_DPICHANGED` like `viewDidChangeBackingProperties` (resize buffers,
+- `sticky=on` (default): follow the active virtual desktop via the documented
+  `IVirtualDesktopManager` (`MoveWindowToDesktop`, re-driven from the daemon's
+  1 s tick because desktop switches raise no window message; the current
+  desktop's GUID is read from Explorer's `CurrentVirtualDesktop` registry
+  value, foreground window as fallback). True pinning lives behind the
+  undocumented, build-fragile `IVirtualDesktopPinnedApps` and is not used;
+  with komorebi, workspaces are komorebi's own concept and a topmost tool
+  window is visible across them anyway — a missing manager degrades to a
+  one-time warning. `sticky=off` = no following.
+- DPI: `SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)`
+  at daemon start (no manifest is embedded); scale = `GetDpiForWindow()/96`;
+  handle `WM_DPICHANGED` like `viewDidChangeBackingProperties` (resize buffers,
   switch glyph-atlas scale). One `GlyphAtlas` per distinct scale, as on macOS.
   Popup scenes build at the **host surface's** scale: a fresh window's DPI
   comes from the monitor at its **creation position** — a popup created at
@@ -386,10 +494,15 @@ HWND  WS_POPUP | (borderless)
   also works).
 - Displays: enumerate `EnumDisplayMonitors`; the public contract stays the
   **1-based arrangement index** (primary = 1, then enumeration order);
-  internally re-match monitors across `WM_DISPLAYCHANGE` by
-  `QueryDisplayConfig` device path (EDID-stable), then rebuild debounced
-  500 ms (the sledgehammer, kept). `display=active` = monitor of
-  `GetForegroundWindow()`.
+  internally there is no re-matching across `WM_DISPLAYCHANGE`: every
+  surface (and glyph atlas) is torn down and the set rebuilt from a fresh
+  enumeration, debounced 500 ms (the sledgehammer, kept), and re-tried from
+  the 1 s tick with 1→60 s backoff while surfaces are missing
+  (`recoverMissingSurfaces`). `display` accepts `all`, `main`, or a
+  comma-separated list of those indices (`[!] invalid display list`
+  otherwise); there is no `active` value at bar level, and the item-level
+  `display=` association (`active` or an index list) is stored but not
+  consulted by layout.
 - `fullscreen_show`: detection ANDs two signals —
   `SHQueryUserNotificationState` in {`QUNS_BUSY`,
   `QUNS_RUNNING_D3D_FULL_SCREEN`, `QUNS_PRESENTATION_MODE`} for *whether* a
@@ -399,50 +512,71 @@ HWND  WS_POPUP | (borderless)
   from an ordinary borderless window that merely spans the display — hiding
   the bar under a "Windowed (Fullscreen)" game and a maximized borderless
   editor was user-reported. Re-evaluated on the 1 s tick, on
-  `ABN_FULLSCREENAPP`, and on every workspace switch (a switch changes the
-  foreground window). **Policy per monitor**: `fullscreen_show=on` elevates
-  that surface to topmost *over* the fullscreen window (macOS parity);
-  `fullscreen_show=off` (the default) **auto-hides** the surface while
-  fullscreen is detected on its monitor and shows it again otherwise — the
-  Win11-taskbar convention, and the analog of the macOS bar not drawing over a
-  fullscreen Space. Auto-hide ORs with the user's `hidden=` toggle and keeps
-  the appbar reservation (no window reflow when toggling). Switching to a
-  workspace without the fullscreen window restores the bar because its
-  foreground no longer covers the monitor. **Known limitation** (pre-existing
-  in the detector, shared by the elevation path): detection keys off the
-  single *global* foreground window, so a fullscreen app on a monitor you are
-  not focused on is not detected — that monitor's bar stays put until its
-  window is focused. A per-monitor top-window scan would lift this but risks
-  false positives on background borderless-maximized windows, so it is
-  deferred.
+  `ABN_FULLSCREENAPP`, on every foreground-window change
+  (`EVENT_SYSTEM_FOREGROUND` win-event hook), after a surface rebuild, and
+  on every workspace switch (a switch changes the foreground window).
+  **Policy per monitor**: `fullscreen_show=on` elevates that surface to
+  topmost *over* the fullscreen window (macOS parity); `fullscreen_show=off`
+  (the default) **auto-hides** the surface while fullscreen is detected on
+  its monitor and shows it again otherwise — the Win11-taskbar convention,
+  and the analog of the macOS bar not drawing over a fullscreen Space.
+  Auto-hide ORs with the user's `hidden=` toggle and keeps the appbar
+  reservation (no window reflow when toggling). Switching to a workspace
+  without the fullscreen window restores the bar because its foreground no
+  longer covers the monitor. **Known limitation** (pre-existing in the
+  detector, shared by the elevation path): detection keys off the single
+  *global* foreground window, so a fullscreen app on a monitor you are not
+  focused on is not detected — that monitor's bar stays put until its window
+  is focused. A per-monitor top-window scan would lift this but risks false
+  positives on background borderless-maximized windows, so it is deferred.
 - `hidden`, `shadow` (DWM shadow toggle), `margin/y_offset/height/position`
   math identical (all y-down native — the AppKit y-up conversions are simply
   deleted).
 - Mouse: WndProc `WM_LBUTTONDOWN/UP`, `WM_RBUTTONUP`, `WM_MBUTTONUP`,
   `WM_MOUSEMOVE` + `TrackMouseEvent(TME_LEAVE)`, `WM_MOUSEWHEEL`
   (`GET_WHEEL_DELTA_WPARAM/120`, sign preserved). Click fires on button-up.
-  Modifiers via `GetKeyState` mapped `shift>ctrl>alt>cmd(Win)`. Global
-  popup-auto-close + `mouse.exited.global`/`modifier_change` need
+  `WM_LBUTTONDOWN` takes `SetCapture` (bar and popup WndProcs alike) so a
+  slider drag keeps receiving Move/Up after the pointer leaves the thin
+  window; a stolen capture (`WM_CAPTURECHANGED` that is not our own release)
+  ends the drag with a synthetic Up at the cursor position. Modifiers via
+  `GetKeyState` mapped `shift>ctrl>alt>cmd(Win)` for surface events; the
+  global `modifier_change` path reads `GetAsyncKeyState`, because
+  `GetKeyState` is stale on a message-only window that never has focus.
+  Global popup-auto-close + `mouse.exited.global`/`modifier_change` need
   `SetWindowsHookEx(WH_MOUSE_LL / WH_KEYBOARD_LL)` — no permission prompts on
   Windows. UIPI caveat: a non-elevated process's low-level hooks do not
   observe input delivered to elevated windows, so popup auto-close and
   modifier tracking degrade while an elevated app has focus — acceptable; do
-  not pursue uiAccess. Keep both warped-cursor defenses: any surface event marks the
-  pointer inside; the 250 ms global-exit debounce re-verifies containment via
-  `GetCursorPos` and is vetoed during slider drags.
+  not pursue uiAccess. Warped-cursor defenses: containment is the
+  `WindowFromPoint` class test (`pointOverYBarWindow`) run on every
+  `WH_MOUSE_LL` move once the global events are subscribed, with no
+  debounce; a global exit is vetoed while a slider drag is live and the
+  release re-verifies containment via `GetCursorPos`; a surface rebuild
+  forces an exit because a destroyed window never sends `WM_MOUSELEAVE`.
 - Popups: same lifecycle invariants — a popup panel counts as live only after
   its scene rendered; anchor math (host frame → screen coords, l/c/r align,
-  below-bar for top position) is pure arithmetic over y-down coords.
+  below-bar for top position) is pure arithmetic over y-down coords, then
+  clamped into the anchor's monitor: a 7 pt edge inset (right clamp first,
+  then left, so an over-wide panel overflows rightwards rather than
+  off-screen) and a vertical flip to the other side of the bar, not a slide,
+  when the panel would run off the bottom or top.
 
 ### 6.1 Space reservation (replaces "windows avoid the menu bar")
 
-New bar property (Windows extension, accepted-and-ignored by the macOS build):
+New bar property (Windows extension; the macOS build currently rejects it
+with `[?] unknown bar property: reserve`):
 
 ```
---bar reserve=komorebi|appbar|off      (default: komorebi when detected, else off)
+--bar reserve=auto|komorebi|appbar|off   (default: auto — komorebi when detected,
+                                          else YTile when detected, else no
+                                          reservation; `komorebi` behaves like `auto`)
 ```
 
-- `komorebi`: send `MonitorWorkAreaOffset` per included monitor (§11.4).
+- `komorebi` (and `auto`): send `MonitorWorkAreaOffset` to every komorebi
+  monitor — one offset, `(height + y_offset) × the first surface's scale`
+  (zero while `hidden=on`); `display=` exclusions are not applied (§11.4).
+  With komorebi absent the same mode drives YTile's `reserve` command
+  instead.
 - `appbar`: register via `SHAppBarMessage` (`ABM_NEW/QUERYPOS/SETPOS`), for
   users without komorebi. Gets `ABN_FULLSCREENAPP` for free.
 - The two modes are mutually exclusive by construction — double reservation
@@ -490,12 +624,15 @@ DWM is a retained compositor: **no render loop at rest** — `setNeedsRender()`
 coalesces model changes to one full-scene re-encode posted to the UI thread;
 render + `Present(1,0)` only then. No partial damage — damage gates *whether*
 a frame renders, never what is drawn. While animations or a marquee are
-active, pace frames with the DXGI **frame-latency waitable object**
-(`DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT`, `SetMaximumFrameLatency(1)`)
-or `DCompositionWaitForCompositorClock`, on-demand start/stop exactly like the
+active, pace frames with `DCompositionWaitForCompositorClock` on a dedicated
+pump thread (it ticks at the display's real refresh rate; the thread drops to
+a ~16 ms wait if the clock is unavailable, and a 16 ms `WM_TIMER` stands in
+only when the pump cannot start), on-demand start/stop exactly like the
 CADisplayLink (the scheduler's `continuousDemand`/`reattach` discipline
 carries over). Animation durations remain frames/60 seconds at any refresh
-rate. Failed present / device-removed → 1 s retry, device-lost recreation.
+rate. A failed present → 1 s retry (`kRenderRetryTimer`); missing bar surfaces
+are rebuilt from the 1 s tick with exponential back-off (1 s → 60 s). The D3D11
+device itself is created once at boot and is never recreated.
 Acceptance: PresentMon / Task Manager GPU shows ~0% while the bar is static.
 
 ### 7.3 Pipelines & shader
@@ -503,7 +640,8 @@ Acceptance: PresentMon / Task Manager GPU shows ~0% while the bar is static.
 Three PSOs (quad, shape, glyph) sharing one blend state (`SrcBlend=ONE`,
 `DestBlend=INV_SRC_ALPHA`, both channels), cull mode **NONE** (the unit-quad
 strip winding is not guaranteed CCW), no MSAA. `shaders/ybar.hlsl` ships as a
-resource and compiles at startup with `D3DCompile` (vs_5_0/ps_5_0). Ship
+loose file beside the exe (`<exe dir>\shaders\ybar.hlsl`, read from disk) and
+compiles at startup with `D3DCompile` (vs_5_0/ps_5_0). Ship
 `d3dcompiler_47.dll` **app-local** next to `ybar.exe` (redistributable under
 the Windows SDK license, ~4 MB): the System32 copy exists on all Win 10/11
 machines but is only documented as supported for UWP apps — app-local is the
@@ -514,15 +652,16 @@ The MSL→HLSL translation is mechanical — validated against the shader source
 `[[vertex_id]]/[[instance_id]]` → `SV_VertexID/SV_InstanceID`; device pointer
 vertex-pulling → `StructuredBuffer<QuadInstance>` in `t0`; `Uniforms` →
 `cbuffer b1`; holes → `StructuredBuffer<Hole>` (keep the explicit `float3`
-pad = 32-byte stride); `constexpr sampler` → static sampler (LINEAR, CLAMP);
-`fwidth/dfdx/dfdy` → `fwidth/ddx/ddy`; `mix` → `lerp`; `atan2` argument order
-identical; `SV_Position.xy` in the pixel shader gives top-left pixel coords
-exactly like `[[position]]` (the hole-cutout math depends on this and ports
-unchanged); Metal and D3D share NDC conventions so `to_clip` is untouched.
-The GPU instance ABI (QuadInstance 112 B / GlyphInstance 64 B / ShapeVertex
-32 B / Hole 32 B, flag bits, binding slots t0/b1/t0+t1 textures) is preserved
-with static asserts. `cornerExponent` stays transmitted-but-unused, as on
-macOS. One Windows-added flag bit extends the ABI: `kGlyphFlagDesaturate`
+pad = 32-byte stride); `constexpr sampler` → a `SamplerState` at `s0` fed by
+a runtime-created `ID3D11SamplerState` (LINEAR, CLAMP); `fwidth/dfdx/dfdy` →
+`fwidth/ddx/ddy`; `mix` → `lerp`; `atan2` argument order identical;
+`SV_Position.xy` in the pixel shader gives top-left pixel coords exactly like
+`[[position]]` (the hole-cutout math depends on this and ports unchanged);
+Metal and D3D share NDC conventions so `to_clip` is untouched. The GPU
+instance ABI (QuadInstance 112 B / GlyphInstance 64 B / ShapeVertex 32 B /
+Hole 32 B, flag bits, binding slots t0/b1/t0+t1 textures, holes at PS `t2`)
+is preserved with static asserts. `cornerExponent` stays transmitted-but-unused,
+as on macOS. One Windows-added flag bit extends the ABI: `kGlyphFlagDesaturate`
 (`1u << 1`; `kGlyphFlagGrey` in the HLSL) applies a Rec. 709 luma conversion
 to colour-atlas samples — valid directly on premultiplied colour — backing
 `image.desaturate` (§3.3). The painted glass rim (`flagGlass`) ships with
@@ -556,47 +695,69 @@ Model on Windows Terminal AtlasEngine + `lhecker/dwrite-hlsl`:
   "DWRITE_TEXTURE_ALIASED_1x1 is now misnamed, it must also be used with
   grayscale"); never pass `DWRITE_RENDERING_MODE_ALIASED`, which produces
   bi-level output. Color page 1024²
-  premultiplied BGRA8-sRGB via `IDWriteFactory4::TranslateColorGlyphRun`
-  (COLR layers; `DWRITE_E_NOCOLOR` → monochrome path) rendered through
-  D2D into a `GUID_WICPixelFormat32bppPBGRA` target. Shelf packer, 1 px
+  premultiplied BGRA8-sRGB, written only by the image pipeline (§7.5): WIC
+  decodes converted to `GUID_WICPixelFormat32bppPBGRA` and shell icons drawn
+  with `DrawIconEx` then premultiplied. Colour glyph runs are **not**
+  rasterized — the atlas is built on `IDWriteFactory2` with no
+  `TranslateColorGlyphRun`/D2D path, so emoji and COLR symbols go through the
+  grayscale mask page and take the part's colour. Shelf packer, 1 px
   padding, quarter-point size buckets, cache keys, no-eviction policy, and
   the stderr warning strings port verbatim.
 - **Metrics — the load-bearing part**: reproduce
   `ShapedLine{width, ascent, descent, inkWidth, inkMinX, inkMinY, inkMaxY}`.
-  `ascent/descent` from `DWRITE_FONT_METRICS × size/designUnitsPerEm`. Ink
-  bounds: accumulate per-glyph ink boxes (design metrics or
+  `ascent/descent` from the layout's `DWRITE_LINE_METRICS` (`baseline` and
+  `height − baseline`); `designUnitsPerEm` scales only the per-glyph ink
+  boxes. Ink bounds: accumulate per-glyph ink boxes (design metrics or
   `GetAlphaTextureBounds`) advanced along shaped positions, then apply
   **exactly** `width = (int)(inkBounds.width + 1.5)`. Every padding and
-  alignment in every ported config depends on this truncation. A dedicated
-  parity test with golden values from the macOS build is required (§14).
+  alignment in every ported config depends on this truncation. The headless
+  tests in `tests/ink_metric_tests.cpp` pin the truncation and the ink-union
+  accumulation with synthetic values; a golden-value comparison against the
+  macOS build is still outstanding (§14).
 - **Fonts**: spec grammar `"Family:Style:Size"` unchanged; empty family →
   **Segoe UI Variable** with the style-string→weight table
-  (`ultralight…black` → `DWRITE_FONT_WEIGHT_*`); named families matched via
-  `IDWriteFontCollection::FindFamilyName` + face-name string match (DirectWrite
-  exposes face names, so `"Hack Nerd Font:Bold Italic:14.0"` resolves the same
-  way). `WM_FONTCHANGE` clears the font/glyph caches (late-installed Nerd
-  Fonts — same behavior as the CoreText registration notification). It must
-  be handled in the **bar windows'** WndProc — message-only windows do not
-  receive broadcast messages, so the hidden message window never sees it.
+  (`ultralight…black` → `DWRITE_FONT_WEIGHT_*`); named families go straight to
+  `IDWriteFactory::CreateTextFormat` with the same style-string table
+  (`weightFor`/`styleFor` — `bold`, `semibold` and `italic` match as
+  substrings, the rest exactly), so `"Hack Nerd Font:Bold Italic:14.0"`
+  resolves to `DWRITE_FONT_WEIGHT_BOLD` + `DWRITE_FONT_STYLE_ITALIC`;
+  `FindFamilyName` is used only to pick the icon font. `WM_FONTCHANGE`
+  clears the shaped-line font cache — `FontCache::clear`; the glyph atlas
+  pages are left as-is, only a display change rebuilds them (late-installed
+  Nerd Fonts — same behavior as the CoreText registration notification). It
+  must be handled in the **bar windows'** WndProc — message-only windows do
+  not receive broadcast messages, so the hidden message window never sees it.
   It is also a convention honored by well-behaved font installers, not a
   system guarantee.
 
 ### 7.5 Icons & images
 
-- `sf:<name>` (text) and `sf.<name>` (image source) grammar preserved. The
-  resolver maps names through a shipped JSON table to Segoe Fluent Icons
-  codepoints (generated from the Microsoft Learn table); unmapped names fall
-  back to the bundled `fluentui-system-icons` font (MIT, redistributable),
-  then to a placeholder glyph with a stderr note. Tinting via the mask page
-  works unchanged.
+- `sf:<name>` (text) grammar preserved; `sf.<name>` is accepted by the name
+  parser but the image pipeline has no `sf.` branch, so an
+  `image.string="sf.<name>"` source renders nothing — use `sf:` icon text. The
+  resolver maps names through a compiled-in table (`src/render/icon_map.cpp`)
+  to Segoe Fluent Icons codepoints (generated from the Microsoft Learn table);
+  unmapped names try progressively shorter dotted prefixes
+  (`speaker.wave.2.fill` → `speaker.wave.2` → …), then a placeholder glyph
+  (U+E9CE) with a one-time stderr note. The icon *font* is chosen at runtime
+  from the system collection — Segoe Fluent Icons → Segoe MDL2 Assets →
+  `FluentSystemIcons-Resizable` if the user installed it; no font is bundled.
+  Tinting via the mask page works unchanged.
 - `app.<Name>` image sources resolve running-process icons:
   process enumeration → `QueryFullProcessImageNameW` → `SHGetFileInfoW(SHGFI_ICON)`
-  (UWP apps: unwrap `ApplicationFrameHost` and read the package logo asset).
+  (matched on the executable stem, case-insensitive — no UWP unwrap or
+  package-logo lookup, so a packaged app resolves only if its real process
+  stem is the name given).
   New Windows-native source `exe.<path>` resolves an icon directly from a path
-  — used by the komorebi workspaces widget (§11.6).
+  — used by the tray popup widget (§10.6) and the sketchybar-glass
+  volume-mixer rows.
 - File images decode through WIC (`IWICImagingFactory`), multi-res `.ico`
-  picks the frame nearest `size × scale`; `spinner`/rotation re-raster via a
-  small D2D helper (cache-key behavior identical).
+  always decodes frame 0, which WIC's Fant scaler then resizes to
+  `size × scale`; `spinner` and `image.rotation` are parsed but **not
+  rendered** — `GlyphAtlas::image` has no spinner branch (the source falls
+  through to the WIC file path and is negative-cached) and `emitImage`
+  ignores `rotation`, so the sketchybar-glass spinner helper draws nothing on
+  Windows.
 
 ### 7.6 Backdrops
 
@@ -605,6 +766,13 @@ DWMSBT_TRANSIENTWINDOW)` (Acrylic; Win11 22621+) + dark mode via
 `DWMWA_USE_IMMERSIVE_DARK_MODE` (documented only to darken the frame; that it
 also selects the dark backdrop variant is undocumented-but-stable behavior,
 the same reliance wezterm ships); popups likewise when `popup.blur_radius>0`.
+Both are gated on Windows' **Transparency effects** setting
+(`HKCU\...\Themes\Personalize\EnableTransparency`, read by
+`systemTransparencyEnabled()`): with it off the bar and popups get
+`DWMSBT_NONE` and the popup plate is forced opaque
+(`buildPopupScene(opaquePanel)`); the daemon re-reads it on
+`WM_SETTINGCHANGE`/`WM_THEMECHANGED` (forwarded from the bar windows) and
+re-applies the backdrops.
 The undocumented `SetWindowCompositionAttribute` accent path is dead on Win11
 — never used. **Per-item glass pills have no Windows analog**: item-level
 `glass`/`blur_radius` render as the shader's painted glass rim + translucent
@@ -615,19 +783,24 @@ fills only. Rounded backdrop corners via `DWMWA_WINDOW_CORNER_PREFERENCE`
 
 ## 8. Core model
 
-`model/` is a 1:1 port of `Items/` + `Animation/`: Item tree,
-TextPart/BackgroundStyle value types, YColor (linear-light lerp), GraphState
-ring buffer, SliderState, GaugeState, ImageState, PopupState, bracket
-derivation and regex member expansion (**unanchored** substring matching —
-`std::regex` ECMAScript `regex_search`, matching NSRegularExpression
-semantics), five-cursor layout as a pure function with injected measurement,
-ComponentGeometry (bracket unions, popup vertical/horizontal/wrap-flow
-layouts, graph tessellation), Serialize, and the animation scheduler.
+`model/` (+ `anim/` for the scheduler and curves) is a 1:1 port of `Items/` +
+`Animation/`: Item tree, TextPart/BackgroundStyle value types, YColor
+(linear-light lerp), GraphState ring buffer, SliderState, GaugeState,
+ImageState, PopupState, bracket derivation and regex member expansion
+(**unanchored** substring matching — `std::regex` ECMAScript `regex_search`,
+matching NSRegularExpression semantics), five-cursor layout as a pure
+function with injected measurement, ComponentGeometry (bracket unions, popup
+vertical/horizontal/wrap-flow layouts — `layout.cpp`/`popup_layout.cpp`;
+graph tessellation itself is `emitGraph` in `render/scene_builder.cpp`),
+Serialize, PropertySetter, and the animation scheduler.
 
 Deliberate fix over the Swift original: `Item.contentWidth` hardcodes
 `backingScale: 2` for alias layout (`Item.swift:114`) — irrelevant once alias
-is unsupported, but the port threads real per-monitor scale through
-measurement anyway (Windows scales are commonly 1.0/1.25/1.5).
+is unsupported, and the port measures and lays out in scale-free DIPs (the
+injected `Measure` takes no scale), applying the real per-monitor scale only
+at scene build (`render/scene_builder` snaps to device pixels) and glyph
+rasterization (one `GlyphAtlas` per display scale) — nothing hardcodes a
+backing scale (Windows scales are commonly 1.0/1.25/1.5).
 
 ---
 
@@ -641,9 +814,11 @@ measurement anyway (Windows scales are commonly 1.0/1.25/1.5).
 - CLI hot path: every widget script shells `ybar --set …`; keep client startup
   lean (no COM init, no WinRT, static CRT) — target < 10 ms per invocation.
 - `--add event <name> [notification]`: the second argument (macOS distributed
-  notification binding) is **accepted and ignored** with a one-time stderr
-  note. Custom events remain fully functional via `--trigger`. (A future
-  named-pipe broadcast binding may reuse the slot; out of scope v1.)
+  notification binding) is **accepted and recorded** — echoed by
+  `--query events` (`"(null)"` when absent; `ybar.add_event(name, notification)`
+  forwards it the same way) but bound to nothing, with no stderr note. Custom
+  events remain fully functional via `--trigger`. (A future named-pipe
+  broadcast binding may reuse the slot; out of scope v1.)
 
 ---
 
@@ -651,15 +826,15 @@ measurement anyway (Windows scales are commonly 1.0/1.25/1.5).
 
 | Provider | Windows implementation | Notes |
 |---|---|---|
-| Workspace (front app) | `SetWinEventHook(EVENT_SYSTEM_FOREGROUND, WINEVENT_OUTOFCONTEXT)` → exe FileDescription (unwrap `ApplicationFrameHost` for UWP) | Always on; no permissions. komorebi's `FocusChange` events enrich but the hook works WM-less |
-| space_change | komorebi provider (§11); without komorebi: no-op | INFO stays `""` |
-| system_woke / system_will_sleep | `WM_POWERBROADCAST`: `PBT_APMRESUMEAUTOMATIC` / `PBT_APMSUSPEND` (+`RegisterSuspendResumeNotification` for modern standby) | |
-| app_launched / app_terminated | From komorebi `Show`/`Destroy` window events when available; else 2 s process-snapshot diff (`EnumProcesses`) | **Semantics change**: window-scoped with komorebi (background processes invisible); WMI tracing needs admin — rejected. Document. |
+| Workspace (front app) | `SetWinEventHook(EVENT_SYSTEM_FOREGROUND, WINEVENT_OUTOFCONTEXT)` → exe FileDescription (unwrap `ApplicationFrameHost` for UWP) | Always on; no permissions. The hook is the only source — komorebi/YTile do not feed `front_app_switched` |
+| space_change | komorebi provider (§11), or the YTile adapter (`src/providers/ytile.cpp`, attached only when komorebi is absent); without either: no-op | INFO stays `""` |
+| system_woke / system_will_sleep | `WM_POWERBROADCAST`: `PBT_APMRESUMEAUTOMATIC` / `PBT_APMSUSPEND` (forwarded from the bar windows' WndProc to the message-only mailbox, which never receives broadcasts directly — no `RegisterSuspendResumeNotification`) | |
+| app_launched / app_terminated | From komorebi `Show`/`Destroy` window events (or the YTile adapter's manage/unmanage diffs) when a WM is attached; else 2 s process-snapshot diff (`CreateToolhelp32Snapshot`, armed lazily on first subscription) | **Semantics change**: window-scoped with komorebi (background processes invisible); WMI tracing needs admin — rejected. Document. |
 | Power | `GetSystemPowerStatus` + `RegisterPowerSettingNotification(GUID_ACDC_POWER_SOURCE, GUID_BATTERY_PERCENTAGE_REMAINING)` → `PBT_POWERSETTINGCHANGE` | Push, no polling. `"AC"`/`"BATTERY"` strings + dedupe/forced split preserved; the third source condition `PoHot` (UPS) maps to `"AC"` |
-| Audio | `IMMDeviceEnumerator` → `IAudioEndpointVolume` (+`IAudioEndpointVolumeCallback`), `IMMNotificationClient::OnDefaultDeviceChanged` re-arm | Callbacks marshal to UI thread. Muted → 0, integer percent |
-| Network | `NotifyNetworkConnectivityHintChange` (or `INetworkListManager` events); SSID via `WlanQueryInterface(wlan_intf_opcode_current_connection)` | **Win11 24H2 gates SSID behind Location privacy** — degrade to `"connected"` exactly like macOS-without-authorization; `wifi_ssid_prompt=on` opens `ms-settings:privacy-location` |
-| SystemStats | `GetSystemTimes` deltas (busy = (kernel−idle)+user), `GlobalMemoryStatusEx` (Total−Avail)/Total; `GetDiskFreeSpaceExW` for `DISK_*_GB` | Microsoft explicitly recommends this over PDH for ≥1 Hz sampling. Same 2 s interval, 0–100 contract |
-| Media | **GSMTC** (`GlobalSystemMediaTransportControlsSessionManager`, C++/WinRT): `CurrentSessionChanged` + `MediaPropertiesChanged` + `PlaybackInfoChanged` → `media_change` with `MEDIA_APP/STATE/TITLE/ARTIST/ALBUM` | Strict superset of the macOS distributed-notification hack: covers Spotify, browsers, most players, plus artwork/seek/transport for a future now-playing popup. `MEDIA_APP` carries the session's app id — scripts matching `"Music"|"Spotify"` need the documented mapping table. Cached-env replay on reload preserved. Fails only under session-0 (not applicable) |
+| Audio | `IMMDeviceEnumerator` → `IAudioEndpointVolume` (+`IAudioEndpointVolumeCallback`), `IMMNotificationClient::OnDefaultDeviceChanged` re-arm | Callbacks marshal to UI thread. Muted → 0, integer percent. **Write path (ybar-win extension, no macOS analog)**: `--volume <0-100>` / `ybar.volume(pct)` → `SetMasterVolumeLevelScalar` on the held endpoint (0 mutes keeping the scalar; >0 sets then unmutes, scalar first so a muted endpoint cannot blip its old level); the set's own `OnNotify` publishes the new value back through the normal path. **Per-app sessions (ybar-win extension)**: `--query audio` / `--volume <0-100> <app>` enumerate `IAudioSessionManager2` on the default endpoint STATELESSLY per call (the tray_icons pattern — no session sinks, no lifetime surface; a fresh manager per call also always sees new sessions). Sessions group by lowercase exe stem (`system` = Explorer's system-sounds session, pinned last); Expired sessions and sessions whose process image path is unreadable (SYSTEM-owned, or the pid died while merely Inactive) are skipped so a group id is never empty; group volume is the max across sessions, muted only when all are. Reads mirror muted→0; writes mirror the master ordering (0 mutes keeping the scalar, >0 sets the scalar then unmutes). Session scalars are RELATIVE to master (100 = follow master) — the Windows 11 Settings mixer convention, kept as-is deliberately |
+| Network | `NotifyNetworkConnectivityHintChange` + `WlanRegisterNotification` (ACM connect/disconnect); SSID via `WlanQueryInterface(wlan_intf_opcode_current_connection)` | **Win11 24H2 gates SSID behind Location privacy** — degrade to `"connected"` exactly like macOS-without-authorization; `wifi_ssid_prompt=on` opens `ms-settings:privacy-location` |
+| SystemStats | `GetSystemTimes` deltas (busy = (kernel−idle)+user), `GlobalMemoryStatusEx` (Total−Avail)/Total; `GetDiskFreeSpaceExA` on `%USERPROFILE%` (else `C:\`) for `DISK_*_GB` | Microsoft explicitly recommends this over PDH for ≥1 Hz sampling. Same 2 s interval, 0–100 contract |
+| Media | **GSMTC** (`GlobalSystemMediaTransportControlsSessionManager`, C++/WinRT): `CurrentSessionChanged` + `SessionsChanged` + `MediaPropertiesChanged` + `PlaybackInfoChanged`, plus a 10 s revalidation tick (GSMTC does not reliably report a vanished session — a closed browser tab leaves a `Playing` ghost) → `media_change` with `MEDIA_APP/STATE/TITLE/ARTIST/ALBUM` | Strict superset of the macOS distributed-notification hack: covers Spotify, browsers, most players, plus artwork/seek/transport for a future now-playing popup. `MEDIA_APP` carries the session's app id — scripts matching `"Music"|"Spotify"` need the documented mapping table. Cached-env replay on reload preserved. Fails only under session-0 (not applicable) |
 | Clock/routine | 1 s timer on UI thread, tolerance semantics via timer coalescing | |
 
 ### 10.1 ScriptRunner
@@ -682,12 +857,16 @@ value is read with `_wgetenv` so non-ASCII shell paths survive. Dispatch is
 **`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`** Job Object (kills the whole child
 *tree* — the latent "children of the shell survive" gap macOS shares is
 fixed here), fire-and-forget, PATH prepended with the `ybar.exe` directory
-and the resolved shell's directory (`;` separator). The exec pipe is
-drained concurrently with the child (same >64 KB deadlock exists with
-anonymous pipes). Config scripts: no chmod (no exec bit), dispatch by
-extension — `.lua`/`.jsonc` in-process, anything else through the resolved
-shell. Lua's `io.popen`/`os.execute` go through `cmd.exe` (CRT `_popen`) —
-document that these two escape the shell decision.
+and the resolved shell's directory (`;` separator). `ybar.exec` shares the
+interpreter choice, the PATH prepend and the 60 s limit but not the rest: its
+watchdog `TerminateProcess`es the shell alone (no Job Object, so grandchildren
+can survive) and it passes no cwd, so the child inherits the daemon's working
+directory rather than the config dir. The exec pipe is drained concurrently
+with the child (same >64 KB deadlock exists with anonymous pipes). Config
+scripts: no chmod (no exec bit), dispatch by extension —
+`.lua`/`.json`/`.jsonc` in-process, anything else through the resolved shell.
+Lua's `io.popen`/`os.execute` go through `cmd.exe` (CRT `_popen`) — document
+that these two escape the shell decision.
 
 ### 10.6 Alias
 
@@ -699,10 +878,12 @@ area exposes no per-icon capture API.
 
 A tray **popup widget** shipped instead (`src/providers/tray_icons.h`;
 theme `items/widgets/apps.lua`): rows carry the owning app's registration
-name and its **executable's** icon (a cached PNG where Explorer kept one,
-else `exe.<path>` through §7.5) — resolved metadata, not captured tray
-pixels, so it does not revive the `alias` grammar. Left-click opens or
-restores the app; right-click quits it behind an in-row confirm.
+name and its icon (Explorer's stored `IconSnapshot` PNG — the tray icon as
+it was at first registration, read from the registry and content-hashed into
+`%LOCALAPPDATA%\ybar\tray` — where the registration kept one, else
+`exe.<path>` through §7.5) — resolved metadata, not captured tray pixels, so
+it does not revive the `alias` grammar. Left-click opens or restores the
+app; right-click quits it behind an in-row confirm.
 Two claims in this section's original rationale were measured false on
 26200.9168 and are recorded so they are not re-derived:
 
@@ -719,14 +900,18 @@ The list therefore comes from `HKCU\Control Panel\NotifyIconSettings`
 filtered by process liveness — a **two-pass** enumeration (basename
 candidates first; handles, icon and version metadata only for survivors),
 because opening a handle on every process from the UI thread measured 50 ms
-warm / 225 ms cold. Liveness matches on executable **basename** (NVIDIA's
-icon is owned by a SYSTEM `NVDisplay.Container.exe` whose full path a normal
-process cannot read; a stray row beats a missing one). Explorer's own icons
-are omitted — they all report `explorer.exe`/"Windows Explorer" and the bar
-already carries those functions as first-class pills.
+warm / 225 ms cold. Liveness matches on the registration's
+**full image path**, falling back to executable **basename** only for
+processes whose path cannot be read (NVIDIA's icon is owned by a SYSTEM
+`NVDisplay.Container.exe` whose full path a normal process cannot read; a
+stray row beats a missing one). Explorer's own icons are omitted — they all
+report `explorer.exe`/"Windows Explorer" and the bar already carries those
+functions as first-class pills.
 
-The verb surface: `--query tray` / `--query windows` (§3.6), `--tray <name>
-invoke|close`, and the in-process `ybar.tray(name, action)` (§3.7).
+The verb surface: `--query tray` / `--query windows` (§3.6), `--window <hwnd>
+close|kill` (an hwnd from the `--query windows` rows: posted `WM_CLOSE`, or
+`TerminateProcess` with no save prompt), `--tray <name> invoke|close`, and
+the in-process `ybar.tray(name, action)` (§3.7).
 `invoke` tries, in order: (1) UIA `InvokePattern` — the real tray callback,
 prefix-matched because UIA labels carry status text the registry name lacks;
 it only reaches promoted icons or an already-open overflow flyout; (2)
@@ -747,8 +932,9 @@ whose path cannot be read is never terminated, `explorer.exe` is refused
 outright, and terminate rights are requested up front so anything at higher
 integrity drops out without a blocklist. The theme reconciles the row list
 at 1.5/4/7 s after a close — spanning the `WM_CLOSE` reply and the
-escalation — **not** gated on the popup still being open
-(`mouse.exited.global` hides it the moment the pointer leaves).
+escalation — each pass still gated on the popup being open, since the next
+open re-populates anyway (`mouse.exited.global` hides it the moment the
+pointer leaves).
 
 ---
 
@@ -830,46 +1016,72 @@ Every notification is the **full state snapshot**:
 
 Focused workspace = `monitors.elements[monitors.focused]
 .workspaces.focused`; workspace *name* when non-null, else 1-based index as
-the display string. Monocle/maximized state per workspace feeds
-`fullscreen_show`.
+the display string. Monocle/maximized state is not read; `fullscreen_show`
+stays driven by the surface's foreground-window check, which the daemon
+re-runs whenever a workspace-change update lands.
 
 Parsing rule: **tolerant** — unknown fields ignored, missing optionals
 defaulted; the schema has no formal stability guarantee (no breaking changes
 documented in the last five releases, but pin the tested version in CI and
 re-validate per release).
 
-### 11.3 KomorebiProvider (daemon-side, always attempted at boot)
+### 11.3 KomorebiProvider (daemon-side, attempted while `reserve` allows a WM)
 
-- Detect komorebi: try `komorebi.sock` connect (also poll lazily every 15 s
-  when absent so a bar started before komorebi attaches itself).
-- Subscribe as `<instance>` (i.e. socket `%LOCALAPPDATA%\komorebi\ybar.sock`;
-  a renamed ybar instance gets its own). Reader thread: accept → read-to-EOF
-  → parse → `PostMessage` to UI thread.
+- Detect komorebi: `komorebi.sock` exists (`GetFileAttributesA`, no connect
+  attempt; a late attach `refresh()`es state at once; also re-checked from the
+  daemon's 1 s tick when absent so a bar started before komorebi attaches
+  itself).
+- Subscribe as the fixed name `ybar.sock` (socket
+  `%LOCALAPPDATA%\komorebi\ybar.sock`; every ybar instance uses this same
+  name — the instance lock (§5) stops a second launch of the same instance
+  from re-registering it, but a differently named instance would clobber the
+  live subscriber). Reader thread: accept → read-to-EOF → parse →
+  `PostMessage` to UI thread.
 - **Reconnect** (komorebi-bar's pattern, one fix): a zero-byte read / accept
   failure ⇒ komorebi died; loop re-registration every 1 s until it succeeds,
   then re-apply the work-area offset (§11.4) and re-publish state.
   Re-register with `AddSubscriberSocketWithOptions` — komorebi-bar re-sends
   the plain variant here and silently loses its state filter after a
   reconnect; don't copy that.
+- **Unsubscribe** on stop (`--exit`, `reserve` leaving WM mode, provider
+  teardown): close the listener, join the reader, send
+  `{"type":"RemoveSubscriberSocket","content":"ybar.sock"}` to `komorebi.sock`,
+  and delete the subscriber socket file; the daemon then zeroes the work-area
+  offset (§11.4).
 - Events published on the YBar bus:
   - `space_change` (built-in) + **`komorebi_workspace_change`** (registered by
     the provider as a custom event) with env
     `FOCUSED_WORKSPACE=<name-or-index>`, `PREV_WORKSPACE=…`,
-    `FOCUSED_MONITOR_INDEX=<1-based>`, INFO = focused workspace display
-    string — fired on any notification whose focused monitor/workspace
+    `FOCUSED_MONITOR_INDEX=<1-based>`, `WORKSPACES=<names>` (the focused
+    monitor's workspace display names, newline-separated, komorebi order),
+    `FOCUSED_WORKSPACE_INDEX=<1-based position in WORKSPACES>`, INFO =
+    focused workspace display string — fired on any notification whose
+    focused monitor/workspace changed, or whose workspace list (names/count)
     changed. Themes keep the AeroSpace pattern (subscribe, read
     `env.FOCUSED_WORKSPACE`) verbatim.
-  - `front_app_switched` from `FocusChange` (title/exe in hand) — deduped
-    against the WinEventHook source so items see one event.
+  - `front_app_switched` is not derived from `FocusChange`: it comes only from
+    the foreground-window source (`publishFrontApp`, §10), so items see one
+    event.
   - `app_launched`/`app_terminated` from `Show`/`Destroy` (window-scoped,
     §10 table).
-  - Raw passthrough: the full notification JSON is cached; a
-    `--query komorebi` extension verb returns the last State for
-    scripts/Lua (cheap — it's already parsed).
-- **Forced-query** entries added: `komorebi_workspace_change` re-reads cached
-  state (or sends `{"type":"State"}`) so `ybar --trigger
-  komorebi_workspace_change` replays current state at config boot, mirroring
-  the AeroSpace boot-population idiom.
+  - No raw passthrough: the notification JSON is not cached and there is no
+    `--query komorebi` verb (`--komorebi` is send-only, no reply). A script that
+    needs the full State asks komorebi directly (`komorebic state`, or
+    `{"type":"State"}` on `komorebi.sock`) or uses the event env.
+- **Forced-query** entries added: `komorebi_workspace_change` (and
+  `ytile_workspace_change`) re-query the live WM (`refresh()` —
+  `{"type":"State"}` on `komorebi.sock`, or YTile's `state` command — dedupe
+  bypassed) so `ybar --trigger komorebi_workspace_change` replays current
+  state at config boot, mirroring the AeroSpace boot-population idiom.
+- **YTile (sibling WM)**: `YTileProvider` (`src/providers/ytile.*`, named pipe
+  `\\.\pipe\ytile`, NDJSON) attaches at boot and through the same 1 s re-detect
+  only while `komorebi.sock` is absent; komorebi outranks it and takes over live
+  if it appears later. It publishes `ytile_workspace_change` **and**
+  `komorebi_workspace_change` (plus `space_change`) with the same env keys
+  (`FOCUSED_WORKSPACE`, `PREV_WORKSPACE`, `FOCUSED_MONITOR_INDEX`, `WORKSPACES`,
+  `FOCUSED_WORKSPACE_INDEX`) — `WORKSPACES` there carries the shown workspace
+  numbers (non-empty or active) rather than names — so komorebi themes run
+  unchanged.
 
 ### 11.4 Work-area reservation handshake
 
@@ -880,19 +1092,24 @@ On start / bar-height change / monitor change / komorebi reconnect, when
 {"type":"MonitorWorkAreaOffset","content":[<monitor_idx>, {"left":0,"top":H,"right":0,"bottom":H}]}
 ```
 
-per included monitor. **Both `top` and `bottom` are `H`**: komorebi applies
-`top += offset.top; bottom -= offset.bottom` where `bottom` is the work-area
-*height* — `top` alone would shift the area down without shrinking it,
-pushing tiles `H` px past the bottom of the screen (komorebi-bar sets both,
-`bar.rs:503`). `H` = **physical pixels** of
-`(height + y_offset) × monitor scale` (komorebi rects are physical;
-komorebi-bar's un-scaled constant is a known limitation, we do better) and
-`monitor_idx` is komorebi's index for the monitor **matched via State
-`device_id`/geometry**, not ybar's arrangement index. On graceful exit
+per komorebi monitor (indices `0 … monitors.elements.size()-1`, regardless of
+ybar's display include set). **Both `top` and `bottom` are `H`**: komorebi
+applies `top += offset.top; bottom -= offset.bottom` where `bottom` is the
+work-area *height* — `top` alone would shift the area down without shrinking
+it, pushing tiles `H` px past the bottom of the screen (komorebi-bar sets
+both, `bar.rs:503`). `H` = **physical pixels** of
+`(height + y_offset) × scale of the first bar surface` — a single value sent
+to every monitor (komorebi rects are physical; komorebi-bar's un-scaled
+constant is a known limitation, we do better) and `monitor_idx` is simply
+komorebi's own index `0 … N-1` — every komorebi monitor receives the same
+offset; no `device_id`/geometry matching is done. On graceful exit
 (`--exit`, `WM_ENDSESSION`): send the same message with a zero rect.
 Known limitation (komorebi-bar has it too): a crashed bar leaves the offset
 until komorebi reloads its config — document `komorebic restore-windows` /
-config reload as the fix, and re-zero on next ybar start before applying.
+config reload as the fix (still to be written up in the README/example);
+ybar does not pre-zero at start — komorebi stores the offset per monitor
+(`work_area_offset`, an absolute set), so applying `H` replaces the stale
+value.
 
 ### 11.5 Click commands
 
@@ -900,33 +1117,42 @@ Two supported forms:
 
 - **Compat (themes port verbatim)**: `click_script = "komorebic focus-workspace 2"`
   — shells out, works everywhere.
-- **Native (no process spawn)**: Lua `ybar.komorebi({type="FocusMonitorWorkspaceNumber",
-  content={0, 2}})` and CLI `ybar --komorebi '<json>'` — the daemon writes the
-  message straight to `komorebi.sock`. Useful messages: `FocusWorkspaceNumber(n)`,
+- **Native (no `komorebic` spawn)**: CLI `ybar --komorebi '<json>'` (from Lua
+  via `sbar.exec("ybar --komorebi '…'")`, as
+  `examples/sketchybar-glass/items/spaces.lua` does; there is no
+  `ybar.komorebi` Lua function) — the daemon writes the message straight to
+  `komorebi.sock`. Useful messages: `FocusWorkspaceNumber(n)`,
   `FocusMonitorWorkspaceNumber(m, n)`, `FocusNamedWorkspace(s)`,
-  `CycleFocusWorkspace(dir)`, `TogglePause`. This is a ybar-win extension;
-  the macOS build rejects the verb.
+  `CycleFocusWorkspace(dir)`, `TogglePause`. The daemon forwards whenever
+  `komorebi.sock` exists (even with `reserve=off`); with komorebi absent and
+  YTile attached, `FocusWorkspaceNumber` (index into `WORKSPACES`),
+  `FocusNamedWorkspace` and `CycleFocusWorkspace` are translated onto YTile
+  verbs; anything else — or no WM at all — replies
+  `[!] komorebi is not available`. This is a ybar-win extension; the macOS
+  build rejects the verb.
 
 ### 11.6 Workspaces widget & pairing example
 
-`themes/*/items/workspaces.lua` gets a komorebi variant with the exact
-structure of the AeroSpace one (pills, focused highlight, reveal/collapse
-animation, app glyphs) but **event-driven with zero polling**: the provider's
-cached state replaces all three `aerospace list-*` CLI calls (enumeration =
-`workspaces.elements` per monitor; visible = non-empty ∪ focused, where
-non-empty = `containers.elements` non-empty, or `monocle_container`/
-`maximized_window` set, or `floating_windows.elements` non-empty; app names
-from `Window.exe` mapped through `helpers/app_icons.lua`).
-Click = `komorebic focus-workspace <idx>` (compat form). Note komorebi
+`examples/sketchybar-glass/items/spaces.lua` is the komorebi workspaces
+widget: a simplified form of the AeroSpace one (fixed 10-slot pill set, focused
+highlight; no reveal/collapse animation, no app glyphs) that is
+**event-driven with zero polling**: the daemon's
+`WORKSPACES`/`FOCUSED_WORKSPACE_INDEX` env replaces all three `aerospace list-*`
+CLI calls (enumeration = `workspaces.elements` of the focused monitor; every
+listed workspace is shown — the env carries no per-workspace occupancy, so
+there is no non-empty ∪ focused filter, and `helpers/app_icons.lua` is present
+in the example but unused by the pills).
+Click = `ybar --komorebi '{"type":"FocusWorkspaceNumber","content":<slot-1>}'`
+(native form, index-based so unnamed workspaces focus too). Note komorebi
 workspaces are **per-monitor and dynamic** — re-enumerate pills on state
 notifications, not only at config load.
 
-`examples/komorebi-whkd/` replaces `examples/yabai-skhd/`: komorebi.json
-fragment (bars should NOT also set `global_work_area_offset` when
-`reserve=komorebi` — ybar sends it), whkd bindings firing
-`ybar --trigger …` (mode-pill pattern like skhd modes), and the pairing
-walkthrough. No SIP/scripting-addition section — komorebi needs no OS
-tampering.
+`examples/komorebi-whkd/` replaces `examples/yabai-skhd/` — today only a
+six-line README stub; the planned contents are a komorebi.json fragment (bars
+should NOT also set `global_work_area_offset` when `reserve=komorebi` — ybar
+sends it), whkd bindings firing `ybar --trigger …` (mode-pill pattern like
+skhd modes), and the pairing walkthrough. No SIP/scripting-addition section —
+komorebi needs no OS tampering.
 
 ### 11.7 Licensing
 
@@ -951,12 +1177,16 @@ the README's third-party section.)
   Sorted-key emission is a tested contract.
 - Themes: theme model (directory + entry-point search `ybarrc.lua` →
   `ybar.jsonc` → `ybarrc.jsonc`, `~/.config/ybar/themes/`, `current-theme`
-  file, install-from-git) ports; shipped themes get komorebi workspace
+  file) ports as the built-in `ybar theme list|current|use <name>|reset`
+  subcommand — there is no install-from-git; user themes are directories
+  dropped into `~/.config/ybar/themes/`; shipped themes get komorebi workspace
   widgets and `ms-settings:` deep links (`ms-settings:sound`,
   `ms-settings:batterysaver`, `ms-settings:network-wifi`) replacing
   `x-apple.systempreferences:` clicks; `osascript` media/volume snippets are
   obsolete — media is native (GSMTC) and volume goes through the audio
-  provider or a `ybar --set`-driven slider.
+  provider (`volume_change` in) and, for absolute sets from sliders, the
+  in-process `ybar.volume(pct[, app])` Lua verb / `ybar --volume <0-100> [app]`
+  CLI verb (§10, Audio row) — no shell round-trip.
 
 ---
 
@@ -967,17 +1197,24 @@ the README's third-party section.)
   via Azure Trusted Signing (§15 punch-list item 2) — Smart App Control
   makes that load-bearing rather than a nicety, and SmartScreen still
   warns until the certificate accrues reputation.
-- Static CRT (`/MT`) → single `ybar.exe` + `shaders/` + `themes/` payload.
+- Static CRT (`/MT`) → single `ybar.exe` + `shaders/` + `examples/` (the
+  shipped themes; `ybar theme list` searches beside the exe) + an app-local
+  `d3dcompiler_47.dll` payload.
   No TCC/codesign/bundle apparatus — that entire macOS surface evaporates.
 - Identity: `AppUserModelID = "YBar.YBar"` (taskbar/notification identity;
   successor to `com.ybar.YBar`).
-- Autostart: `ybar autostart enable|disable` writes/removes
+- Autostart: `ybar autostart enable|disable|status` writes/removes/reports a
+  `YBar` value (quoted, symlink-resolved exe path) under
   `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (visible in Task
   Manager's Startup Apps, user-toggleable). Crash-restart semantics (macOS
   LaunchAgent `KeepAlive.SuccessfulExit=false`) via an optional Task Scheduler
-  recipe in docs; `ybar --exit` remains the only sanctioned stop.
-- Build dir: out-of-tree default (`%LOCALAPPDATA%\ybar-build`) — the repo may
-  live in OneDrive-synced folders (this one does); same hazard class as the
+  recipe (not yet written — today the Run value starts ybar once per login and
+  nothing restarts it after a crash); `ybar --exit` remains the only
+  sanctioned stop.
+- Build dir: in-tree — `CMakePresets.json` puts the `default` (Debug) preset
+  at `build/` and `release` at `build-release/` (`build/` is git-ignored;
+  `build-release/` is not), so be aware that the repo may live in
+  OneDrive-synced folders (this one does); same hazard class as the
   iCloud/xattr issue that motivated the macOS scratch path.
 
 ---
@@ -989,18 +1226,23 @@ the README's third-party section.)
   width=dynamic sentinel, property paths, defaults, event bits +
   NAME/SENDER/INFO protection, JSONC translation with sorted output, glyph
   clip UV-remap math, Lua end-to-end with headless BarManager) to Catch2.
-  Keep the daemon constructible **headless** (no window creation in
-  constructors) so Lua tests run in CI — the Swift code preserves this seam
-  deliberately.
+  The headless seam is `LuaRuntime` itself, not the daemon (`runDaemon()`
+  creates its message window and reserves the instance socket before anything
+  else): the tests build it with a null message window over the real
+  `ItemStore`/`EventBus`/`CommandHandler`/`ScriptRunner` funnel — no window,
+  socket, or daemon; `exec`/`delay` degrade to no-ops — so the Lua end-to-end
+  tests run in CI. The Swift tests keep the same seam (a `BarManager` without
+  `begin()`) deliberately.
 - **Text-metric parity suite**: golden `ShapedLine` values (width per the
   +1.5 formula, ink bounds) exported from the macOS build for a fixed test
   font shipped in the repo; DirectWrite must match integer-exactly.
 - **komorebi protocol tests**: recorded notification/State JSON fixtures from
   v0.1.41 (checked in) parsed by the provider; a canary CI job runs against
   komorebi's latest release to catch schema drift.
-- CI: GitHub Actions `windows-latest`, CMake + vcpkg cache; PresentMon-based
-  idle-GPU smoke test on a self-hosted runner is aspirational, manual
-  acceptance otherwise.
+- CI: GitHub Actions `windows-latest`, CMake presets against the runner's
+  preinstalled vcpkg (`VCPKG_INSTALLATION_ROOT`; no dependency cache step);
+  PresentMon-based idle-GPU smoke test on a self-hosted runner is
+  aspirational, manual acceptance otherwise.
 
 ---
 
@@ -1026,12 +1268,13 @@ the README's third-party section.)
   now-playing widget, Acrylic backdrops, winget/scoop, `ybar theme`
   subcommand, ported themes.
 
-### Implementation status (as of 2026-08-11, all live-verified on hardware)
+### Implementation status (as of 2026-09-02, all live-verified on hardware)
 
 **Done** — W0 (wire + komorebi protocol + HLSL, incl. a live State round-trip);
 W1 (bar windows, DComp with the §7.1 DIP counter-scale, SDF background);
-W2 partially (DirectWrite stack, atlas, layout, full CLI — advance-based
-widths, no icon mapping yet); W3 mostly (EventBus, ScriptRunner, mouse +
+W2 mostly (DirectWrite stack, atlas, layout, full CLI — the advance-based
+widths and missing icon mapping are both closed below; only the §14 macOS
+golden-value gate stays open); W3 mostly (EventBus, ScriptRunner, mouse +
 click_script, config exec/JSONC/hotload/--reload, power/stats/front-app
 providers, routine timer); W4 fully (subscription with reconnect,
 workspace-name events, `{top:H,bottom:H}` offset zeroed on exit,
@@ -1048,7 +1291,7 @@ marquees run at the display's real refresh rate instead of the ~64 Hz a
 marquee on screen, the YBAR_DEBUG frame trace reads 119.5 fps sustained
 through full re-encode + Present on the 120 Hz reference panel; the
 scheduler and marquee are time-based, so pace changes smoothness only —
-graphs/sliders(render)/gauges).
+graphs/sliders(render)/gauges — all three since landed, see below).
 
 **Also done since**: the embedded Lua runtime (vendored 5.4.8, byte-identical
 prelude, single-funnel trampolines, generation-guarded exec/delay, Lua-first
@@ -1223,8 +1466,10 @@ Divergences are cataloged in `examples/sketchybar-glass/PORTING-WIN.md`.
    Verified on the running build: `Get-AuthenticodeSignature` reports
    `Valid`. Both paths skip while the `AZURE_CLIENT_ID` repo variable is
    empty, so forks still build; the release body then says so.
-3. Cutting the first `win-v0.1.0` tag (release workflow + manifests are
-   ready and validated; the tag is the maintainer's call).
+3. ~~Cutting the first `win-v0.1.0` tag~~ — DONE 2026-09-01: tagged and
+   published signed (see the release + mixer pass below); the scoop manifest
+   pins the zip hash, the winget manifest still carries its all-zero
+   placeholder pending submission.
 4. ~~Glass-theme polish~~ — RESOLVED as a deliberate restyle, not a port
    gap: the wifi/bluetooth/system-monitor popups are Win11 Fluent flyouts
    (quick-settings headers with toggle glyphs, single-line rows, plain-text
@@ -1368,9 +1613,10 @@ Catch2 suite now counts 188 test cases) and live-verified on hardware:
 - **Wifi rows** (theme): every row shares two columns. Segoe Fluent's
   `Wifi1..Wifi4` are *proportional* — leading with the variable-width arc
   shifted everything after it in the run (badges wandered 100/97/94/90 px),
-  so rows lead with the fixed-width glyph. An icon part's `padding_left`
-  and a label part's start do not share an origin — a row's *structure* is
-  matched to the reference row instead of tuning an indent.
+  so rows lead with the fixed-width glyph. An indent computed from paddings
+  alone came out ~8 pt short — a part without a fixed width advances by its
+  ink as well as its paddings, and a fixed width replaces both — so a row's
+  *structure* is matched to the reference row instead of tuning an indent.
 - **Three defects found live, none feature-related**: `FontCache::shape()`
   could `clear()` the cache while callers held references into it — every
   call site shapes an icon then a label and holds both — so the cap moved
@@ -1390,12 +1636,77 @@ Catch2 suite now counts 188 test cases) and live-verified on hardware:
   `utf8.len` for a constant ~45 pt/s reading pace (the fixed 100-frame
   default raced long titles).
 
+**Release + mixer pass (2026-09-01 → 09-02)**, CI-green (the Catch2 suite
+now counts 195 test cases) and live-verified on hardware:
+
+- **win-v0.1.0 shipped**: the release workflow signs under
+  `environment: release` (the OIDC subject the federated credential
+  actually matches — the first run failed on the tag-subject mismatch);
+  install channels are the `scripts/install.ps1` one-liner (SHA256 +
+  Authenticode-verified) and the raw scoop manifest, both README-led.
+- **Slider knob centred** (theme note in `items/widgets/bluetooth.lua`): the
+  Segoe `●` stand-in's ink sits ~1.75 px low in its em at 2× (the SF
+  circle's is symmetric), so both themes' knobs — now 18 pt, a 16 px circle
+  at 2× — carry `y_offset = 2.25` (1.25 centred the default 11.5 pt; the sag
+  grows with size), measured by a held-open pixel sweep — re-probing popups
+  between captures shifts layout sub-pixel and poisons deltas; sweep with
+  the popup held open.
+- **Per-app mixer** (§10 Audio row, §3.6, §3.7): `--query audio` /
+  `--volume <0-100> [app]` / `ybar.volume(pct[, app])` over a stateless
+  per-call `IAudioSessionManager2` enumeration (tray_icons pattern — no
+  session sinks, no lifetime surface), grouped by lowercase exe stem with
+  unreadable-path and Expired sessions skipped so a group id is never
+  empty. The bluetooth flyout's volume row gains the quick-settings
+  chevron; the popup moved to wrap-flow (`wrap_width = popup_width + 4` —
+  line advance includes the default 2/2 item paddings, reproducing the
+  vertical layout pixel-for-pixel) so the master line seats slider +
+  chevron and each mixer row seats icon + slider, icons deliberately
+  outside the slider items (slider clicks clamp x to 0-100, reference
+  parity — an inset icon would be click-to-mute). The panel resets to the
+  master view on open because auto-close popups close on silent paths that
+  run no Lua. Live-verified end to end: query contract against three real
+  groups, set/mute/restore round trips, chevron open, back row, and a
+  synthetic 65 %-mark drag on the Chrome row landing at exactly 65 with
+  the master untouched.
+
+**Docs audit + footer pass (2026-09-02)**, the Catch2 suite now counts 196
+test cases:
+
+- **Battery popup footer** (theme): the Settings row's `sf.gearshape` image
+  drew nothing (the atlas has no `sf.` source) but reserved its width, so
+  "Settings" sat 19 pt right of every other row. The gear is now an `sf:`
+  icon part beside a label part. Two slot rules recorded in the theme: a
+  part's fixed `width` replaces its ink and paddings (an 11 pt inset inside
+  a 16 pt slot clipped an 11 pt glyph to its left half), and an item centres
+  its parts by default, so a row's slots must sum to the popup width — also
+  the real cause of the wifi rows' "8 pt origin" puzzle above.
+- **Documentation audit**: every document on the branch (this spec, the
+  README, packaging, the porting guide, the per-directory READMEs) was read
+  against the code by 22 auditors and each finding re-verified by
+  adversarial refuters; about 170 corrections landed. The recurring drift:
+  the YTile adapter lived only in this status log; §7 still described the
+  design (device-lost recreation, colour glyph runs, a bundled icon font,
+  `sf.` images, `spinner`) rather than what shipped; §11 described a
+  `--query komorebi` verb and per-monitor matching that never existed. The
+  `sf.` image source and `spinner`/`image.rotation` are now recorded as
+  **not rendered** (§7.5) rather than fixed.
+- **Two code slips the audit surfaced, both fixed**: `image.drawing` and
+  `background.image.drawing` had their reference error strings swapped
+  (§3.3; regression-tested), and the app-lifecycle poller's gate tested only
+  komorebi, so under YTile it armed beside the window diffs and every launch
+  fired twice (§10).
+- `cmake_minimum_required` moved to 3.25: `CMakePresets.json` is schema
+  version 6, which 3.24 rejects at configure.
+
 Deliberate divergences (never 1:1): alias items but a tray widget + verbs +
-`ybar.tray` instead (§10.6, §3.7), the added `slider.interactive` /
-`image.desaturate` / `image.y_offset` keys (§3.3) with the desaturate
-shader flag behind them (§7.3), graph baseline clamping and squared plate
-bottoms (§3.9), per-item glass pills (§7.6), distributed-notification
-bindings (§9), THERMAL_STATE (§10), single topmost z-band (§16).
+`ybar.tray` instead (§10.6, §3.7), the `--volume` verb + `ybar.volume`
+write path on the audio provider plus the `--query audio` /
+`--volume <pct> <app>` per-app session mixer (§10, §3.6, §3.7), the added
+`slider.interactive` / `image.desaturate` / `image.y_offset` keys and bar
+`reserve` (§3.3, §6.1) with the desaturate shader flag behind them (§7.3),
+graph baseline clamping and squared plate bottoms (§3.9), per-item glass
+pills (§7.6), distributed-notification bindings (§9), THERMAL_STATE always
+`nominal` (§3.5), single topmost z-band (§16).
 
 ---
 
@@ -1403,26 +1714,36 @@ bindings (§9), THERMAL_STATE (§10), single topmost z-band (§16).
 
 - **DirectWrite ink-metric parity** — the +1.5 truncation over glyph path
   bounds has no single-call DWrite equivalent; per-glyph accumulation may
-  differ by a pixel on some fonts. Mitigation: golden-value suite (§14) is a
-  W2 gate, not an afterthought.
+  differ by a pixel on some fonts. Mitigation: the accumulation math and the
+  +1.5 formula are pinned headlessly (`tests/ink_metric_tests.cpp`); the
+  macOS golden-value export (§14) is still open past W2 — cross-platform
+  pixel equality remains unproven.
 - **komorebi schema drift** — no formal stability guarantee; the tagged serde
   output could change variant names. Mitigation: tolerant parsing,
   pinned fixtures + latest-release canary CI, all komorebi coupling isolated
   in one provider.
 - **Stale work-area offset on crash** — offset persists in komorebi until
-  config reload. Mitigation: re-zero-then-apply on every ybar start; document
-  recovery; consider a `komorebic` health-check on `--exit` paths.
+  config reload. Mitigation: the first `MonitorWorkAreaOffset` after start
+  replaces (never adds to) whatever komorebi still holds, so a stale strip is
+  overwritten on every reserving ybar start; document recovery; consider a
+  `komorebic` health-check on `--exit` paths.
 - **Shell compatibility** — configs written on macOS assume POSIX sh + macOS
   tools (`pmset`, `osascript`, `open`). The shell resolution (D10) keeps the
   *interpreter* compatible; the *commands* still need theme-level Windows
-  variants. Themes ship with both; PORTING notes cover the rest.
+  variants. The Windows theme tree ships the Windows variants only
+  (`examples/sketchybar-glass`, with `helpers/win.lua` standing in for the
+  macOS `helpers/mac.lua`); `PORTING-WIN.md` covers the rest.
 - **WS_EX_NOACTIVATE / topmost quirks** — some fullscreen apps and
   DirectComposition interactions can still push topmost windows around;
-  `fullscreen_show`'s triple detection path (§6) is the mitigation.
+  `fullscreen_show`'s two-signal detection path (§6) is the mitigation.
 - **GSMTC session mapping** — `MEDIA_APP` values differ from `"Music"/"Spotify"`
-  literals in existing scripts; ship the mapping table and document.
-- **C++/Lua longjmp** — enforced by review + a debug assertion that no
-  trampoline path calls raising Lua APIs (same invariant as Swift).
+  literals in existing scripts; no mapping table ships — the flagship theme
+  drops the whitelist and shows the raw id as-is
+  (`examples/sketchybar-glass/items/widgets/media.lua`, `PORTING-WIN.md`).
+- **C++/Lua longjmp** — enforced by review, with no debug assertion —
+  non-raising stack helpers (`toString`/`argCString`, `lua_rawlen` over
+  `luaL_len`) are the only guard that no trampoline path calls raising Lua
+  APIs (same invariant as Swift).
 - **Single z-band for `topmost=window`** — behavior difference vs macOS
   floating level; documented, low impact for komorebi users (tiled windows
   never overlap a reserved strip).

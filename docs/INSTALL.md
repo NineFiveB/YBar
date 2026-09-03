@@ -10,16 +10,16 @@ Tools are sufficient, full Xcode is not required (see
 ## Homebrew (recommended)
 
 ```sh
-brew tap AltimG/ybar            # github.com/AltimG/homebrew-ybar
+brew tap NineFiveB/ybar            # github.com/NineFiveB/homebrew-ybar
 brew install ybar               # latest tagged release
 # or:
 brew install --HEAD ybar        # build from current main
 ```
 
 Recent Homebrew asks you to confirm trusting a third-party tap the first
-time you install from it; `brew trust AltimG/ybar` pre-approves it (useful
+time you install from it; `brew trust NineFiveB/ybar` pre-approves it (useful
 in scripts, where the prompt would fail instead). Tapping the main repo
-directly also works: `brew tap AltimG/ybar https://github.com/AltimG/YBar.git`.
+directly also works: `brew tap NineFiveB/ybar https://github.com/NineFiveB/YBar.git`.
 
 This builds YBar from source and installs:
 
@@ -56,7 +56,7 @@ codesign --force --sign - --identifier com.ybar.YBar ~/Applications/YBar.app
 ## Manual build
 
 ```sh
-git clone https://github.com/AltimG/YBar.git
+git clone https://github.com/NineFiveB/YBar.git
 cd YBar
 make app
 ```

@@ -13,7 +13,7 @@
 **Please do not open a public issue for security problems.**
 
 Report privately via GitHub's vulnerability reporting:
-**[github.com/AltimG/YBar/security/advisories/new](https://github.com/AltimG/YBar/security/advisories/new)**
+**[github.com/NineFiveB/YBar/security/advisories/new](https://github.com/NineFiveB/YBar/security/advisories/new)**
 
 Include what you can: affected version (`ybar --version` or commit), a
 reproduction, and your assessment of impact. You'll get an acknowledgment

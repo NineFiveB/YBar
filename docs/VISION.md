@@ -48,4 +48,4 @@ Item, text run (font fallback, SF Symbols, emoji), image, rounded-rect/squircle 
 
 ## Repo
 
-`https://github.com/AltimG/YBar.git` — Swift Package Manager, Swift 6, macOS 14+ (SDK current), `ybar` single binary acting as daemon + CLI client.
+`https://github.com/NineFiveB/YBar.git` — Swift Package Manager, Swift 6, macOS 14+ (SDK current), `ybar` single binary acting as daemon + CLI client.
