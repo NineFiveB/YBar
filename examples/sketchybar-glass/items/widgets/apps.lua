@@ -58,6 +58,8 @@ local tray_bracket = sbar.add("bracket", "widgets.apps.bracket", { tray.name }, 
   popup = { align = "center", height = 26 },
 })
 
+require("helpers.hover").pill(tray_bracket, tray)
+
 sbar.add("item", "widgets.apps.padding", {
   position = "right",
   width = settings.group_paddings,

@@ -75,6 +75,12 @@ local cal_bracket = sbar.add("bracket", "calendar.bracket", { cal.name }, {
   popup = { align = "right", wrap_width = grid_width }
 })
 
+-- The fill lives on the ITEM here, not the bracket (see the padding note
+-- above), so the hover lift starts from bg2 rather than bg1 — but both the
+-- item and its transparent bracket still have to drive it, because the
+-- bracket is what the hit test returns over the pill's outer padding.
+require("helpers.hover").attach(cal, { cal, cal_bracket }, colors.bg2, colors.bg3)
+
 -- Padding item required because of bracket
 sbar.add("item", { position = "right", width = settings.group_paddings })
 

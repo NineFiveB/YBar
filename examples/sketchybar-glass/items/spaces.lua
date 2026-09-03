@@ -79,6 +79,34 @@ for i = 1, MAX_SLOTS do
   })
 end
 
+-- A workspace pill's fill has TWO inputs — focus and hover — so both go
+-- through one function. Painting them independently would let a workspace
+-- change repaint a pill the pointer is still sitting on, dropping the
+-- highlight until the pointer moved again.
+local hover = require("helpers.hover")
+local hovered = {}   -- slot -> pointer is over this pill
+local focused = 0    -- slot index of the focused workspace, 0 = none
+
+local function space_color(i)
+  -- Focus outranks hover: the selected pill is already the brightest state
+  -- in the strip, and lifting it further would read as a second selection.
+  if i == focused then return colors.with_alpha(colors.grey, 0.5) end
+  return hovered[i] and colors.bg2 or colors.bg1
+end
+
+for i = 1, MAX_SLOTS do
+  local function set_hover(on)
+    hovered[i] = on or nil
+    hover.fade(spaces[i], space_color(i),
+               on and hover.ENTER_FRAMES or hover.EXIT_FRAMES)
+  end
+  -- Both the pill and its ring bracket, for the seam described in helpers/hover.
+  for _, w in ipairs({ spaces[i], brackets[i] }) do
+    w:subscribe("mouse.entered", function() set_hover(true) end)
+    w:subscribe("mouse.exited", function() set_hover(false) end)
+  end
+end
+
 -- One repaint per event: bind names to slots, then apply the focus styling
 -- (same palette as the macOS apply_focus: selected = half-grey pill + grey
 -- ring, others = bg1 + bg2 ring).
@@ -87,18 +115,18 @@ local function update_spaces(env)
   for name in (env.WORKSPACES or ""):gmatch("[^\n]+") do
     names[#names + 1] = name
   end
-  local focused_index = tonumber(env.FOCUSED_WORKSPACE_INDEX) or 0
+  focused = tonumber(env.FOCUSED_WORKSPACE_INDEX) or 0
 
   for i = 1, MAX_SLOTS do
     local name = names[i]
     if name then
-      local selected = (i == focused_index)
+      local selected = (i == focused)
       spaces[i]:set({
         drawing = true,
         icon = { string = name, color = colors.white },
-        background = {
-          color = selected and colors.with_alpha(colors.grey, 0.5) or colors.bg1,
-        },
+        -- space_color, not a focus-only expression: the pointer may be
+        -- resting on a pill while this runs.
+        background = { color = space_color(i) },
       })
       brackets[i]:set({
         background = { border_color = selected and colors.grey or colors.bg2 },

@@ -68,6 +68,8 @@ local battery_bracket = sbar.add("bracket", "widgets.battery.bracket", { battery
   popup = { align = "center", height = 26 }
 })
 
+require("helpers.hover").pill(battery_bracket, battery)
+
 local popup_pos = "popup." .. battery_bracket.name
 
 -- ── Header: "Battery" + percentage ─────────────────────────────────────────

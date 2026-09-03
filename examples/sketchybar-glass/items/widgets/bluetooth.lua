@@ -115,6 +115,8 @@ local bt_bracket = sbar.add("bracket", "widgets.bluetooth.bracket", { bt_icon.na
   popup = { align = "center", height = 26, wrap_width = popup_width + 4 },
 })
 
+require("helpers.hover").pill(bt_bracket, bt_icon)
+
 sbar.add("item", "widgets.bluetooth.padding", {
   position = "right",
   width = settings.group_paddings,

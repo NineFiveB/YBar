@@ -64,6 +64,8 @@ local cpu_bracket = sbar.add("bracket", "widgets.cpu.bracket", { cpu.name }, {
   popup = { align = "center" }
 })
 
+require("helpers.hover").pill(cpu_bracket, cpu)
+
 -- ── Popup: Task Manager-style graph dashboard ─────────────────────────────
 local popup_pos = "popup." .. cpu_bracket.name
 

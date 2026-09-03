@@ -70,6 +70,8 @@ local media_bracket = sbar.add("bracket", "widgets.media.bracket", { media.name 
   popup = { align = "center", wrap_width = popup_width, auto_close = false },
 })
 
+require("helpers.hover").pill(media_bracket, media)
+
 local popup_pos = "popup." .. media_bracket.name
 
 local media_padding = sbar.add("item", "widgets.media.padding", {

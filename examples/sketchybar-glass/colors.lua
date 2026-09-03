@@ -26,7 +26,8 @@ return {
   -- the strip, so a pill could only ever be LIGHTER than the bar; fixed tones
   -- let the pills sit darker than the strip, which is the intent here.
   bg1 = 0xff1a1a1c,          -- resting pill fill
-  bg2 = 0xff26262a,          -- raised/selected surface
+  bg2 = 0xff26262a,          -- raised/selected surface, and the hover lift off bg1
+  bg3 = 0xff32323a,          -- hover lift off bg2, for the pills that rest raised
 
   with_alpha = function(color, alpha)
     if alpha > 1.0 or alpha < 0.0 then return color end

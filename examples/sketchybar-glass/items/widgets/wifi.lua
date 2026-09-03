@@ -51,6 +51,8 @@ local wifi_bracket = sbar.add("bracket", "widgets.wifi.bracket", {
   popup = { align = "center", height = 26 }
 })
 
+require("helpers.hover").pill(wifi_bracket, wifi)
+
 local popup_pos = "popup." .. wifi_bracket.name
 
 -- ── Header: "Wi-Fi" + radio toggle (click opens the Wi-Fi settings page) ───
