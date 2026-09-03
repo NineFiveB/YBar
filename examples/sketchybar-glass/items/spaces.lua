@@ -61,14 +61,20 @@ for i = 1, MAX_SLOTS do
   })
   spaces[i] = space
 
-  -- Single item bracket for space items to achieve double border on highlight
+  -- The outer half of the focus ring. Inset 1pt taller than the pill (25 vs
+  -- 23) AND 1pt wider on each side, so its stroke sits one point outside the
+  -- pill's own stroke on all four edges rather than only above and below —
+  -- without the padding the two rings share the left and right edges and the
+  -- dimmer one paints over the brighter, so the ring reads uneven.
   brackets[i] = sbar.add("bracket", { space.name }, {
     background = {
       color = colors.transparent,
-      border_color = colors.bg2,
+      border_color = colors.transparent,
       height = 25,
       border_width = 0,
     },
+    padding_left = 1,
+    padding_right = 1,
   })
 
   -- Padding space (visibility tracks the workspace item).
@@ -94,6 +100,44 @@ local function space_color(i)
   return hovered[i] and colors.bg2 or colors.bg1
 end
 
+-- The focus ring, in two stops.
+--
+-- There is no glow in this engine to switch on: a border is drawn as a hard
+-- band between the shape edge and that edge inset by border_width, with only
+-- a one-pixel analytic feather (shaders/ybar.hlsl, quad_fragment), and there
+-- is no blur or bloom pass anywhere in the pipeline. So the falloff is built
+-- from the two quads a workspace pill already owns — its own 23pt box and the
+-- bracket's box one point outside it. Bright stroke on the pill edge, dim
+-- stroke one point out; brightness dropping outward is what reads as a halo
+-- at this size. Two stops is all the geometry affords, and at 1pt each on a
+-- 35pt strip that is enough.
+--
+-- Both stops fade with the fill, so focus arrives as one gesture rather than
+-- a ring appearing over a pill that is still changing colour.
+local RING_INNER = colors.with_alpha(colors.white, 0.85)
+local RING_OUTER = colors.with_alpha(colors.white, 0.28)
+local RING_FRAMES = 8
+
+-- Paint one slot's focus state: fill, inner stop, outer stop, together.
+local function paint_focus(i, frames)
+  local on = (i == focused)
+  sbar.animate("sin", frames or RING_FRAMES, function()
+    spaces[i]:set({
+      background = {
+        color = space_color(i),
+        border_width = on and 1 or 0,
+        border_color = on and RING_INNER or colors.transparent,
+      },
+    })
+    brackets[i]:set({
+      background = {
+        border_width = on and 1 or 0,
+        border_color = on and RING_OUTER or colors.transparent,
+      },
+    })
+  end)
+end
+
 for i = 1, MAX_SLOTS do
   local function set_hover(on)
     hovered[i] = on or nil
@@ -107,9 +151,9 @@ for i = 1, MAX_SLOTS do
   end
 end
 
--- One repaint per event: bind names to slots, then apply the focus styling
--- (same palette as the macOS apply_focus: selected = half-grey pill + grey
--- ring, others = bg1 + bg2 ring).
+-- One repaint per event: bind names to slots, then ease every slot's focus
+-- state. The fill used to snap here while the decorative hover on the same
+-- property eased — backwards, since the fill is the load-bearing signal.
 local function update_spaces(env)
   local names = {}
   for name in (env.WORKSPACES or ""):gmatch("[^\n]+") do
@@ -120,17 +164,10 @@ local function update_spaces(env)
   for i = 1, MAX_SLOTS do
     local name = names[i]
     if name then
-      local selected = (i == focused)
-      spaces[i]:set({
-        drawing = true,
-        icon = { string = name, color = colors.white },
-        -- space_color, not a focus-only expression: the pointer may be
-        -- resting on a pill while this runs.
-        background = { color = space_color(i) },
-      })
-      brackets[i]:set({
-        background = { border_color = selected and colors.grey or colors.bg2 },
-      })
+      -- Text and visibility snap; only the focus paint eases. A pill whose
+      -- name changed should read as its new workspace at once.
+      spaces[i]:set({ drawing = true, icon = { string = name, color = colors.white } })
+      paint_focus(i)
       sbar.set("space.padding." .. i, { drawing = true })
     else
       spaces[i]:set({ drawing = false })
