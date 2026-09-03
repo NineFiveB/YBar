@@ -33,6 +33,11 @@ plus the Authenticode signature, and puts the directory on your `PATH`.
 Options via env vars: `$env:YBAR_START=1` (launch when done),
 `$env:YBAR_AUTOSTART=1` (run at login), `$env:YBAR_VERSION=0.1.0` (pin),
 `$env:YBAR_UNINSTALL=1` (remove; same one-liner).
+When it starts the daemon for you (`YBAR_START`, or an upgrade of a running
+bar) its stderr goes to `%LOCALAPPDATA%\ybar\stderr.log` — the daemon's state
+directory, which also holds the IPC socket that doubles as the single-instance
+lock. Uninstall removes the install and state directories but leaves
+`~\.config\ybar` alone.
 
 Or with [Scoop](https://scoop.sh):
 
@@ -51,8 +56,10 @@ runtime, the shipped themes, and an app-local `d3dcompiler_47.dll`:
 ```
 ybar.exe
 shaders\ybar.hlsl
-examples\<theme>\ybarrc.jsonc
+examples\<theme>\ybarrc.lua or ybarrc.jsonc
 d3dcompiler_47.dll
+README.md
+LICENSE
 ```
 
 For a manual install, put the folder on your `PATH` so config scripts can
@@ -60,6 +67,7 @@ call `ybar` back (Scoop's shim already covers this). Then:
 
 ```powershell
 ybar autostart enable    # HKCU Run entry; shows up in Task Manager > Startup apps
+                         # (`autostart disable` removes it, `autostart status` reports it)
 ybar                     # start the daemon
 ```
 
@@ -69,8 +77,10 @@ may still warn until the certificate accrues reputation.
 ## Quick start
 
 `ybar` with no arguments starts the daemon and loads the first config it finds
-in `%USERPROFILE%\.config\ybar\`: `ybarrc.lua`, then `ybar.jsonc`, then
-`ybarrc.jsonc`. `-c <path>` overrides that.
+in `%XDG_CONFIG_HOME%\ybar\` (when set), then `%USERPROFILE%\.config\ybar\`:
+`ybarrc.lua`, then `ybarrc`, then `ybarrc.jsonc`, then `ybar.jsonc`, falling
+back to `~\.ybarrc.lua` / `~\.ybarrc`. A theme recorded with `ybar theme use`
+takes precedence over that search; `-c <path>` overrides everything.
 
 Everything else is a client command sent to the running daemon:
 
@@ -83,12 +93,23 @@ ybar --animate tanh 30 --set clock label.color=0xffff0000
 ybar --query bar
 ```
 
+The daemon verbs are sketchybar's: `--bar`, `--default`,
+`--add item|graph|slider|bracket|event`, `--set`, `--subscribe`, `--trigger`,
+`--animate`, `--update`, `--query bar|defaults|events|displays|<item>`,
+`--push`, `--remove`, `--move`, `--reorder`, `--rename`, `--clone`,
+`--reload [path]`, `--hotload on|off`, `--ping`, and `--exit`. Windows adds
+`--komorebi`, `--volume`, `--tray`, `--window`, and
+`--query windows|tray|audio` (see below). `ybar --help` (`-h`) and
+`ybar --version` (`-v`) print locally, as do the `theme` and `autostart`
+subcommands; `--config` is the long form of `-c`.
+
 ## Themes
 
 ```powershell
 ybar theme list            # shipped themes + anything in ~/.config/ybar/themes
 ybar theme use catppuccin-komorebi
 ybar theme current
+ybar theme reset           # forget the choice; normal config discovery applies again
 ```
 
 `use` records the choice in `%USERPROFILE%\.config\ybar\current-theme` and
@@ -97,9 +118,12 @@ re-points a running daemon immediately. A theme is any directory containing
 
 ## komorebi
 
-komorebi is detected automatically. When it is running, ybar subscribes to its
+komorebi is detected automatically. When it is running and `--bar reserve=`
+is `auto` or `komorebi` (never under `appbar` or `off`), ybar subscribes to its
 socket and publishes `komorebi_workspace_change` with `FOCUSED_WORKSPACE`,
-`PREV_WORKSPACE`, and `FOCUSED_MONITOR_INDEX`; window `Show`/`Destroy` events
+`PREV_WORKSPACE`, `FOCUSED_MONITOR_INDEX`, `WORKSPACES` (the focused monitor's
+workspace names, newline-separated) and `FOCUSED_WORKSPACE_INDEX` (1-based), and
+fires `space_change` with the same variables; window `Show`/`Destroy` events
 become `app_launched`/`app_terminated`; and ybar reserves its strip through
 `MonitorWorkAreaOffset` so tiled windows do not sit underneath it.
 
@@ -107,10 +131,10 @@ Reservation is controlled by `--bar reserve=`:
 
 | Value | Behaviour |
 |---|---|
-| `komorebi` | reserve through komorebi (default when komorebi is detected) |
+| `komorebi` | reserve through the tiling WM — behaves exactly like `auto` |
 | `appbar` | reserve through the shell (`SHAppBarMessage`) — use without a tiling WM |
 | `off` | reserve nothing |
-| `auto` | komorebi when detected, else off |
+| `auto` | komorebi when detected, else YTile when detected, else off — the default |
 
 The two reservation modes are mutually exclusive by construction; enabling both
 would reserve the strip twice.
@@ -125,6 +149,19 @@ ybar --komorebi '{"type":"CycleFocusWorkspace","content":"Next"}'
 ybar re-detects komorebi once per second, so starting komorebi after ybar
 attaches on its own — no restart needed.
 
+### YTile
+
+YTile, the sibling tiling WM, is supported the same way: when komorebi is
+absent and YTile is running (its `\\.\pipe\ytile` pipe exists), ybar
+subscribes to it, reserves its strip through YTile, and publishes
+`ytile_workspace_change` **and** `komorebi_workspace_change` with the same
+variables (`WORKSPACES` lists the workspace numbers that are non-empty or
+active), so komorebi themes work unchanged; window manage/unmanage feed
+`app_launched`/`app_terminated`. `ybar --komorebi` keeps working too —
+`FocusWorkspaceNumber`, `FocusNamedWorkspace` and `CycleFocusWorkspace` are
+translated onto YTile. komorebi outranks: if it starts later, ybar hands over
+to it.
+
 ## Events
 
 Twenty builtin events, plus any custom event you register with
@@ -135,6 +172,12 @@ Twenty builtin events, plus any custom event you register with
 `mouse.scrolled`, `volume_change`, `power_source_change`, `battery_change`,
 `wifi_change`, `system_stats`, `mouse.exited.global`, `mouse.entered.global`,
 `modifier_change`, `app_launched`, `app_terminated`, `media_change`.
+
+When a tiling WM is detected (and `reserve` is not `off`/`appbar`) the
+daemon also registers two custom events of its own: `komorebi_workspace_change`
+(fired for komorebi and for YTile alike, so themes work unchanged) and
+`ytile_workspace_change` (YTile only); `space_change` fires alongside them
+with the same variables.
 
 Providers arm on first subscription, so a config that never mentions an event
 pays nothing for it. Scripts receive `NAME`, `SENDER`, `INFO`, and any
@@ -157,6 +200,16 @@ event-specific variables (`FOCUSED_WORKSPACE`, `MEDIA_TITLE`, `CPU_USAGE`,
 - **Elevated windows.** A non-elevated process's low-level hooks do not see
   input delivered to elevated windows, so popup auto-close and
   `modifier_change` go quiet while an elevated app has focus.
+- **Volume, tray, and windows.** `ybar --volume <0-100> [app]` sets the
+  master volume, or one app's session group when given an `id` from
+  `ybar --query audio`. `ybar --query tray` lists notification-area icons
+  and `ybar --tray <name> invoke|close` activates or closes one;
+  `ybar --query windows` lists running app windows and
+  `ybar --window <hwnd> close|kill` posts `WM_CLOSE` to one or terminates
+  its process. All are ybar-win extensions; the macOS build rejects them.
+- **Diagnostics.** Start the daemon with `YBAR_DEBUG=1` set and it traces its
+  bring-up, surface/DPI geometry and per-frame render statistics to stderr —
+  worth attaching to a bug report.
 
 ## Porting a macOS config
 
@@ -177,7 +230,8 @@ Bash), else Git for Windows' `sh.exe` found via the registry, else
 
 ## Building
 
-Requires Visual Studio 2022 C++ tools, CMake ≥ 3.24, and
+Requires Visual Studio 2022 C++ tools, CMake ≥ 3.25 (the presets file is
+schema version 6), and
 [vcpkg](https://github.com/microsoft/vcpkg) (`VCPKG_ROOT` set).
 
 ```powershell
@@ -196,7 +250,7 @@ ctest --preset default
 | `src/anim/` | curves, scheduler (frame-clock paced) | §3.8 |
 | `src/render/` | D3D11 renderer, scene builder, glyph atlas, DirectWrite font cache, icon map | §7 |
 | `src/win/` | bar/popup surfaces (HWND + DComp), displays, input, backdrops, appbar | §6 |
-| `src/providers/` | audio, network, app lifecycle/info, media (GSMTC), **komorebi**, ytile | §10, §11 |
+| `src/providers/` | audio + per-app audio sessions, network, app lifecycle/info, media (GSMTC), window list, tray icons, **komorebi**, ytile | §10, §11 |
 | `src/lua/` | vendored Lua 5.4 (C), bridge, prelude | §3.7, §12 |
 | `shaders/ybar.hlsl` | the SDF/glyph pipeline, compiled at runtime with `D3DCompile` | §7.3 |
 | `tests/` | Catch2 contract tests (ported from the Swift suite) | §14 |
