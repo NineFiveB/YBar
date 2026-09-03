@@ -94,9 +94,11 @@ local current_name = sbar.add("item", {
   align = "left",
   -- Structurally IDENTICAL to a scanned row: glyph column, then the name. The
   -- name lands in the shared column BY CONSTRUCTION rather than by a padding
-  -- tuned to match it — an icon part's padding_left and a label part's start
-  -- do not measure from the same origin, so matching them by arithmetic came
-  -- out 8pt wrong and only a calibrated magic number would have fixed it.
+  -- tuned to match it. A part starts where the previous part's advance ends,
+  -- plus its own padding_left — and a part WITHOUT a fixed width advances by
+  -- its paddings plus its ink, so an indent computed from paddings alone came
+  -- out ~8pt (one badge glyph) short. A fixed width replaces ink + paddings
+  -- outright, which is why the column is a width here and not a padding.
   -- It also puts this row's security badge in the same column as every other
   -- row's, instead of alone at the far right.
   icon = {

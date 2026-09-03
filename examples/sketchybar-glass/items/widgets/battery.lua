@@ -18,6 +18,7 @@ local settings = require("settings")
 
 local popup_width = 229
 local inset = 11
+local gear_col = inset + 15   -- Settings footer: inset + 11 pt glyph + 4 pt gap
 
 -- The pill body is a slider so the charge fill is CONTINUOUS (smooth) rather
 -- than 5 discrete SF-glyph levels: the slider track is the empty battery
@@ -200,17 +201,33 @@ local settings_row = sbar.add("item", {
   position = popup_pos,
   width = popup_width,
   -- macOS put the gear glyph inline in the icon string; sf: names resolve
-  -- whole strings, so the glyph is an sf. image and the text stands alone.
-  image = { string = "sf.gearshape", size = 12, drawing = true, padding_left = inset },
+  -- whole strings, so the glyph takes the icon part and the text the label.
+  -- (An `sf.gearshape` image was tried first: the atlas has no sf. source,
+  -- so it drew nothing but still reserved its width, indenting "Settings"
+  -- past every other row's left edge.) Same padding as the header, so the
+  -- gear's left edge lines up with "Battery" and "Battery Level".
+  --
+  -- Two slot rules bit the first attempt at this row. A part's fixed width
+  -- REPLACES ink + paddings, so the inset has to fit inside it — a 16 pt
+  -- slot with an 11 pt inset left 5 pt for an 11 pt glyph and clipped the
+  -- gear to its left half. And an item centres its parts by default, so
+  -- the two slots must sum to popup_width or the whole row drifts right by
+  -- half the shortfall.
   icon = {
+    string = "sf:gearshape",
+    align = "left",
+    color = colors.white,
+    font = { size = 11 },
+    width = gear_col,
+    padding_left = inset,
+  },
+  label = {
     string = "Settings",
     align = "left",
     color = colors.white,
     font = { size = 10.5 },
-    width = popup_width - 18 - inset,
-    padding_left = 4,
+    width = popup_width - gear_col,
   },
-  label = { drawing = false },
 })
 
 -- ── Updates ────────────────────────────────────────────────────────────────
