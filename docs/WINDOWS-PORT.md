@@ -534,7 +534,13 @@ HWND  WS_POPUP | (borderless)
   deleted).
 - Mouse: WndProc `WM_LBUTTONDOWN/UP`, `WM_RBUTTONUP`, `WM_MBUTTONUP`,
   `WM_MOUSEMOVE` + `TrackMouseEvent(TME_LEAVE)`, `WM_MOUSEWHEEL`
-  (`GET_WHEEL_DELTA_WPARAM/120`, sign preserved). Click fires on button-up.
+  (`GET_WHEEL_DELTA_WPARAM/120`, sign preserved). A `WM_MOUSELEAVE` is
+  believed only when `GetCursorPos` is outside the window rect, and otherwise
+  re-arms tracking: the z-order and desktop-following upkeep on the 1 s tick
+  moves the window under a stationary pointer, and Windows posts a leave the
+  pointer never performed. Untested for a year because nothing hovered — with
+  targeted `mouse.entered`/`mouse.exited` driving a highlight it made every
+  hovered item blink once a second. Click fires on button-up.
   `WM_LBUTTONDOWN` takes `SetCapture` (bar and popup WndProcs alike) so a
   slider drag keeps receiving Move/Up after the pointer leaves the thin
   window; a stolen capture (`WM_CAPTURECHANGED` that is not our own release)

@@ -440,6 +440,30 @@ LRESULT CALLBACK barWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         case WM_MOUSELEAVE:
             if (impl) {
                 impl->trackingLeave = false;
+                // A stationary pointer can still get WM_MOUSELEAVE here: the
+                // bar's z-order and desktop-following upkeep run on the 1 s
+                // tick, and a SetWindowPos under the cursor makes Windows
+                // re-hit-test and post a leave the pointer never performed.
+                // Taken at face value that flaps hover state once a second —
+                // an item under a still pointer sees exited/entered pairs
+                // forever, which is invisible until something animates on
+                // hover, and then it blinks. Confirm against the real cursor
+                // before reporting it, the same way a slider release
+                // re-verifies containment (spec 6).
+                // The test is the window RECT alone, deliberately not
+                // WindowFromPoint: the z-order upkeep that provokes these
+                // leaves also makes the bar briefly not the top window under
+                // the cursor, so asking who owns the point re-admits exactly
+                // the spurious leaves this is here to reject.
+                POINT cursor{};
+                RECT bounds{};
+                if (GetCursorPos(&cursor) && GetWindowRect(hwnd, &bounds) &&
+                    PtInRect(&bounds, cursor)) {
+                    TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, hwnd, 0};
+                    TrackMouseEvent(&track);
+                    impl->trackingLeave = true;
+                    return 0;
+                }
                 MouseEvent event;
                 event.kind = MouseEvent::Kind::Leave;
                 event.modifier = currentModifier();
