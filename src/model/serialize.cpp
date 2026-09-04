@@ -146,6 +146,8 @@ json itemDict(const Item& item, const BoundingRects& boundingRects) {
         {"wrap_width", item.popup.wrapWidth},
         {"height", item.popup.cellHeight},
         {"auto_close", item.popup.autoClose},
+        {"fade_in", item.popup.fadeInFrames},
+        {"fade_out", item.popup.fadeOutFrames},
     };
     if (item.position == ItemPosition::Popup) result["popup_host"] = item.popupHost;
     return result;

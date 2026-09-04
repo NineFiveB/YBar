@@ -35,6 +35,12 @@ sbar.default({
   },
   popup = {
     blur_radius = 0, -- no Acrylic behind popups: solid Fluent panels
+    -- NOTE: nothing in this `popup` table actually applies. ItemStore's
+    -- applyDefaults copies an explicit field list (a reference contract) and
+    -- `popup` is not on it, so these are inert — the panels are getting the
+    -- engine's built-in PopupState defaults instead. Kept as the statement of
+    -- intent it has always been; the open/close fade that has to take effect
+    -- is applied by name in ybarrc.lua after the items load.
     background = {
       border_width = 0,
       corner_radius = 7,

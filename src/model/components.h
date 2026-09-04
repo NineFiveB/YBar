@@ -108,6 +108,12 @@ struct PopupState {
     double blurRadius = 0;
     double cellHeight = 0; // 0 = per-row natural
     double yOffset = 0;
+    // Open/close opacity fade, in frames at 60Hz. Windows extension; 0 keeps
+    // the reference's hard cut, so a popup that never sets these behaves
+    // exactly as before. The compositor runs the fade, so it costs no app
+    // frames — unlike animating a property, which would re-render every one.
+    double fadeInFrames = 0;
+    double fadeOutFrames = 0;
     BackgroundStyle background = [] {
         BackgroundStyle style;
         style.drawing = true;

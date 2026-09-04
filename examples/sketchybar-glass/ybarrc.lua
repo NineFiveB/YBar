@@ -32,6 +32,15 @@ sbar.set("/.*/", { background = { border_width = 0 } })
 -- Focused-workspace highlight: brightest white (monochrome scheme).
 sbar.set("/space\\..*/", { icon = { highlight_color = 0xffffffff } })
 
+-- Popup open/close fade, in frames at 60Hz. Applied here rather than in
+-- default.lua because ItemStore's applyDefaults copies an explicit field
+-- list and `popup` is not on it, so popup defaults never reach an item.
+--
+-- Asymmetric, and the opposite way round from hover: a panel is usually
+-- dismissed involuntarily — the pointer merely leaving the bar — so a slow
+-- exit trails ghost panels behind a pointer sweeping across the pills.
+sbar.set("/.*/", { popup = { fade_in = 8, fade_out = 5 } })
+
 sbar.end_config()
 
 sbar.event_loop()
