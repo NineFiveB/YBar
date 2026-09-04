@@ -280,7 +280,17 @@ float4 quad_fragment(QuadVOut i) : SV_Target {
         // "darken the lower bevel", it punches the plate to pure black. The
         // usable range under this fill is roughly (-0.004, +0.014); measured
         // on a resting pill that lands at 22/255 and 40/255 respectively.
-        float light = clamp(diffuse + spec + fres, -0.004, 0.014) * presence * outer;
+        //
+        // The knee is tanh, NOT clamp. A hard clamp is a C0 discontinuity, and
+        // because the bevel's brightest band saturates along the whole top
+        // edge it produced a flat plateau with a visible step where the clamp
+        // engaged — measured as a constant 43/255 across the edge, which reads
+        // as a stepped, choppy rim rather than a curved one. tanh approaches
+        // the same limits asymptotically, so the rim stays smooth everywhere
+        // and the corners in particular stop banding.
+        float raw = diffuse + spec + fres;
+        float lim = raw >= 0.0 ? 0.014 : 0.004;
+        float light = lim * tanh(raw / lim) * presence * outer;
         // rgb is premultiplied, so the light has to be scaled by alpha to stay
         // consistent with it; alpha only ever gains, never loses, or a dark
         // bevel would eat holes in the plate.

@@ -29,7 +29,16 @@ sbar.default({
   },
   background = {
     height = 25,
-    corner_radius = 7, -- Fluent "overlay corner" radius
+    -- Half the 25pt plate height: a full stadium. Worth knowing WHY, because
+    -- it is not only taste. Where a corner arc meets a straight edge the
+    -- curvature jumps from 1/r to 0; the SDF's gradient direction stays
+    -- continuous but its rate of change does not, and the bevel normal follows
+    -- that gradient, so the highlight inherits the break and reads as a choppy
+    -- rim. A bigger radius stretches the transition over more pixels. The
+    -- principled fix is a squircle (continuous curvature) via
+    -- background.corner_exponent, which the model parses but v1 still renders
+    -- circular -- until then, rounder is smoother.
+    corner_radius = 12.5,
     border_width = 0,
     -- Item-level glass is the shader's bevel lighting, NOT a backdrop: a
     -- quarter-round edge lit from above, highlight on the top arc and shade
