@@ -74,7 +74,9 @@ public:
 
     // One-shot request/reply on its own connection (the server allows
     // concurrent instances). Returns false if the daemon is unreachable.
-    static bool sendCommand(const std::string& cmd, const std::string& arg,
+    // NOT static: it has to break the held subscription after displacing it
+    // (ytiled serves one pipe instance), which needs pipe_.
+    bool sendCommand(const std::string& cmd, const std::string& arg,
                             std::string* replyLine = nullptr);
 
     // Pure state-JSON -> update parse (primary monitor), exposed for the
