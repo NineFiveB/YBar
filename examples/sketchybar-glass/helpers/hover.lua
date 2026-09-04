@@ -81,6 +81,21 @@ function M.fade(target, color, frames)
   end)
 end
 
+-- Colour-only counterpart to M.attach: no gradient, no lift, and crucially no
+-- write to y_offset AT ALL.
+--
+-- Rows must use this. M.attach routes through M.surface, whose paint() sets
+-- y_offset unconditionally (0 at rest, +LIFT raised), so a row that set its own
+-- alignment offset and then attached had that offset overwritten with 0 on the
+-- spot — and then shoved to +1 on every hover, so the selector jumped two
+-- points as the pointer arrived and dropped back as it left.
+function M.attachColor(target, watchers, base, hover)
+  for _, w in ipairs(watchers) do
+    w:subscribe("mouse.entered", function() M.fade(target, hover, M.ENTER_FRAMES) end)
+    w:subscribe("mouse.exited", function() M.fade(target, base, M.EXIT_FRAMES) end)
+  end
+end
+
 -- Drive `target`'s surface from the hover state of every item in `watchers`.
 -- Returns nothing; the subscriptions own themselves.
 function M.attach(target, watchers, base, hover)
@@ -121,7 +136,9 @@ function M.row(item, opts)
       y_offset = opts.y_offset or -1,   -- positive is up
     },
   })
-  M.attach(item, { item }, colors.transparent, opts.hover or colors.row_hover)
+  -- attachColor, NOT attach: the elevation path would clobber the y_offset set
+  -- immediately above and make the selector hop on hover.
+  M.attachColor(item, { item }, colors.transparent, opts.hover or colors.row_hover)
 end
 
 return M
