@@ -25,21 +25,69 @@ local M = {}
 M.ENTER_FRAMES = 5  -- ~83ms
 M.EXIT_FRAMES = 10  -- ~167ms
 
--- Fade `target`'s background to `color`. Exposed because pills whose colour
--- has more than one input (the workspace strip, where focus outranks hover)
--- have to compute the destination themselves.
+-- ELEVATION (the pseudo-3D half of the hover).
+--
+-- The usual lift cue is a drop shadow, and it is the wrong one here twice
+-- over. The strip is 0x0a0a0c, so a black shadow is very nearly invisible
+-- against it; and scene_builder draws a shadow as a hard offset COPY of the
+-- plate with no blur at all (scene_builder.cpp, "hard offset copy, no blur"),
+-- so wherever it did show it would read as a 2007 hard-edged plate rather
+-- than contact shadow.
+--
+-- On a dark UI depth is carried by LIGHT, not shade. A raised convex face
+-- catches more light along its top than its bottom, so a hovered pill gains a
+-- vertical gradient and rises a pixel. That is the whole trick, and it is
+-- entirely free: no engine change, no new draw, no extra quad.
+--
+-- gradient_angle 90 puts `color` at the TOP edge and `gradient_color` at the
+-- bottom. scene_builder sets gradientDir = (cos a, sin a) and the shader takes
+-- t = dot(uv - 0.5, dir) + 0.5, so at 90 degrees t == uv.y, which is 0 at the
+-- top. Getting this backwards inverts the light and the pill reads concave.
+M.LIFT = 1      -- px the pill rises on hover; positive is up
+M.BEVEL = 0.62  -- bottom tone as a fraction of the top: the face's curvature
+
+-- The property set for one surface state. `raised` false is deliberately not
+-- "omit the gradient": gradient_color lives behind a std::optional and, if it
+-- has never been set, animates FROM transparent black — which flashes the
+-- pill's lower half clear mid-fade. Writing equal stops at rest keeps the
+-- gradient always present and always opaque, so only its colour ever moves.
+local function paint(color, raised)
+  return {
+    background = {
+      color = color,
+      gradient_angle = 90,
+      gradient_color = raised and colors.shade(color, M.BEVEL) or color,
+      y_offset = raised and M.LIFT or 0,
+    },
+  }
+end
+
+-- Paint `target` as a resting flat pill or a raised lit one. frames <= 0 sets
+-- directly, which is what the initial establish wants.
+function M.surface(target, color, raised, frames)
+  if not frames or frames <= 0 then
+    target:set(paint(color, raised))
+    return
+  end
+  sbar.animate("sin", frames, function() target:set(paint(color, raised)) end)
+end
+
+-- Fade `target`'s background COLOUR only, with no elevation. Popup rows use
+-- this: they are flat list entries, and a row that lifted under the pointer
+-- would make a dense list jitter as the eye moved down it.
 function M.fade(target, color, frames)
   sbar.animate("sin", frames or M.ENTER_FRAMES, function()
     target:set({ background = { color = color } })
   end)
 end
 
--- Drive `target`'s background from the hover state of every item in
--- `watchers`. Returns nothing; the subscriptions own themselves.
+-- Drive `target`'s surface from the hover state of every item in `watchers`.
+-- Returns nothing; the subscriptions own themselves.
 function M.attach(target, watchers, base, hover)
+  M.surface(target, base, false, 0) -- establish the gradient stops up front
   for _, w in ipairs(watchers) do
-    w:subscribe("mouse.entered", function() M.fade(target, hover, M.ENTER_FRAMES) end)
-    w:subscribe("mouse.exited", function() M.fade(target, base, M.EXIT_FRAMES) end)
+    w:subscribe("mouse.entered", function() M.surface(target, hover, true, M.ENTER_FRAMES) end)
+    w:subscribe("mouse.exited", function() M.surface(target, base, false, M.EXIT_FRAMES) end)
   end
 end
 

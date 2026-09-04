@@ -16,6 +16,7 @@ json shadowDict(const ShadowStyle& shadow) {
         {"color", shadow.color.hex()},
         {"distance", shadow.distance},
         {"angle", shadow.angle},
+        {"blur", shadow.blur},
     };
 }
 

@@ -167,6 +167,17 @@ struct DaemonState {
     std::thread animationPump;
     int appliedOffsetPhysical = -1;
     int hoverItemId = -1; // targeted mouse.entered/exited tracking
+    // Pointer-tracked key light (glass pills only). Logical points on
+    // `pointerSurface`; negative means the pointer is not over any bar.
+    // `pointerLightActive` is recomputed each frame from the scene actually
+    // built: with no glass quad on screen — which is every flat theme,
+    // including the one that ships — the pointer path costs nothing at all
+    // and the bar keeps its zero-work-at-rest behaviour.
+    double pointerX = -1;
+    double pointerY = -1;
+    std::size_t pointerSurface = static_cast<std::size_t>(-1);
+    double lastPointerRender = 0;
+    bool pointerLightActive = false;
 
     // Config (spec 5).
     std::string instance;
@@ -1690,11 +1701,24 @@ void DaemonState::renderAll() {
 
         ybar::render::SceneParams params{surface->logicalWidth(), surface->logicalHeight(),
                                          scale, monotonicSeconds()};
+        if (pointerSurface == surfaceIndex) {
+            params.pointerX = pointerX;
+            params.pointerY = pointerY;
+        }
         trace("renderAll: buildScene");
         const auto list =
             ybar::render::buildScene(store.items(), boxes, settings, params, *fonts, *atlas);
         trace("renderAll: render");
         if (list.hasMarquee) marqueeOnScreen = true; // keeps the clock running
+        // Arms the pointer-light path for the NEXT mouse move. Cheap: a scan
+        // of one frame's quads, and it short-circuits on the first glass one.
+        if (surfaceIndex == 0) pointerLightActive = false;
+        for (const auto& quad : list.quads) {
+            if (quad.flags & ybar::render::kQuadFlagGlass) {
+                pointerLightActive = true;
+                break;
+            }
+        }
         if (!renderer->render(list, surface->renderSurface(), atlas)) {
             SetTimer(messageWindow, kRenderRetryTimer, 1000, nullptr); // spec 7.2
         }
@@ -1855,6 +1879,35 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
 
             // Hover transitions (mouse.entered / mouse.exited) + tooltip dwell.
             state.setHoverItem(item);
+
+            // Pointer-tracked key light. renderAll() is a FULL re-layout and
+            // re-encode, so this is gated three ways: only when a glass quad
+            // is actually on screen, only past a minimum travel, and never
+            // faster than the 60 Hz frame clock. Without all three a pointer
+            // crossing the bar would re-shape every string on it at the
+            // mouse's own report rate, which is 125 Hz and up.
+            if (state.pointerLightActive) {
+                if (event.kind == Kind::Leave) {
+                    if (state.pointerX >= 0) {
+                        state.pointerX = -1;
+                        state.pointerY = -1;
+                        state.pointerSurface = static_cast<std::size_t>(-1);
+                        state.renderAll();
+                    }
+                } else if (event.kind == Kind::Move) {
+                    const double now = monotonicSeconds();
+                    const bool moved = state.pointerSurface != surfaceIndex ||
+                                       std::abs(event.x - state.pointerX) >= 3.0 ||
+                                       std::abs(event.y - state.pointerY) >= 3.0;
+                    state.pointerX = event.x;
+                    state.pointerY = event.y;
+                    state.pointerSurface = surfaceIndex;
+                    if (moved && now - state.lastPointerRender >= 1.0 / 60.0) {
+                        state.lastPointerRender = now;
+                        state.renderAll();
+                    }
+                }
+            }
 
             // A press ANYWHERE on the bar — including empty space — closes
             // auto-close popups except the pressed host's (spec 3.9).

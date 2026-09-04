@@ -58,6 +58,45 @@ QuadInstance backgroundQuad(const BackgroundStyle& bg, const Rect& rect, double 
     return quad;
 }
 
+// Emit a background's shadow copy, hard or soft. Shared by the bracket pass
+// and emitItem: a pill IS a bracket in this theme, so a lift cue that only
+// worked on plain items would miss every pill on the bar.
+//
+// blur > 0 turns the hard offset copy into a falloff. The blur has to live
+// OUTSIDE the shape, but a quad's rect IS its shape's bounding box, so a
+// falloff drawn within it would be clipped at exactly the edge it exists to
+// soften. Grow the drawn rect by the blur on every side and carry the true
+// half size across in fill2.xy — free on a shadow quad, whose gradient is
+// reset just below. Nothing about the 112-byte instance layout changes.
+void pushShadow(DisplayList& list, const BackgroundStyle& bg, const Rect& box, double scale,
+                bool squareBottom) {
+    if (!bg.shadow.drawing) return;
+    const double radians = bg.shadow.angle * 3.14159265358979323846 / 180.0;
+    const double dx = std::cos(radians) * bg.shadow.distance;
+    const double dy = -std::sin(radians) * bg.shadow.distance;
+    BackgroundStyle shadowStyle = bg;
+    shadowStyle.color = bg.shadow.color;
+    shadowStyle.gradientColor.reset();
+    shadowStyle.borderWidth = 0;
+    shadowStyle.glass = false;
+    auto quad = backgroundQuad(shadowStyle,
+                               Rect{box.x + dx, box.y + dy, box.width, box.height}, scale);
+    if (squareBottom) quad.radii.z = quad.radii.w = 0;
+    const double blurPx = bg.shadow.blur * scale;
+    if (blurPx > 0) {
+        // Order matters: fill2 records the half size BEFORE the grow.
+        quad.fill2 = {quad.size.x * 0.5f, quad.size.y * 0.5f, 0.0f, 0.0f};
+        const auto grow = static_cast<float>(blurPx);
+        quad.origin.x -= grow;
+        quad.origin.y -= grow;
+        quad.size.x += grow * 2.0f;
+        quad.size.y += grow * 2.0f;
+        quad.gradientDir = {grow, 0.0f};
+        quad.flags |= kQuadFlagShadow;
+    }
+    list.quads.push_back(quad);
+}
+
 } // namespace
 
 // Clips a glyph quad to `clip` (device px) and remaps its UVs proportionally
@@ -371,6 +410,10 @@ DisplayList buildScene(const std::vector<std::unique_ptr<Item>>& items,
     const double scale = params.scale;
     list.viewportSize = {static_cast<float>(snap(params.barWidth, scale)),
                          static_cast<float>(snap(params.barHeight, scale))};
+    // Logical -> device px. A negative stays negative, which is how the shader
+    // reads "pointer is not on this surface" and falls back to the fixed light.
+    list.pointer = {static_cast<float>(params.pointerX < 0 ? -1.0 : params.pointerX * scale),
+                    static_cast<float>(params.pointerY < 0 ? -1.0 : params.pointerY * scale)};
 
     // 0) background.clip cutouts: items punch item-shaped rounded holes in
     // the BAR background only, max 16 per frame (spec 3.9).
@@ -422,6 +465,7 @@ DisplayList buildScene(const std::vector<std::unique_ptr<Item>>& items,
                                                           : params.barHeight - 4;
         const Rect box{item->frame.x, item->frame.midY() - height / 2 - item->yOffset,
                        item->frame.width, height};
+        pushShadow(list, item->background, box, scale, false);
         list.quads.push_back(backgroundQuad(item->background, box, scale));
     }
 
@@ -486,22 +530,7 @@ void emitItem(DisplayList& list, Item& item, const Rect& contentBox, double scal
         // two keep the theme's rounding — a bottom curve would cut across the
         // zero line (user request; Task Manager look).
         const bool squareBottom = item.graph.has_value();
-        if (item.background.shadow.drawing) {
-            const double radians =
-                item.background.shadow.angle * 3.14159265358979323846 / 180.0;
-            const double dx = std::cos(radians) * item.background.shadow.distance;
-            const double dy = -std::sin(radians) * item.background.shadow.distance;
-            BackgroundStyle shadowStyle = item.background;
-            shadowStyle.color = item.background.shadow.color;
-            shadowStyle.gradientColor.reset();
-            shadowStyle.borderWidth = 0;
-            shadowStyle.glass = false;
-            auto shadowQuad = backgroundQuad(
-                shadowStyle, Rect{bgRect.x + dx, bgRect.y + dy, bgRect.width, bgRect.height},
-                scale); // hard offset copy, no blur (spec 3.9)
-            if (squareBottom) shadowQuad.radii.z = shadowQuad.radii.w = 0;
-            list.quads.push_back(shadowQuad);
-        }
+        pushShadow(list, item.background, bgRect, scale, squareBottom);
         auto plateQuad = backgroundQuad(item.background, bgRect, scale);
         if (squareBottom) plateQuad.radii.z = plateQuad.radii.w = 0;
         list.quads.push_back(plateQuad);

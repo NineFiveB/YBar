@@ -33,6 +33,17 @@ return {
   -- above are opaque precisely so a pill can sit darker than the strip.
   row_hover = 0x16ffffff,
 
+  -- Scale a colour's RGB toward black (factor < 1) or white (factor > 1),
+  -- preserving alpha. This is the hover bevel's only ingredient: a raised
+  -- convex face catches more light at the top than at the bottom.
+  shade = function(color, factor)
+    local a = color & 0xff000000
+    local r = math.min(255, math.floor(((color >> 16) & 0xff) * factor))
+    local g = math.min(255, math.floor(((color >> 8) & 0xff) * factor))
+    local b = math.min(255, math.floor((color & 0xff) * factor))
+    return a | (r << 16) | (g << 8) | b
+  end,
+
   with_alpha = function(color, alpha)
     if alpha > 1.0 or alpha < 0.0 then return color end
     return (color & 0x00ffffff) | (math.floor(alpha * 255.0) << 24)

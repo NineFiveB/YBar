@@ -295,8 +295,8 @@ bounds (§7.4), ink-vs-em vertical centering rules, marquee (cycle = ink+24pt,
 duration frames/60), paint order (bar bg → brackets → per item shadow → bg →
 image → icon → graph/slider/gauge → label, the image trailing the label
 instead when `image.align=r`; all quads → all triangles → all glyphs), pixel
-snapping (origin and size rounded independently), hard offset shadows (no
-blur — do not "improve"), `background.clip` holes (max 16), graph
+snapping (origin and size rounded independently), hard offset shadows (see
+the shadow note below), `background.clip` holes (max 16), graph
 right-to-left on the leftward-flowing cursors (`right` and `q`), gauge 270°
 dial with label centered inside contributing zero width. Deliberate graph
 deviations: the reference centers a zero sample's stroke ON the box bottom
@@ -653,6 +653,47 @@ the Windows SDK license, ~4 MB): the System32 copy exists on all Win 10/11
 machines but is only documented as supported for UWP apps — app-local is the
 supported path for desktop apps and preserves the no-build-time-toolchain
 property.
+
+**Shadows — two additive Windows extensions (§3.9).** The reference draws a
+shadow as a hard offset COPY of the plate with no blur, and only for non-bracket
+items (`SceneBuilder.swift`, bracket pass emits a background quad and nothing
+else). Both still hold by default here, because both extensions are opt-in and
+both default to off:
+
+- `background.shadow.blur` (points, default **0**). Above 0 the shadow quad is
+  grown by the blur on every side, the true shape half-size is carried in
+  `fill2.xy`, the radius in `gradientDir.x`, and `kQuadFlagShadow` (bit 4)
+  selects a squared smoothstep ramp instead of the analytic AA edge. All three
+  of those fields are unused on a shadow quad, so **`QuadInstance` stays 112
+  bytes and byte-identical with Instances.swift** — a macOS build that never
+  sets the flag is unaffected. A LIGHT shadow colour at distance 0 with a blur
+  is a GLOW; that is the only bloom this pipeline has, and the workspace focus
+  halo in sketchybar-glass uses it.
+- Brackets emit shadows too, via the shared `pushShadow`. The reference does
+  not. This matters because in a bracket-based theme every pill IS a bracket,
+  so shadows and glows would otherwise be unreachable on exactly the elements
+  that want them. Invisible unless `background.shadow.drawing` is set, which
+  defaults off.
+
+**Item-level `glass` is bevel lighting, not a backdrop (§7.3).** The branch
+builds a real `float3` surface normal by treating the pill as a slab with a
+quarter-round bevel — the normal of a quarter circle at depth `t` is
+`(outward * sqrt(1 - t²), t)` — and shades it Blinn-Phong. It previously used
+`normalize(float2(ddx(d), ddy(d)))` as a "normal", which is a unit 2D screen
+direction with no height term and cannot light a surface. Two constraints are
+easy to get wrong and are load-bearing: the coefficients are LINEAR light
+against an sRGB target, so on a near-black theme (26/255 ≈ linear 0.010) the
+usable range is only about (−0.004, +0.014); and the key light's azimuth swings
+toward the pointer at FIXED elevation, because leaning the whole vector also
+drops `L.z`, which is the flat-face reference the bevel is measured against, and
+the effect then cancels itself to 1–2 levels out of 255.
+
+`Uniforms` is **32 bytes here, not the reference's 16**: it carries the pointer
+position (device px on the surface being drawn, negative = pointer away) for
+that key light. It is a per-frame constant buffer, not the shared per-item
+instance ABI. The daemon gates the pointer path three ways — only when a glass
+quad is actually on screen, only past 3pt of travel, and never faster than
+60 Hz — so a flat theme pays nothing and zero-work-at-rest is preserved.
 
 The MSL→HLSL translation is mechanical — validated against the shader source:
 `[[vertex_id]]/[[instance_id]]` → `SV_VertexID/SV_InstanceID`; device pointer

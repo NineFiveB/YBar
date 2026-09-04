@@ -308,6 +308,7 @@ bool Renderer::render(const DisplayList& list, Surface& surfaceBase, GlyphAtlas*
     Uniforms uniforms;
     uniforms.viewportSize = list.viewportSize;
     uniforms.holeCount = static_cast<std::uint32_t>(list.holes.size());
+    uniforms.pointer = list.pointer;
     D3D11_MAPPED_SUBRESOURCE mapped;
     if (FAILED(context->Map(impl_->uniforms.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
         return false;

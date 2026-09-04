@@ -58,12 +58,15 @@ cbuffer Uniforms : register(b1) {
     float2 viewportSize;
     uint   holeCount;
     uint   _uPad;
+    float2 pointer;   // device px on this surface; negative = pointer is away
+    float2 _uPad2;
 };
 
 static const uint kQuadFlagGradient = 1u << 0;
 static const uint kQuadFlagGlass    = 1u << 1;
 static const uint kQuadFlagArc      = 1u << 2;
 static const uint kQuadFlagHoles    = 1u << 3;
+static const uint kQuadFlagShadow   = 1u << 4;
 static const uint kGlyphFlagColor   = 1u << 0;
 static const uint kGlyphFlagGrey    = 1u << 1;
 
@@ -130,6 +133,10 @@ float sd_rounded_box(float2 p, float2 halfSize, float4 radii) {
 
 float4 quad_fragment(QuadVOut i) : SV_Target {
     float d = sd_rounded_box(i.local, i.halfSize, i.radii);
+    // The SDF's screen-space gradient, taken once at top level: derivatives in
+    // divergent control flow are undefined, and both the AA width and the
+    // bevel normal below need it.
+    float2 gradD = float2(ddx(d), ddy(d));
     float aa = max(fwidth(d), 1e-4);
 
     // background.clip cutouts: multiply coverage by "outside every hole".
@@ -142,6 +149,21 @@ float4 quad_fragment(QuadVOut i) : SV_Target {
                                       float4(hole.radius, hole.radius, hole.radius, hole.radius));
             holeMask = min(holeMask, smoothstep(-aa, aa, hd));
         }
+    }
+
+    // Soft falloff (drop shadow, or a glow when fill is light). The quad was
+    // grown by the blur radius on the CPU side, so the SDF here must use the
+    // TRUE shape half size from fill2.xy rather than the grown i.halfSize.
+    // `aa` is reused deliberately: it is computed before any branch, and the
+    // screen-space derivative of the two distances differs only by a constant
+    // shape offset, so taking fwidth() inside this branch would risk divergent
+    // derivatives for no accuracy gained.
+    if (i.flags & kQuadFlagShadow) {
+        float sd = sd_rounded_box(i.local, i.fill2.xy, i.radii);
+        float blur = max(i.gradientDir.x, aa);
+        float cov = saturate(1.0 - smoothstep(-blur, blur, sd));
+        cov *= cov; // a squared ramp sits much closer to a gaussian than linear
+        return float4(i.fill.rgb * i.fill.a * cov, i.fill.a * cov) * holeMask;
     }
 
     if (i.flags & kQuadFlagArc) {
@@ -179,30 +201,91 @@ float4 quad_fragment(QuadVOut i) : SV_Target {
     float alpha = fill.a * inner + i.borderColor.a * (outer - inner);
 
     if (i.flags & kQuadFlagGlass) {
-        // Liquid-glass rim: the SDF's screen-space gradient is the surface
-        // normal, so speculars wrap around corners like light bending through
-        // curved glass instead of a flat top band.
-        float2 grad = float2(ddx(d), ddy(d));
-        float2 n = normalize(grad + float2(1e-5, 1e-5));
+        // A REAL surface normal, not a screen-space direction.
+        //
+        // This branch used to take normalize(float2(ddx(d), ddy(d))) as its
+        // "normal". That is a unit 2D direction with no height component at
+        // all, so it cannot light a surface: every pixel on the rim reported
+        // the same tilt magnitude and only the direction varied, which is why
+        // the result read as a painted-on glint rather than a lit object — and
+        // a glint on the top arc specifically is the 2007 glossy-button
+        // signature.
+        //
+        // Instead treat the pill as a slab with a quarter-round bevel of width
+        // BEVEL_PX. t runs 0 at the outer edge to 1 where the face goes flat,
+        // and the normal of a quarter circle at that parameter is exactly
+        // (outward * sqrt(1 - t^2), t) — straight out at the edge, straight up
+        // on the face.
+        const float BEVEL_PX = 5.0;
+        float t = saturate(-d / BEVEL_PX);
+        float2 n2 = normalize(gradD + float2(1e-6, 1e-6));
+        float3 N = normalize(float3(n2 * sqrt(saturate(1.0 - t * t)), max(t, 1e-3)));
 
-        float band = smoothstep(-3.0, -0.8, d) * outer;      // rim shell (~1.5pt)
-        // Purely directional key light: a glint on the top arc that dies out
-        // along the sides — a full-perimeter ring reads as an outline, not glass.
-        float keySpec = pow(max(dot(n, normalize(float2(-0.25, -1.0))), 0.0), 3.0);
-        float rimLight = band * 0.30 * keySpec;
+        // Screen y is DOWN, so a light with negative y sits ABOVE the bar.
+        //
+        // The key light's AZIMUTH swings toward the pointer at a FIXED
+        // elevation, so the highlight travels around the bevel as the cursor
+        // crosses a pill and the pill reads as tilting to follow it. This is
+        // the whole pseudo-3D hover: nothing moves geometrically, so the 2D
+        // hit rect still matches the pixels exactly and the instance ABI is
+        // untouched.
+        //
+        // Holding the elevation fixed is the load-bearing part. Leaning the
+        // whole vector (the obvious way) also drops L.z, and since the flat
+        // face is referenced against saturate(L.z) below, the reference moves
+        // WITH the light and cancels almost all of the effect — measured at
+        // 1-2 levels out of 255, which is nothing. With L.z pinned the face
+        // stays exactly as authored and the full swing lands on the rim.
+        const float ELEV = 0.72;                  // cos of the light's elevation
+        float2 az = float2(-0.35, -0.80);
+        if (pointer.x >= 0.0) {
+            // 160 px is a little under one pill, so a pill's own highlight
+            // tracks the cursor across it while neighbours still react.
+            az += clamp((pointer - i.position.xy) / 160.0, -1.2, 1.2);
+        }
+        az = normalize(az + float2(1e-6, 1e-6));
+        float3 L = float3(az * sqrt(1.0 - ELEV * ELEV), ELEV); // already unit
+        float3 H = normalize(L + float3(0.0, 0.0, 1.0)); // orthographic view
+        float ndl = saturate(dot(N, L));
 
-        // Thickness: a whisper of glow just inside the rim.
-        float innerGlow = max((smoothstep(-10.0, -2.5, d) - band), 0.0) * 0.03 * outer;
+        // Diffuse as a DIFFERENCE from the flat face, so the middle of the
+        // pill stays exactly as authored and only the bevel moves: the top
+        // edge lifts, the bottom edge sinks. This sign change is the whole
+        // trick — a bevel that only ever brightens reads as a glow, while one
+        // that also darkens reads as geometry.
+        //
+        // The coefficients are small because the render target is sRGB and the
+        // theme is near-black: the shader writes LINEAR light, so against a
+        // base of 26/255 (linear 0.010) an addition of 0.05 lands at 67/255
+        // once encoded — a fivefold jump from what reads as a "subtle" number.
+        // Anything tuned by eye in 0..1 sRGB terms will blow out the rim.
+        // 0.050 is chosen so the natural range lands INSIDE the clamp below
+        // rather than against it. At 0.090 the top edge computed 0.020 and the
+        // sides -0.006, both outside (-0.004, +0.014) — so every bevel pixel
+        // saturated, the shading went binary, and the pointer-tracked light
+        // below could not modulate anything because there was no headroom left
+        // to modulate into.
+        // Range is now 0 .. ~0.21 of this coefficient, so 0.067 puts the peak
+        // right at the clamp without pinning everything below it.
+        float diffuse = (ndl - saturate(L.z)) * 0.067;
+        float spec = pow(saturate(dot(N, H)), 42.0) * 0.040;
+        float fres = pow(1.0 - saturate(N.z), 4.0) * 0.008;
 
-        // Gentle top-lit sheen across the body, in composed space so it
-        // reads even at near-clear fills.
-        float sheen = max((0.5 - i.uv.y) * 0.025, 0.0) * outer;
         // Glass presence follows the fill: a transparent pill (hover fade-out,
         // invisible-until-hover items) must show no rim/backdrop ghost.
         float presence = smoothstep(0.0, 0.06, fill.a);
-        float light = (rimLight + innerGlow + sheen) * presence;
-        rgb = clamp(rgb + float3(light, light, light), 0.0, 1.0);
-        alpha = clamp(alpha + light * 0.85, 0.0, 1.0);
+        // Bounds are LINEAR light, and they are this tight for a reason: the
+        // theme's resting pill is 26/255, which is linear 0.010. A negative of
+        // -0.016 is larger than the entire value beneath it, so it does not
+        // "darken the lower bevel", it punches the plate to pure black. The
+        // usable range under this fill is roughly (-0.004, +0.014); measured
+        // on a resting pill that lands at 22/255 and 40/255 respectively.
+        float light = clamp(diffuse + spec + fres, -0.004, 0.014) * presence * outer;
+        // rgb is premultiplied, so the light has to be scaled by alpha to stay
+        // consistent with it; alpha only ever gains, never loses, or a dark
+        // bevel would eat holes in the plate.
+        rgb = clamp(rgb + float3(light, light, light) * alpha, 0.0, 1.0);
+        alpha = clamp(alpha + max(light, 0.0) * 0.5, 0.0, 1.0);
     }
     return float4(rgb * holeMask, alpha * holeMask);
 }

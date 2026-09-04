@@ -16,6 +16,10 @@ struct ShadowStyle {
     Color color{0xff000000};
     double distance = 5;
     double angle = 30; // degrees; offset = (cos(a)*d, sin(a)*d), y flipped at render
+    // Falloff width in points; 0 keeps the reference's hard offset copy.
+    // A light colour at distance 0 with a blur makes this a GLOW instead --
+    // same quad, same code path, and the only bloom this pipeline has.
+    double blur = 0;
 
     bool operator==(const ShadowStyle&) const = default;
 };

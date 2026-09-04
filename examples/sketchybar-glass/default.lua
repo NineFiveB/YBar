@@ -31,7 +31,13 @@ sbar.default({
     height = 25,
     corner_radius = 7, -- Fluent "overlay corner" radius
     border_width = 0,
-    glass = false,
+    -- Item-level glass is the shader's bevel lighting, NOT a backdrop: a
+    -- quarter-round edge lit from above, highlight on the top arc and shade
+    -- under the bottom. It costs no extra draw and no backdrop of any kind.
+    -- The BAR's own glass stays off in bar.lua -- that flag is the DWM Acrylic
+    -- plate, which is a completely different thing and the part that reads
+    -- dated on a near-black strip.
+    glass = true,
   },
   popup = {
     blur_radius = 0, -- no Acrylic behind popups: solid Fluent panels

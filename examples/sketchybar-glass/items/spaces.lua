@@ -118,19 +118,55 @@ local RING_INNER = colors.with_alpha(colors.white, 0.85)
 local RING_OUTER = colors.with_alpha(colors.white, 0.28)
 local RING_FRAMES = 8
 
--- Paint one slot's focus state: fill, inner stop, outer stop, together.
-local function paint_focus(i, frames)
+-- The halo, which is now a real one. The two-stop trick above exists because
+-- this engine had no blur anywhere: a border is a hard band with a one-pixel
+-- analytic feather, so a falloff had to be faked from the two quads a pill
+-- already owned. background.shadow.blur adds the falloff the pipeline was
+-- missing -- a shadow quad grown by the blur radius with a squared ramp -- and
+-- a LIGHT shadow at zero offset is exactly a glow. Kept alongside the two ring
+-- stops rather than replacing them: the stops draw the crisp edge, the glow
+-- carries it outward.
+local GLOW = colors.with_alpha(colors.white, 0.32)
+local GLOW_BLUR = 5
+
+-- Paint one slot's WHOLE surface: fill, bevel, lift, and both ring stops,
+-- from both inputs at once. Focus and hover used to own separate writes to
+-- the same background, which was already a hazard for the fill alone; with
+-- elevation on the same property it becomes a correctness bug, because a
+-- workspace change would drop the lift out from under a pointer that has not
+-- moved. One writer, every time.
+--
+-- The bracket lifts WITH the pill. It carries the outer ring stop one point
+-- outside the pill's box, so leaving it behind would tear the halo in half
+-- the moment the pill rose.
+local function paint_space(i, frames)
   local on = (i == focused)
+  local raised = hovered[i] or false
+  local color = space_color(i)
   sbar.animate("sin", frames or RING_FRAMES, function()
     spaces[i]:set({
       background = {
-        color = space_color(i),
+        color = color,
+        gradient_angle = 90,
+        gradient_color = raised and colors.shade(color, hover.BEVEL) or color,
+        y_offset = raised and hover.LIFT or 0,
         border_width = on and 1 or 0,
         border_color = on and RING_INNER or colors.transparent,
+        -- drawing stays ON in both states so only the COLOUR animates: the
+        -- shadow's alpha is animatable and its drawing flag is not, so
+        -- toggling the flag would pop the halo in and out while the ring it
+        -- belongs to eased.
+        shadow = {
+          drawing = true,
+          color = on and GLOW or colors.transparent,
+          distance = 0,
+          blur = GLOW_BLUR,
+        },
       },
     })
     brackets[i]:set({
       background = {
+        y_offset = raised and hover.LIFT or 0,
         border_width = on and 1 or 0,
         border_color = on and RING_OUTER or colors.transparent,
       },
@@ -141,8 +177,7 @@ end
 for i = 1, MAX_SLOTS do
   local function set_hover(on)
     hovered[i] = on or nil
-    hover.fade(spaces[i], space_color(i),
-               on and hover.ENTER_FRAMES or hover.EXIT_FRAMES)
+    paint_space(i, on and hover.ENTER_FRAMES or hover.EXIT_FRAMES)
   end
   -- Both the pill and its ring bracket, for the seam described in helpers/hover.
   for _, w in ipairs({ spaces[i], brackets[i] }) do
@@ -167,7 +202,7 @@ local function update_spaces(env)
       -- Text and visibility snap; only the focus paint eases. A pill whose
       -- name changed should read as its new workspace at once.
       spaces[i]:set({ drawing = true, icon = { string = name, color = colors.white } })
-      paint_focus(i)
+      paint_space(i)
       sbar.set("space.padding." .. i, { drawing = true })
     else
       spaces[i]:set({ drawing = false })

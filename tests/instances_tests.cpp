@@ -14,7 +14,12 @@ TEST_CASE("instance strides match the shader ABI") {
     CHECK(sizeof(GlyphInstance) == 64);
     CHECK(sizeof(ShapeVertex) == 32);
     CHECK(sizeof(Hole) == 32);
-    CHECK(sizeof(Uniforms) == 16);
+    // 32, not the reference's 16: Uniforms gained the pointer position that
+    // drives the pointer-tracked key light (Windows-only, see WINDOWS-PORT
+    // §7.3). It is a per-frame constant buffer, NOT the shared per-item
+    // instance ABI — the four strides above are the ones that must stay
+    // byte-identical with Instances.swift, and they do.
+    CHECK(sizeof(Uniforms) == 32);
 }
 
 TEST_CASE("field offsets match the shader struct layout") {

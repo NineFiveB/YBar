@@ -21,6 +21,9 @@ struct SceneParams {
     double barHeight = 0;
     double scale = 1.0;
     double clock = 0; // monotonic seconds, drives marquee phase
+    // Pointer in LOGICAL points on this surface; negative = not over it.
+    double pointerX = -1;
+    double pointerY = -1;
 };
 
 // Clips a glyph quad to a device-px box and remaps its UVs proportionally —

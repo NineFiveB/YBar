@@ -244,6 +244,7 @@ Result setShadow(ShadowStyle& shadow, const Segments& segs, std::size_t at,
     if (key == "color") return setColor(shadow.color, segs, at + 1, value, fullPath);
     if (key == "distance") return setFloat(shadow.distance, value);
     if (key == "angle") return setFloat(shadow.angle, value);
+    if (key == "blur") return setFloat(shadow.blur, value);
     return errUnknown(fullPath);
 }
 

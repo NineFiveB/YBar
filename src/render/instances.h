@@ -25,6 +25,13 @@ inline constexpr std::uint32_t kQuadFlagGradient = 1u << 0;
 inline constexpr std::uint32_t kQuadFlagGlass = 1u << 1;
 inline constexpr std::uint32_t kQuadFlagArc = 1u << 2;
 inline constexpr std::uint32_t kQuadFlagHoles = 1u << 3;
+// Soft falloff quad (drop shadow, or a glow when the colour is light). The
+// quad is drawn EXPANDED by the blur radius so the falloff has somewhere to
+// live; the true shape's halfSize rides in fill2.xy and the blur radius in
+// gradientDir.x, both of which a shadow quad otherwise leaves unused. Nothing
+// about the 112-byte layout changes, so macOS stays byte-compatible and simply
+// never sets this bit.
+inline constexpr std::uint32_t kQuadFlagShadow = 1u << 4;
 inline constexpr std::uint32_t kGlyphFlagColor = 1u << 0;
 // Colour images only: render at luminance, for a disabled/pending row.
 inline constexpr std::uint32_t kGlyphFlagDesaturate = 1u << 1;
@@ -80,8 +87,17 @@ struct Uniforms {
     Float2 viewportSize;
     std::uint32_t holeCount = 0;
     std::uint32_t pad = 0;
+    // Pointer position in DEVICE PIXELS on the surface being drawn, or
+    // negative when the pointer is not over it. Drives the pointer-tracked key
+    // light in the glass branch. Unlike QuadInstance this is a per-frame
+    // constant buffer, not the shared per-item instance ABI — growing it costs
+    // macOS nothing until the Metal side chooses to mirror it, and a macOS
+    // build that never writes the field simply gets the fixed light.
+    Float2 pointer{-1.0f, -1.0f};
+    Float2 pad2;
 };
-static_assert(sizeof(Uniforms) == 16, "Uniforms ABI stride");
+// cbuffers round to 16; 24 bytes of payload occupies 32.
+static_assert(sizeof(Uniforms) == 32, "Uniforms ABI stride");
 
 // Flat, paint-ordered frame content in DEVICE PIXELS (top-left origin).
 // Draw order: all quads -> all shape triangles -> all glyphs (spec 3.9).
@@ -93,6 +109,8 @@ struct DisplayList {
     std::vector<GlyphInstance> glyphs;
     std::vector<Hole> holes;
     Float2 viewportSize;
+    // Device-px pointer position on this surface; negative = not over it.
+    Float2 pointer{-1.0f, -1.0f};
     // A marquee is on screen: the caller keeps the frame clock running
     // (continuousDemand, spec 7.2).
     bool hasMarquee = false;
