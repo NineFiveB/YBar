@@ -101,22 +101,6 @@ bool YTileProvider::sendCommand(const std::string& cmd, const std::string& arg,
         if (ok && replyLine) *replyLine = line;
     }
     CloseHandle(pipe);
-
-    // ytiled serves a SINGLE pipe instance, so the connection just made
-    // displaced any live subscriber, and it drops that subscriber from its
-    // list WITHOUT closing the handle. The reader thread would otherwise sit
-    // in ReadFile forever on a stream that will never deliver another byte:
-    // no error to react to, no reconnect, and workspaces frozen at whatever
-    // they were. Observed as three attaches, three drops and no retry.
-    //
-    // Break the dead read so readerLoop falls through to its reconnect. This
-    // closes a handle another thread is reading from, which is exactly the
-    // mechanism stop() already relies on to join that thread.
-    //
-    // No-op when called from readerLoop's own pre-subscribe pulls, where
-    // pipe_ is still -1, which is why those must stay ahead of openPipe().
-    const auto held = pipe_.exchange(-1);
-    if (held != -1) CloseHandle(reinterpret_cast<HANDLE>(held));
     return ok;
 }
 
@@ -188,51 +172,6 @@ void YTileProvider::stop() {
 
 void YTileProvider::readerLoop() {
     while (running_) {
-        // ORDER IS LOAD-BEARING: every request that needs its own connection
-        // runs BEFORE the subscribe pipe is opened, never while it is held.
-        //
-        // ytiled serves a single pipe instance, so a second concurrent
-        // connection does not queue behind the first — it displaces the
-        // subscriber. Pulling the state and re-asserting the reservation
-        // AFTER subscribing therefore killed the subscription that had just
-        // been made, 2ms in:
-        //
-        //     21:39:33.761 subscriber attached
-        //     21:39:33.763 1 subscriber(s) dropped
-        //
-        // The stream then delivered nothing ever again: the workspaces widget
-        // stayed empty and every workspace switch went unseen while ytiled
-        // logged it happily. The cost of going first is a tiny window between
-        // the state pull and the subscribe in which a change can be missed —
-        // strictly better than a subscription that is dead on arrival, and the
-        // next change repairs it.
-
-        // Clear the dedupe first: after a reconnect the state may be identical
-        // but subscribers just lost their pipe-side continuity.
-        {
-            std::lock_guard<std::mutex> lock(stateMutex_);
-            lastKey_.clear();
-        }
-
-        // The protocol's `ready` contract: reservations do not survive a
-        // ytiled restart, and every (re)subscribe is the cue to re-assert.
-        // Idempotent by design.
-        const int offset = appliedOffset_.load();
-        if (offset > 0) applyWorkAreaOffset(offset);
-
-        // The stream only pushes on changes — pull the initial state so the
-        // workspaces widget populates at boot (the forced-query idiom,
-        // spec 11.3). Both of these open and close their own connection.
-        std::string stateReply;
-        if (sendCommand("state", "", &stateReply)) {
-            try {
-                const auto reply = json::parse(stateReply);
-                if (reply.contains("state")) handleState(reply.at("state").dump());
-            } catch (const json::exception&) {
-            }
-        }
-
-        // Only now take the one instance and hold it for the stream.
         const HANDLE pipe = openPipe();
         if (pipe == INVALID_HANDLE_VALUE) {
             Sleep(1000);
@@ -246,6 +185,30 @@ void YTileProvider::readerLoop() {
                           readLine(pipe, buffer, line); // ack: {"ok":true,...}
 
         if (subscribed) {
+            // The protocol's `ready` contract: reservations do not survive a
+            // ytiled restart, and every (re)subscribe is the cue to
+            // re-assert. Idempotent by design.
+            const int offset = appliedOffset_.load();
+            if (offset > 0) applyWorkAreaOffset(offset);
+
+            // The stream only pushes on changes — pull the initial state so
+            // the workspaces widget populates at boot (mirrors the
+            // forced-query idiom, spec 11.3). Clear the dedupe first: after
+            // a reconnect the state may be identical but subscribers just
+            // lost their pipe-side continuity.
+            {
+                std::lock_guard<std::mutex> lock(stateMutex_);
+                lastKey_.clear();
+            }
+            std::string stateReply;
+            if (sendCommand("state", "", &stateReply)) {
+                try {
+                    const auto reply = json::parse(stateReply);
+                    if (reply.contains("state")) handleState(reply.at("state").dump());
+                } catch (const json::exception&) {
+                }
+            }
+
             while (running_ && readLine(pipe, buffer, line)) {
                 try {
                     const auto notification = json::parse(line);
