@@ -91,6 +91,29 @@ Result setFloat(double& field, const std::string& value) {
     return ok;
 }
 
+// Animatable float leaf whose value is bounded. setFloat cannot be reused for
+// these: it writes the raw lerp, and a meter clamped only at the set site
+// would still be driven out of range by an animation aimed past an endpoint.
+// Clamping inside the apply callback keeps every intermediate frame legal.
+Result setFloatClamped(double& field, const std::string& value, double lo, double hi) {
+    const auto parsed = parseFloat(value);
+    if (!parsed) return errNumber(value);
+    const double target = std::clamp(*parsed, lo, hi);
+    if (g_animation && g_animation->scheduler) {
+        if (g_animation->frames > 0) {
+            g_animation->scheduler->add(
+                animationKey(), g_animation->curve, g_animation->frames, field, target,
+                [&field, lo, hi](const ybar::anim::AnimValue& v) {
+                    field = std::clamp(std::get<double>(v), lo, hi);
+                });
+            return ok;
+        }
+        g_animation->scheduler->cancel(animationKey()); // direct set cancels
+    }
+    field = target;
+    return ok;
+}
+
 // Non-animatable float leaf (reference treats clip/wrap_width as direct sets).
 // NEVER route a stack local through setFloat: the scheduler keeps the capture
 // alive and would write through a dangling reference every tick.
@@ -371,10 +394,16 @@ Result setSlider(Item& item, const Segments& segs, std::size_t at, const std::st
     if (at >= segs.size()) return errUnknown(fullPath);
     const auto key = segs[at];
     if (key == "percentage") {
-        const auto parsed = parseFloat(value);
-        if (!parsed) return errNumber(value);
-        if (!slider.isDragged) slider.percentage = std::clamp(*parsed, 0.0, 100.0);
-        return ok;
+        // A live drag owns the value: a routine repaint landing mid-drag must
+        // not fight the pointer, and must not leave an animation running that
+        // would keep fighting it after the set returns.
+        if (slider.isDragged) {
+            if (!parseFloat(value)) return errNumber(value);
+            if (g_animation && g_animation->scheduler)
+                g_animation->scheduler->cancel(animationKey());
+            return ok;
+        }
+        return setFloatClamped(slider.percentage, value, 0.0, 100.0);
     }
     if (key == "width") {
         const auto parsed = parseFloat(value);
@@ -482,6 +511,10 @@ Result setPopup(Item& item, const Segments& segs, std::size_t at, const std::str
     if (key == "topmost") return ok; // accepted-and-ignored
     if (key == "height") return setFloat(popup.cellHeight, value);
     if (key == "y_offset") return setFloat(popup.yOffset, value);
+    // Durations handed to the compositor, never themselves animated — hence
+    // setFloatDirect, which also clears any stray animation on the key.
+    if (key == "fade_in") return setFloatDirect(popup.fadeInFrames, value, 0.0);
+    if (key == "fade_out") return setFloatDirect(popup.fadeOutFrames, value, 0.0);
     if (key == "background") {
         if (at + 1 >= segs.size()) return errUnknown(fullPath);
         const auto sub = segs[at + 1];

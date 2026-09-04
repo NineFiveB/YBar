@@ -264,7 +264,13 @@ cpu:subscribe("system_stats", function(env)  -- YBAR PORT: built-in provider
   -- history already on screen — Task Manager behavior.
   cpu_hist:push({ load / 100. })
 
-  cpu:set({ slider = { percentage = load, highlight_color = cpu_color_for(load) } })
+  -- Glide the meter instead of stepping it. Samples land every 2 s, so an
+  -- un-eased set makes the fill teleport; over 10 frames it reads as a trend.
+  -- Well inside the sample interval, so the pump stops between samples and
+  -- the bar still does no GPU work at rest.
+  sbar.animate("sin", 10, function()
+    cpu:set({ slider = { percentage = load, highlight_color = cpu_color_for(load) } })
+  end)
 
   last_stats = env
   if cpu_bracket:query().popup.drawing == "on" then
