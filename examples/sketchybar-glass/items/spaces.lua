@@ -100,62 +100,49 @@ local function space_color(i)
   return hovered[i] and colors.bg2 or colors.bg1
 end
 
--- The focus ring, in two stops.
+-- Focus is fill + halo. There is deliberately no outline.
 --
--- There is no glow in this engine to switch on: a border is drawn as a hard
--- band between the shape edge and that edge inset by border_width, with only
--- a one-pixel analytic feather (shaders/ybar.hlsl, quad_fragment), and there
--- is no blur or bloom pass anywhere in the pipeline. So the falloff is built
--- from the two quads a workspace pill already owns — its own 23pt box and the
--- bracket's box one point outside it. Bright stroke on the pill edge, dim
--- stroke one point out; brightness dropping outward is what reads as a halo
--- at this size. Two stops is all the geometry affords, and at 1pt each on a
--- 35pt strip that is enough.
+-- This used to be a ring in two stops -- a bright 1pt stroke on the pill edge
+-- and a dim one on the bracket's box a point outside it -- and that existed
+-- ONLY because the engine had no blur: a border is a hard band with a
+-- one-pixel analytic feather, and there was no bloom pass anywhere, so a
+-- falloff had to be faked out of the two quads a pill already owned.
 --
--- Both stops fade with the fill, so focus arrives as one gesture rather than
--- a ring appearing over a pill that is still changing colour.
-local RING_INNER = colors.with_alpha(colors.white, 0.85)
-local RING_OUTER = colors.with_alpha(colors.white, 0.28)
-local RING_FRAMES = 8
+-- background.shadow.blur supplies the real falloff now (a shadow quad grown by
+-- the blur radius, squared ramp; a LIGHT colour at zero offset IS a glow), so
+-- the fake one was drawing the same idea a second time. Keeping both put three
+-- treatments on one edge -- crisp stroke, dim stroke, halo -- on top of the
+-- bevel rim that already lights that edge, which is what made the focused pill
+-- read as busy against its flat neighbours. The strokes go; the halo stays.
+local FOCUS_FRAMES = 8
+local GLOW = colors.with_alpha(colors.white, 0.42)
+local GLOW_BLUR = 6
 
--- The halo, which is now a real one. The two-stop trick above exists because
--- this engine had no blur anywhere: a border is a hard band with a one-pixel
--- analytic feather, so a falloff had to be faked from the two quads a pill
--- already owned. background.shadow.blur adds the falloff the pipeline was
--- missing -- a shadow quad grown by the blur radius with a squared ramp -- and
--- a LIGHT shadow at zero offset is exactly a glow. Kept alongside the two ring
--- stops rather than replacing them: the stops draw the crisp edge, the glow
--- carries it outward.
-local GLOW = colors.with_alpha(colors.white, 0.32)
-local GLOW_BLUR = 5
-
--- Paint one slot's WHOLE surface: fill, bevel, lift, and both ring stops,
--- from both inputs at once. Focus and hover used to own separate writes to
--- the same background, which was already a hazard for the fill alone; with
--- elevation on the same property it becomes a correctness bug, because a
--- workspace change would drop the lift out from under a pointer that has not
--- moved. One writer, every time.
+-- Paint one slot's WHOLE surface: fill, bevel, lift and halo, from both
+-- inputs at once. Focus and hover used to own separate writes to the same
+-- background, which was already a hazard for the fill alone; with elevation on
+-- the same property it becomes a correctness bug, because a workspace change
+-- would drop the lift out from under a pointer that has not moved. One
+-- writer, every time.
 --
--- The bracket lifts WITH the pill. It carries the outer ring stop one point
--- outside the pill's box, so leaving it behind would tear the halo in half
--- the moment the pill rose.
+-- The bracket still lifts WITH the pill even though it no longer draws
+-- anything: it is the hover seam's other half, and a bracket left behind while
+-- the pill rose would put the two boxes a point apart mid-animation.
 local function paint_space(i, frames)
   local on = (i == focused)
   local raised = hovered[i] or false
   local color = space_color(i)
-  sbar.animate("sin", frames or RING_FRAMES, function()
+  sbar.animate("sin", frames or FOCUS_FRAMES, function()
     spaces[i]:set({
       background = {
         color = color,
         gradient_angle = 90,
         gradient_color = raised and colors.shade(color, hover.BEVEL) or color,
         y_offset = raised and hover.LIFT or 0,
-        border_width = on and 1 or 0,
-        border_color = on and RING_INNER or colors.transparent,
         -- drawing stays ON in both states so only the COLOUR animates: the
         -- shadow's alpha is animatable and its drawing flag is not, so
-        -- toggling the flag would pop the halo in and out while the ring it
-        -- belongs to eased.
+        -- toggling the flag would pop the halo in and out instead of easing
+        -- it alongside the fill.
         shadow = {
           drawing = true,
           color = on and GLOW or colors.transparent,
@@ -164,13 +151,7 @@ local function paint_space(i, frames)
         },
       },
     })
-    brackets[i]:set({
-      background = {
-        y_offset = raised and hover.LIFT or 0,
-        border_width = on and 1 or 0,
-        border_color = on and RING_OUTER or colors.transparent,
-      },
-    })
+    brackets[i]:set({ background = { y_offset = raised and hover.LIFT or 0 } })
   end)
 end
 
