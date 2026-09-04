@@ -105,11 +105,16 @@ for i = 1, MAX_ROWS do
       size = icon_size,
       padding_left = inset,
       padding_right = gutter - inset - icon_size,
-      -- An image centres on the row's em box, but text ink sits below that
-      -- centre, so the icon has to come DOWN (y_offset is positive-up) to land
-      -- on the label's optical centre. Nudging the text instead also resizes
-      -- the row, which never converges.
-      y_offset = -4,
+      -- An image centres on the row's em box, but the label's CAP band sits a
+      -- little below that centre, so the icon comes down slightly to match it
+      -- (y_offset is positive-up). Nudging the text instead also resizes the
+      -- row, which never converges.
+      --
+      -- Measured at 2x on a row with a solid-square icon: cap band 135..151
+      -- (centre 143) against icon 134..165 (centre 149.5). This was -4, which
+      -- overshot by ~6px and left every icon visibly riding low against its
+      -- name; -1 lands the two centres within half a pixel.
+      y_offset = -1,
     },
     icon = {
       string = "",

@@ -57,11 +57,12 @@ end
 -- The plate's height and radius are set once here rather than at each call
 -- site: a row's own box is content-sized, so without an explicit height the
 -- highlight would hug the glyphs instead of reading as a row.
--- y_offset is NOT cosmetic here. A row's plate centres on the item's box, but
--- the content does not sit centred in it: the rows carry their own optical
--- nudges (the tray's icon is pushed down onto the label's centre line), so a
--- plate centred on the box reads high against the text it is meant to be
--- behind. Measured at 2x on the tray list: plate centre 141, text centre 146.
+-- y_offset is NOT cosmetic here. A row's plate centres on the item's BOX, but
+-- a row's visible content does not sit centred in that box — the box includes
+-- the label's descender room, so a plate centred on it rides low against the
+-- icon and cap band the eye actually tracks. Measured at 2x on the tray list:
+-- content centre 143.5 (icon 128..159, cap band 137..151) against a plate
+-- centre of 144.5 unadjusted.
 function M.row(item, opts)
   opts = opts or {}
   item:set({
@@ -69,7 +70,7 @@ function M.row(item, opts)
       color = colors.transparent,
       height = opts.height or 22,
       corner_radius = opts.radius or 4,
-      y_offset = opts.y_offset or -2,   -- positive is up
+      y_offset = opts.y_offset or -1,   -- positive is up
     },
   })
   M.attach(item, { item }, colors.transparent, opts.hover or colors.row_hover)
