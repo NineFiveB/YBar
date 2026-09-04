@@ -205,6 +205,7 @@ for i = 1, max_devices do
       align = "left",
     },
   })
+  require("helpers.hover").row(dev_rows[i])
 end
 
 -- Nearby Devices section dropped: Windows has no inquiry-scan or
@@ -511,6 +512,8 @@ local settings_row = sbar.add("item", "widgets.bluetooth.settings", {
   },
   label = { drawing = false },
 })
+
+require("helpers.hover").row(settings_row)
 
 -- ── State ──────────────────────────────────────────────────────────────────
 local paired_cache = {}      -- { name, dtype }

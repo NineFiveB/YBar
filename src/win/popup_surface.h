@@ -23,9 +23,22 @@ public:
 
     // Anchor = host frame in SCREEN physical pixels; sizes in logical points.
     // align 'c'/'r'/other-left; below=true for top bars.
+    // fadeInFrames applies on the hidden->shown edge only (see fadeIn).
     void present(ybar::model::Size panelSize, const ybar::model::Rect& anchorScreenPx,
-                 char align, bool below, double yOffset);
+                 char align, bool below, double yOffset, double fadeInFrames = 0);
     void hide();
+
+    // Opacity fades run on the COMPOSITOR, not the app: the animation is
+    // handed to DirectComposition once and this process renders no frames
+    // while it plays. `frames` is at 60Hz; 0 snaps.
+    //
+    // present() calls fadeIn on the hidden->shown edge ONLY. Re-issuing the
+    // animation every frame would restart it and the panel would never
+    // finish appearing.
+    void fadeIn(double frames);
+    // Starts the fade and returns at once. The caller keeps the surface alive
+    // for the duration, then calls hide().
+    void fadeOut(double frames);
 
     // Acrylic plate + rounded backdrop corners (spec 7.6). Cheap and
     // idempotent; call whenever the popup's blur/corner settings may differ.

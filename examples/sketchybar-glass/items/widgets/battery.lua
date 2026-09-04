@@ -311,6 +311,8 @@ local function toggle_details()
   end
 end
 
+require("helpers.hover").row(settings_row)
+
 settings_row:subscribe("mouse.clicked", function()
   sbar.exec('explorer.exe "ms-settings:batterysaver"')
   hide_details()

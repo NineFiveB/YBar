@@ -177,6 +177,7 @@ for i = 1, MAX_NETS do
       align = "left",
     },
   })
+  require("helpers.hover").row(net_rows[i])
 end
 
 -- ── Footer: More Wi-Fi settings ────────────────────────────────────────────
@@ -201,6 +202,8 @@ local settings_row = sbar.add("item", {
   },
   label = { drawing = false },
 })
+
+require("helpers.hover").row(settings_row)
 
 -- ── State ──────────────────────────────────────────────────────────────────
 local wifi_power = true

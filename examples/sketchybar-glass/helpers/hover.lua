@@ -49,4 +49,30 @@ function M.pill(bracket, member, base, hover)
   M.attach(bracket, { bracket, member }, base or colors.bg1, hover or colors.bg2)
 end
 
+-- A popup row: no bracket, no resting fill, so the row supplies its own plate
+-- and lifts it from transparent. Rows are the densest clickable surface in
+-- the theme and the only one with no affordance at all otherwise — several
+-- of them act on a click, and the tray's act destructively.
+--
+-- The plate's height and radius are set once here rather than at each call
+-- site: a row's own box is content-sized, so without an explicit height the
+-- highlight would hug the glyphs instead of reading as a row.
+-- y_offset is NOT cosmetic here. A row's plate centres on the item's box, but
+-- the content does not sit centred in it: the rows carry their own optical
+-- nudges (the tray's icon is pushed down onto the label's centre line), so a
+-- plate centred on the box reads high against the text it is meant to be
+-- behind. Measured at 2x on the tray list: plate centre 141, text centre 146.
+function M.row(item, opts)
+  opts = opts or {}
+  item:set({
+    background = {
+      color = colors.transparent,
+      height = opts.height or 22,
+      corner_radius = opts.radius or 4,
+      y_offset = opts.y_offset or -2,   -- positive is up
+    },
+  })
+  M.attach(item, { item }, colors.transparent, opts.hover or colors.row_hover)
+end
+
 return M

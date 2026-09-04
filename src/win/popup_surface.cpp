@@ -50,11 +50,13 @@ public:
     ComPtr<IDCompositionDevice> compositionDevice;
     ComPtr<IDCompositionTarget> target;
     ComPtr<IDCompositionVisual> visual;
+    ComPtr<IDCompositionEffectGroup> effect; // carries the open/close opacity
     std::function<void(const MouseEvent&)> onMouse;
     bool visible = false;
     int widthPx = 0;
     int heightPx = 0;
     bool releasingCapture = false; // our own ReleaseCapture, not a steal
+    bool trackingLeave = false;    // TME_LEAVE armed, for row hover exit
 
     ~PopupSurfaceImpl() {
         if (hwnd) {
@@ -97,7 +99,40 @@ LRESULT CALLBACK popupWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             }
             return 0;
         case WM_MOUSEMOVE:
-            if (impl) impl->dispatchMouse(MouseEvent::Kind::Move, lParam, "left");
+            if (impl) {
+                // Arm leave tracking so a row's hover can be released when the
+                // pointer exits the panel. Without this the last row the
+                // pointer touched stays lit after it leaves, because a popup
+                // gets no other signal that the pointer is gone.
+                if (!impl->trackingLeave) {
+                    TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, hwnd, 0};
+                    TrackMouseEvent(&track);
+                    impl->trackingLeave = true;
+                }
+                impl->dispatchMouse(MouseEvent::Kind::Move, lParam, "left");
+            }
+            return 0;
+        case WM_MOUSELEAVE:
+            if (impl) {
+                impl->trackingLeave = false;
+                // Same defence the bar carries (spec 6): the compositor can
+                // post a leave the pointer never performed when the window is
+                // touched under a stationary cursor, which would flap row
+                // hover. Believe it only when the cursor is really outside.
+                POINT cursor{};
+                RECT bounds{};
+                if (GetCursorPos(&cursor) && GetWindowRect(hwnd, &bounds) &&
+                    PtInRect(&bounds, cursor)) {
+                    TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, hwnd, 0};
+                    TrackMouseEvent(&track);
+                    impl->trackingLeave = true;
+                    return 0;
+                }
+                MouseEvent event;
+                event.kind = MouseEvent::Kind::Leave;
+                event.modifier = currentModifier();
+                if (impl->onMouse) impl->onMouse(event);
+            }
             return 0;
         case WM_LBUTTONUP:
             if (impl) {
@@ -170,6 +205,13 @@ std::unique_ptr<PopupSurface> PopupSurface::create(ybar::render::Renderer& rende
     impl->visual->SetContent(swapChain);
     // No transform: the target composes in the window's physical-pixel space
     // (see bar_surface.cpp for the full note).
+    // An effect group carries the open/close opacity. Created once and left
+    // at 1.0, so a popup that never asks for a fade composes exactly as it
+    // did before this existed.
+    if (SUCCEEDED(impl->compositionDevice->CreateEffectGroup(&impl->effect))) {
+        impl->effect->SetOpacity(1.0f);
+        impl->visual->SetEffect(impl->effect.Get());
+    }
     impl->target->SetRoot(impl->visual.Get());
     impl->compositionDevice->Commit();
 
@@ -181,7 +223,7 @@ std::unique_ptr<PopupSurface> PopupSurface::create(ybar::render::Renderer& rende
 PopupSurface::~PopupSurface() = default;
 
 void PopupSurface::present(ybar::model::Size panelSize, const ybar::model::Rect& anchor,
-                           char align, bool below, double yOffset) {
+                           char align, bool below, double yOffset, double fadeInFrames) {
     const double scale = impl_->scaleValue;
     const int widthPx = static_cast<int>(std::lround(panelSize.width * scale));
     const int heightPx = static_cast<int>(std::lround(panelSize.height * scale));
@@ -234,6 +276,10 @@ void PopupSurface::present(ybar::model::Size panelSize, const ybar::model::Rect&
     if (!impl_->visible) {
         ShowWindow(impl_->hwnd, SW_SHOWNOACTIVATE);
         impl_->visible = true;
+        // Only on the edge: fadeIn every frame would restart the ramp and the
+        // panel would never finish appearing. This also resets the opacity a
+        // previous fade-out left at 0.
+        fadeIn(fadeInFrames);
     }
     impl_->compositionDevice->Commit();
 }
@@ -254,10 +300,57 @@ void PopupSurface::setBackdrop(bool acrylic, double cornerRadius) {
     DwmSetWindowAttribute(impl_->hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
 }
 
+namespace {
+
+// One linear ramp between two opacities. AddCubic with only the linear term
+// set is the shortest way to say "go from a to b over d seconds" through
+// IDCompositionAnimation, and End() pins the value afterwards so a dropped
+// animation holds its endpoint instead of snapping back.
+void rampOpacity(IDCompositionDevice& device, IDCompositionEffectGroup& effect, float from,
+                 float to, double seconds) {
+    ComPtr<IDCompositionAnimation> animation;
+    if (FAILED(device.CreateAnimation(&animation))) {
+        effect.SetOpacity(to); // no animation available: snap, never stall
+        return;
+    }
+    animation->AddCubic(0.0, from, static_cast<float>((to - from) / seconds), 0.0f, 0.0f);
+    animation->End(seconds, to);
+    effect.SetOpacity(animation.Get());
+}
+
+} // namespace
+
+void PopupSurface::fadeIn(double frames) {
+    if (!impl_->effect) return;
+    if (frames <= 0) {
+        impl_->effect->SetOpacity(1.0f);
+        impl_->compositionDevice->Commit();
+        return;
+    }
+    rampOpacity(*impl_->compositionDevice.Get(), *impl_->effect.Get(), 0.0f, 1.0f,
+                frames / 60.0);
+    impl_->compositionDevice->Commit();
+}
+
+void PopupSurface::fadeOut(double frames) {
+    if (!impl_->effect || !impl_->visible) return;
+    if (frames <= 0) {
+        impl_->effect->SetOpacity(0.0f);
+        impl_->compositionDevice->Commit();
+        return;
+    }
+    rampOpacity(*impl_->compositionDevice.Get(), *impl_->effect.Get(), 1.0f, 0.0f,
+                frames / 60.0);
+    impl_->compositionDevice->Commit();
+}
+
 void PopupSurface::hide() {
     if (!impl_->visible) return;
     ShowWindow(impl_->hwnd, SW_HIDE);
     impl_->visible = false;
+    // Leave the opacity where a fade-out left it and reset on the next show
+    // instead: clearing it here would flash the panel back to full opacity
+    // for the frame between the fade ending and the window hiding.
 }
 
 ybar::render::Surface& PopupSurface::renderSurface() { return *impl_->surface; }

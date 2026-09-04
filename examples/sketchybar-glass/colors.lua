@@ -28,6 +28,10 @@ return {
   bg1 = 0xff1a1a1c,          -- resting pill fill
   bg2 = 0xff26262a,          -- raised/selected surface, and the hover lift off bg1
   bg3 = 0xff32323a,          -- hover lift off bg2, for the pills that rest raised
+  -- Popup rows rest transparent on a solid panel, so their hover IS an
+  -- overlay. That is safe here in a way it is not on the bar, where the tones
+  -- above are opaque precisely so a pill can sit darker than the strip.
+  row_hover = 0x16ffffff,
 
   with_alpha = function(color, alpha)
     if alpha > 1.0 or alpha < 0.0 then return color end

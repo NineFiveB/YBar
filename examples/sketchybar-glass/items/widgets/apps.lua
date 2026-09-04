@@ -121,6 +121,7 @@ for i = 1, MAX_ROWS do
     },
     label = { drawing = false },
   })
+  require("helpers.hover").row(rows[i])
 end
 
 sbar.add("item", "widgets.apps.sep", {

@@ -180,6 +180,11 @@ struct DaemonState {
         std::unique_ptr<ybar::win::PopupSurface> surface;
         std::vector<int> memberIds;
         std::vector<ybar::model::Rect> boxes; // panel-local logical
+        // > 0 while a dismissed popup is fading out. The entry outlives the
+        // dismissal by exactly the fade so the compositor has something to
+        // animate; it stops hit-testing immediately, so the click that
+        // dismissed it cannot land in a panel that is on its way out.
+        double closingUntil = 0;
     };
     std::unordered_map<int, LivePopup> popups;
     std::unique_ptr<ybar::win::PopupSurface> tooltip;
@@ -257,6 +262,16 @@ struct DaemonState {
     void commitSliderRelease(ybar::model::Item& item);
     void showTooltip(ybar::model::Item& item);
     void hideTooltip();
+    // Move targeted hover to `item` (nullptr = nothing hovered), firing
+    // mouse.exited on the old and mouse.entered on the new. One
+    // implementation for the bar and for popup rows, so a pointer crossing
+    // between a pill and its open panel cannot leave two items lit.
+    void setHoverItem(ybar::model::Item* item);
+    // A popup torn down under the pointer sends no WM_MOUSELEAVE, so a row
+    // left hovered would stay latched: its highlight would be stale on the
+    // next open, and re-entering it would fire no `entered` because the id
+    // never changed. Called from every popup teardown path.
+    void releaseHoverIn(const LivePopup& popup);
     ybar::model::MeasuredContent measureItem(const ybar::model::Item& item) {
         ybar::model::MeasuredContent m;
         const auto& icon = fonts->shape(item.icon.displayString(), item.icon.font);
@@ -1375,6 +1390,38 @@ void DaemonState::hideTooltip() {
     KillTimer(messageWindow, kTooltipTimer);
 }
 
+void DaemonState::releaseHoverIn(const LivePopup& popup) {
+    if (hoverItemId == -1) return;
+    for (const int id : popup.memberIds) {
+        if (id != hoverItemId) continue;
+        setHoverItem(nullptr);
+        return;
+    }
+}
+
+void DaemonState::setHoverItem(ybar::model::Item* item) {
+    const int hoverId = item ? item->id : -1;
+    if (hoverId == hoverItemId) return;
+    hideTooltip();
+    if (hoverItemId != -1) {
+        for (const auto& candidate : store.items()) {
+            if (candidate->id != hoverItemId) continue;
+            candidate->mouseOver = false;
+            bus.triggerTargeted(*candidate, "mouse.exited", "");
+            break;
+        }
+    }
+    if (item) {
+        item->mouseOver = true;
+        bus.triggerTargeted(*item, "mouse.entered", "");
+        if (!item->tooltip.empty()) {
+            tooltipItemId = item->id;
+            SetTimer(messageWindow, kTooltipTimer, 600, nullptr);
+        }
+    }
+    hoverItemId = hoverId;
+}
+
 void DaemonState::updatePopups() {
     if (!renderer || !fonts || surfaces.empty()) return;
     const auto measure = [this](const ybar::model::Item& item) { return measureItem(item); };
@@ -1399,6 +1446,7 @@ void DaemonState::updatePopups() {
             }
         }
         if (!hostExists) {
+            releaseHoverIn(it->second);
             it->second.surface->hide();
             it = popups.erase(it);
         } else {
@@ -1412,10 +1460,32 @@ void DaemonState::updatePopups() {
         auto liveIt = popups.find(host->id);
         if (!wantsOpen) {
             if (liveIt != popups.end()) {
-                liveIt->second.surface->hide();
+                auto& live = liveIt->second;
+                const double now = monotonicSeconds();
+                if (live.closingUntil > 0) {
+                    // Mid-fade: hold the entry until the compositor is done.
+                    if (now < live.closingUntil) continue;
+                } else if (host->popup.fadeOutFrames > 0) {
+                    releaseHoverIn(live);
+                    live.surface->fadeOut(host->popup.fadeOutFrames);
+                    live.closingUntil = now + host->popup.fadeOutFrames / 60.0;
+                    // A closing panel must stop answering the mouse at once,
+                    // or the dismissing click lands in a ghost.
+                    live.memberIds.clear();
+                    live.boxes.clear();
+                    continue;
+                }
+                releaseHoverIn(live);
+                live.surface->hide();
                 popups.erase(liveIt);
             }
             continue;
+        }
+        // Reopened before the fade finished: drop the closing state so the
+        // present() below treats this as a fresh show and ramps back up.
+        if (liveIt != popups.end() && liveIt->second.closingUntil > 0) {
+            liveIt->second.closingUntil = 0;
+            liveIt->second.surface->hide(); // re-arms the hidden->shown edge
         }
         auto& hostSurface = *surfaces[static_cast<std::size_t>(hostSurfaceIndex)];
         const double scale = hostSurface.scale();
@@ -1426,6 +1496,7 @@ void DaemonState::updatePopups() {
         // frozen creation scale: rebuild it so present() sizes the window
         // and the mouse handler divides coordinates at the current scale.
         if (liveIt != popups.end() && liveIt->second.surface->scale() != scale) {
+            releaseHoverIn(liveIt->second);
             liveIt->second.surface->hide();
             popups.erase(liveIt);
             liveIt = popups.end();
@@ -1439,6 +1510,7 @@ void DaemonState::updatePopups() {
         }
         if (members.empty()) {
             if (liveIt != popups.end()) {
+                releaseHoverIn(liveIt->second);
                 liveIt->second.surface->hide();
                 popups.erase(liveIt);
             }
@@ -1451,6 +1523,7 @@ void DaemonState::updatePopups() {
                                                    /*opaquePanel=*/!systemTransparency);
         if (scene.empty()) { // never leave a stale, still-clickable panel
             if (liveIt != popups.end()) {
+                releaseHoverIn(liveIt->second);
                 liveIt->second.surface->hide();
                 popups.erase(liveIt);
             }
@@ -1508,6 +1581,15 @@ void DaemonState::updatePopups() {
                         }
                         return nullptr;
                     };
+                    // Row hover, the same targeted transition the bar does.
+                    // Popup rows are the densest clickable surface in the
+                    // product and had no affordance at all before this.
+                    if (event.kind == Kind::Move || event.kind == Kind::Leave) {
+                        auto* member =
+                            event.kind == Kind::Leave ? nullptr : memberAt(event.x, event.y);
+                        setHoverItem(member);
+                        if (event.kind == Kind::Leave) return;
+                    }
                     if (event.kind == Kind::Down) {
                         auto* member = memberAt(event.x, event.y);
                         // Same read-only rule inside popups (spec 3.9).
@@ -1544,7 +1626,8 @@ void DaemonState::updatePopups() {
                                   host->popup.background.cornerRadius);
         live.surface->present(layout.panelSize, anchor, host->popup.align,
                               settings.position == ybar::model::BarPosition::Top,
-                              host->popup.yOffset);
+                              host->popup.yOffset,
+                              host->popup.fadeInFrames);
         // A panel counts as live only once its scene actually rendered.
         if (!renderer->render(scene, live.surface->renderSurface(), atlas)) {
             live.surface->hide();
@@ -1771,27 +1854,7 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
             auto* item = event.kind == Kind::Leave ? nullptr : hitTest(event.x, event.y);
 
             // Hover transitions (mouse.entered / mouse.exited) + tooltip dwell.
-            const int hoverId = item ? item->id : -1;
-            if (hoverId != state.hoverItemId) {
-                state.hideTooltip();
-                if (state.hoverItemId != -1) {
-                    for (const auto& candidate : state.store.items()) {
-                        if (candidate->id != state.hoverItemId) continue;
-                        candidate->mouseOver = false;
-                        state.bus.triggerTargeted(*candidate, "mouse.exited", "");
-                        break;
-                    }
-                }
-                if (item) {
-                    item->mouseOver = true;
-                    state.bus.triggerTargeted(*item, "mouse.entered", "");
-                    if (!item->tooltip.empty()) {
-                        state.tooltipItemId = item->id;
-                        SetTimer(state.messageWindow, kTooltipTimer, 600, nullptr);
-                    }
-                }
-                state.hoverItemId = hoverId;
-            }
+            state.setHoverItem(item);
 
             // A press ANYWHERE on the bar — including empty space — closes
             // auto-close popups except the pressed host's (spec 3.9).
