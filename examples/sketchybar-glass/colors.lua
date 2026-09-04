@@ -14,7 +14,10 @@ return {
   transparent = 0x00000000,
 
   bar = {
-    bg = 0xfa0a0a0c,         -- near-black strip, ~98% opaque
+    -- Lifted off near-black (was 0x0a0a0c). Kept modest on purpose: the
+    -- resting pill is bg1 at 0x1a1a1c, and the strip is what that pill is read
+    -- against, so every step the strip takes upward is contrast the pills lose.
+    bg = 0xfa121216,         -- ~98% opaque, one step off black
     border = 0x00000000,
   },
   popup = {
