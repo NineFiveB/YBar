@@ -29,16 +29,20 @@ sbar.default({
   },
   background = {
     height = 25,
-    -- Half the 25pt plate height: a full stadium. Worth knowing WHY, because
-    -- it is not only taste. Where a corner arc meets a straight edge the
-    -- curvature jumps from 1/r to 0; the SDF's gradient direction stays
-    -- continuous but its rate of change does not, and the bevel normal follows
-    -- that gradient, so the highlight inherits the break and reads as a choppy
-    -- rim. A bigger radius stretches the transition over more pixels. The
-    -- principled fix is a squircle (continuous curvature) via
-    -- background.corner_exponent, which the model parses but v1 still renders
-    -- circular -- until then, rounder is smoother.
-    corner_radius = 12.5,
+    -- Windows 11's OverlayCornerRadius, the radius its top-level windows and
+    -- flyouts use. Matching the OS matters more here than the smoother rim a
+    -- bigger radius buys: a full stadium looked better in isolation and wrong
+    -- next to everything else on screen.
+    --
+    -- The smoothness cost is real but small, and is no longer the main term.
+    -- Where a corner arc meets a straight edge the curvature jumps from 1/r to
+    -- 0, and the bevel normal follows the SDF gradient, so the highlight
+    -- inherits that break -- a tighter radius packs it into fewer pixels. What
+    -- actually made the rim look choppy was the hard clamp in the shader,
+    -- which is now a tanh knee. The principled fix for the rest is a squircle
+    -- (continuous curvature) via background.corner_exponent, which the model
+    -- parses but v1 still renders circular.
+    corner_radius = 8,
     border_width = 0,
     -- Item-level glass is the shader's bevel lighting, NOT a backdrop: a
     -- quarter-round edge lit from above, highlight on the top arc and shade
@@ -58,7 +62,7 @@ sbar.default({
     -- is applied by name in ybarrc.lua after the items load.
     background = {
       border_width = 0,
-      corner_radius = 7,
+      corner_radius = 8, -- OverlayCornerRadius again: a popup is a flyout
       color = colors.popup.bg,
       glass = false,
     },
