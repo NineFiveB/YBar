@@ -53,6 +53,9 @@ local media = sbar.add("item", "widgets.media", {
   },
   padding_left = 2,
   padding_right = 2,
+  -- Pins the content while the reveal/collapse animates the box width; see
+  -- the note on reveal_media below.
+  align = "right",
 })
 
 -- wrap_width (flow layout) instead of a fixed row height: the transport
@@ -260,6 +263,52 @@ end
 -- ── Open / close ───────────────────────────────────────────────────────────
 -- YBAR PORT: no start/stop_polling — the popup is repainted by media_change
 -- and volume_change pushes, so opening it schedules nothing.
+-- ── Reveal / collapse ──────────────────────────────────────────────────────
+-- A ~155pt pill materialising beside the clock is the most abrupt thing the
+-- strip does, and width animates for free: `width = "dynamic"` under animate
+-- resolves the sentinel to the measured natural width at BOTH endpoints and
+-- hands the sentinel back on natural completion, so the pill wipes open and
+-- then goes back to tracking its own text.
+--
+-- `align = "right"` on the item is load-bearing, not cosmetic. A fixed-width
+-- item clips its content to its box, and the box grows from the LEFT here
+-- (right-positioned items lay out from the right cursor), so with the default
+-- centre alignment the text would slide sideways as the box opens. Pinned
+-- right, the box's left edge does the wiping and the text stays put.
+local REVEAL_FRAMES = 10
+local COLLAPSE_FRAMES = 8
+local media_shown = false
+local media_gen = 0   -- guards a collapse that a reveal has since overtaken
+
+local function reveal_media()
+  media_gen = media_gen + 1
+  if media_shown then return end
+  media_shown = true
+  media:set({ drawing = true, width = 0 })
+  media_padding:set({ drawing = true })
+  sbar.animate("sin", REVEAL_FRAMES, function()
+    media:set({ width = "dynamic" })
+  end)
+end
+
+local function collapse_media()
+  if not media_shown then return end
+  media_shown = false
+  media_gen = media_gen + 1
+  local gen = media_gen
+  sbar.animate("sin", COLLAPSE_FRAMES, function()
+    media:set({ width = 0 })
+  end)
+  -- `drawing` is a bool and cannot animate, so the item is hidden once the
+  -- collapse has run. The generation check drops this if playback resumed in
+  -- the meantime and the pill is already opening again.
+  sbar.delay(COLLAPSE_FRAMES / 60 + 0.05, function()
+    if gen ~= media_gen then return end
+    media:set({ drawing = false })
+    media_padding:set({ drawing = false })
+  end)
+end
+
 local function hide_popup()
   media_bracket:set({ popup = { drawing = false } })
 end
@@ -311,11 +360,10 @@ media:subscribe("media_change", function(env)
   local chars = utf8.len(text) or #text
   local scroll_frames = math.max(240, math.floor(chars * 7.7 + 32))
   media:set({
-    drawing = show,
     icon = { color = color },
     label = { string = text, color = color, scroll_duration = scroll_frames },
   })
-  media_padding:set({ drawing = show })
+  if show then reveal_media() else collapse_media() end
 
   if not show then
     current_app, current_key = nil, nil
