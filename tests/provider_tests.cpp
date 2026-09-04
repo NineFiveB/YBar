@@ -65,8 +65,8 @@ TEST_CASE("audio session groups serialize to the --query audio contract") {
     // The enumeration itself needs a live endpoint (CI has none), so what is
     // pinned is the pure serializer: key set and value round-trip.
     std::vector<ybar::providers::AudioSessionGroup> groups(2);
-    groups[0] = {"chrome", "Google Chrome", "C:\\apps\\chrome.exe", 57, false, true};
-    groups[1] = {"system", "System sounds", "", 0, true, false};
+    groups[0] = {"chrome", "Google Chrome", "C:\\apps\\chrome.exe", 57, false, true, false};
+    groups[1] = {"system", "System sounds", "", 0, true, false, true};
     const auto json = ybar::providers::serializeAudioSessionGroups(groups);
     REQUIRE(json.find("\"id\": \"chrome\"") != std::string::npos);
     REQUIRE(json.find("\"name\": \"Google Chrome\"") != std::string::npos);
@@ -74,6 +74,11 @@ TEST_CASE("audio session groups serialize to the --query audio contract") {
     REQUIRE(json.find("\"volume\": 57") != std::string::npos);
     REQUIRE(json.find("\"muted\": true") != std::string::npos);
     REQUIRE(json.find("\"active\": true") != std::string::npos);
+    // `background` (no visible window owns this image) is part of the
+    // contract: the mixer drops rows that are background AND not active,
+    // which keeps a merely-resident app like a closed Xbox app off the list.
+    REQUIRE(json.find("\"background\": false") != std::string::npos);
+    REQUIRE(json.find("\"background\": true") != std::string::npos);
     REQUIRE(ybar::providers::serializeAudioSessionGroups({}) == "[]");
 }
 

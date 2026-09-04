@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <set>
 
 #include <nlohmann/json.hpp>
 
@@ -114,6 +115,40 @@ int percentFrom(ISimpleAudioVolume* volume) {
     return static_cast<int>(std::lround(scalar * 100.0f));
 }
 
+// Executable images owning at least one visible, titled, unowned top-level
+// window. Used to tell a running app from a merely RESIDENT one: plenty of
+// apps keep a process and an audio session alive long after their window is
+// gone (the Xbox app is the standard example — closing it leaves XboxPcApp.exe
+// running with a live Inactive session), and listing those in a mixer is
+// indistinguishable from a stale entry.
+//
+// Keyed by IMAGE, not pid, because the session's pid is frequently not the pid
+// holding the UI: Chrome routes audio through a utility process, so a per-pid
+// window test would hide Chrome and defeat the purpose.
+std::set<std::string> imagesWithVisibleWindows() {
+    std::set<DWORD> pids;
+    EnumWindows(
+        [](HWND hwnd, LPARAM param) -> BOOL {
+            // Titled, unowned and visible: skips tool windows, message-only
+            // windows and the invisible shells many apps keep around.
+            if (IsWindowVisible(hwnd) && GetWindowTextLengthW(hwnd) > 0 &&
+                GetWindow(hwnd, GW_OWNER) == nullptr) {
+                DWORD pid = 0;
+                GetWindowThreadProcessId(hwnd, &pid);
+                if (pid) reinterpret_cast<std::set<DWORD>*>(param)->insert(pid);
+            }
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&pids));
+
+    std::set<std::string> images;
+    for (const DWORD pid : pids) {
+        const std::string path = executablePathForProcess(pid);
+        if (!path.empty()) images.insert(asciiLower(path));
+    }
+    return images;
+}
+
 } // namespace
 
 std::vector<AudioSessionGroup> audioSessionGroups() {
@@ -136,6 +171,15 @@ std::vector<AudioSessionGroup> audioSessionGroups() {
         group.active = group.active || active;
     });
 
+    // One window sweep for the whole call, and only when there is a real app
+    // session to classify — the system-sounds group is never "resident".
+    const bool needsWindows =
+        std::any_of(byId.begin(), byId.end(),
+                    [](const auto& entry) { return entry.first != "system"; });
+    const auto windowed = needsWindows ? imagesWithVisibleWindows() : std::set<std::string>{};
+    for (auto& [id, group] : byId)
+        group.background = id != "system" && !windowed.count(asciiLower(group.exePath));
+
     std::vector<AudioSessionGroup> groups;
     groups.reserve(byId.size());
     for (auto& [id, group] : byId) groups.push_back(std::move(group));
@@ -157,7 +201,8 @@ std::string serializeAudioSessionGroups(const std::vector<AudioSessionGroup>& gr
                        {"path", group.exePath},
                        {"volume", group.volume},
                        {"muted", group.muted},
-                       {"active", group.active}});
+                       {"active", group.active},
+                       {"background", group.background}});
     return out.dump(2);
 }
 

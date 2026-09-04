@@ -32,6 +32,15 @@ struct AudioSessionGroup {
     int volume = 0;      // 0-100; muted -> 0 (the master read convention)
     bool muted = false;  // every session in the group muted
     bool active = false; // any session currently AudioSessionStateActive
+    // No process running this image owns a visible top-level window: the app
+    // is merely RESIDENT. Reported, never filtered here — a mixer wants to
+    // hide these, but --query audio stays a complete view of the endpoint.
+    //
+    // Caveat: an older UWP app's window belongs to ApplicationFrameHost.exe
+    // rather than to the app, so such an app reads as background even while
+    // visible. `active` is the escape hatch — anything actually playing is
+    // never treated as resident-only.
+    bool background = false;
 };
 
 // One enumeration pass over the default render endpoint's sessions

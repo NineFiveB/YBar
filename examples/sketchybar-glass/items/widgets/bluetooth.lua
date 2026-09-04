@@ -398,7 +398,18 @@ local mix_gen = 0 -- bumped on every open/close; stale poll closures bail
 -- time: a row can flip identity between an app (image) and the system
 -- group (glyph) across binds.
 local function bind_mixer()
-  local groups = ybar.query_table("audio") or {}
+  -- Drop apps that are merely RESIDENT: still running and still holding an
+  -- audio session, but with no window and playing nothing. Closing the Xbox
+  -- app leaves XboxPcApp.exe alive with a live Inactive session, and a row for
+  -- it is indistinguishable from the mixer having failed to refresh.
+  --
+  -- `active` comes first deliberately: anything actually producing sound stays
+  -- listed even with no window, because that is exactly the row you would come
+  -- here to mute.
+  local groups = {}
+  for _, g in ipairs(ybar.query_table("audio") or {}) do
+    if g.active or not g.background then groups[#groups + 1] = g end
+  end
   local shown = 0
   for i = 1, MAX_MIX do
     local g = groups[i]
