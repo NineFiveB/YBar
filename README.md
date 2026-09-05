@@ -16,6 +16,33 @@ grid (`popup.wrap_width` flow layout), arc gauges for CPU and memory, and a
 Settings-style Wi-Fi picker — all on real `NSGlassEffectView` backdrops.
 Network names in this recording are placeholders.*
 
+### Depth effects (opt-in)
+
+The Windows engine can light and lift these pills; the shipped theme keeps
+them flat. Three things it can do, each one property away in Lua. All three
+were recorded by driving the same `--animate` path a real hover takes, so no
+cursor is in frame.
+
+![Hover elevation: a pill lifts a point and gains a top-lit gradient as the pointer arrives, and settles back as it leaves](docs/media/ybar-win-depth-hover.gif)
+
+*Hover elevation — `background.y_offset` plus a two-stop `gradient_color`
+under the hover fill (`helpers/hover.lua`, `attachRaised`). Nothing moves as
+far as input is concerned, so the hit rect stays exact.*
+
+![Bevel lighting: every pill's rim switches from flat to a quarter-round edge lit from above, highlight on the top arc and shade under the bottom](docs/media/ybar-win-depth-bevel.gif)
+
+*Bevel lighting — item-level `background.glass = true`. The shader builds a
+real surface normal from the rounded-box SDF and shades it Blinn-Phong. It is
+not a backdrop and costs no extra draw.*
+
+![Glow: a soft white halo sweeps from pill to pill](docs/media/ybar-win-depth-glow.gif)
+
+*Glow — `background.shadow.blur` with a light colour at zero offset. The same
+soft-falloff quad is a drop shadow with a dark colour; either way the 112-byte
+instance ABI shared with macOS is untouched. The theme uses it for the
+focused-workspace halo.*
+
+
 ```sh
 ybar                                  # start the daemon
 ybar --bar height=32 color=0xdd1e1e2e topmost=on
