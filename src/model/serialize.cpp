@@ -23,6 +23,7 @@ json shadowDict(const ShadowStyle& shadow) {
 json backgroundDict(const BackgroundStyle& bg) {
     return {
         {"drawing", onOff(bg.drawing)},
+        {"glass", onOff(bg.glass)},
         {"color", bg.color.hex()},
         {"border_color", bg.borderColor.hex()},
         {"border_width", bg.borderWidth},

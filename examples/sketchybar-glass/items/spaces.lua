@@ -115,6 +115,14 @@ end
 -- bevel rim that already lights that edge, which is what made the focused pill
 -- read as busy against its flat neighbours. The strokes go; the halo stays.
 local FOCUS_FRAMES = 8
+-- Two focus cues, each one flag. Bevel is the shipped one: the active
+-- workspace is the lit pill (item-level glass, a quarter-round rim lit from
+-- above) and every other pill stays flat, so focus reads as material rather
+-- than as decoration on top of it. The halo is kept for one-line return.
+-- glass is a bool and cannot ease, so it flips at the moment of switch while
+-- the fill still animates underneath it.
+local FOCUS_BEVEL = true
+local FOCUS_HALO = false
 local GLOW = colors.with_alpha(colors.white, 0.42)
 local GLOW_BLUR = 6
 
@@ -135,13 +143,14 @@ local function paint_space(i, frames)
     spaces[i]:set({
       background = {
         color = color,
+        glass = on and FOCUS_BEVEL,
         -- drawing stays ON in both states so only the COLOUR animates: the
         -- shadow's alpha is animatable and its drawing flag is not, so
         -- toggling the flag would pop the halo in and out instead of easing
         -- it alongside the fill.
         shadow = {
           drawing = true,
-          color = on and GLOW or colors.transparent,
+          color = (on and FOCUS_HALO) and GLOW or colors.transparent,
           distance = 0,
           blur = GLOW_BLUR,
         },
