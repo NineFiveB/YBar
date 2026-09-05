@@ -288,8 +288,18 @@ float4 quad_fragment(QuadVOut i) : SV_Target {
         // as a stepped, choppy rim rather than a curved one. tanh approaches
         // the same limits asymptotically, so the rim stays smooth everywhere
         // and the corners in particular stop banding.
-        float raw = diffuse + spec + fres;
-        float lim = raw >= 0.0 ? 0.014 : 0.004;
+        //
+        // Both the response and its bounds scale with the fill's luminance.
+        // They were sized for a 26/255 fill (linear 0.010); on a mid-grey
+        // focus fill (linear ~0.14) the same absolute numbers are a +2/-1
+        // ripple nobody can see, so glass = true silently did nothing there.
+        // gain is 1.0 at the reference fill -- the tuned dark rims are
+        // untouched -- and rises with luminance, capped so a white fill does
+        // not blow out. Measured on the 0x8e focus fill: +13 top, -6 bottom.
+        float lum = dot(fill.rgb, float3(0.2126, 0.7152, 0.0722));
+        float gain = clamp(lum / 0.010, 1.0, 8.0);
+        float raw = (diffuse + spec + fres) * gain;
+        float lim = (raw >= 0.0 ? 0.014 : 0.004) * gain;
         float light = lim * tanh(raw / lim) * presence * outer;
         // rgb is premultiplied, so the light has to be scaled by alpha to stay
         // consistent with it; alpha only ever gains, never loses, or a dark
