@@ -96,14 +96,24 @@ function M.attachColor(target, watchers, base, hover)
   end
 end
 
--- Drive `target`'s surface from the hover state of every item in `watchers`.
--- Returns nothing; the subscriptions own themselves.
-function M.attach(target, watchers, base, hover)
+-- Elevated hover: fill + bevel gradient + one-point lift, driven through
+-- M.surface. This is what the README's depth-hover GIF shows. NOT the shipped
+-- behaviour -- the theme is Fluent-flat, so nothing calls it by default; swap
+-- M.attach's body for a call to this to opt in.
+function M.attachRaised(target, watchers, base, hover)
   M.surface(target, base, false, 0) -- establish the gradient stops up front
   for _, w in ipairs(watchers) do
     w:subscribe("mouse.entered", function() M.surface(target, hover, true, M.ENTER_FRAMES) end)
     w:subscribe("mouse.exited", function() M.surface(target, base, false, M.EXIT_FRAMES) end)
   end
+end
+
+-- Drive `target`'s fill from the hover state of every item in `watchers`.
+-- Colour only: the shipped theme is flat, and this is what pills, the
+-- calendar and popup rows all use. Returns nothing; the subscriptions own
+-- themselves.
+function M.attach(target, watchers, base, hover)
+  M.attachColor(target, watchers, base, hover)
 end
 
 -- The common shape: a bracket carrying the fill around a single member.

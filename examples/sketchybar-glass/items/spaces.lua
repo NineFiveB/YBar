@@ -118,27 +118,23 @@ local FOCUS_FRAMES = 8
 local GLOW = colors.with_alpha(colors.white, 0.42)
 local GLOW_BLUR = 6
 
--- Paint one slot's WHOLE surface: fill, bevel, lift and halo, from both
+-- Paint one slot's WHOLE surface: fill and halo, from both
 -- inputs at once. Focus and hover used to own separate writes to the same
 -- background, which was already a hazard for the fill alone; with elevation on
 -- the same property it becomes a correctness bug, because a workspace change
 -- would drop the lift out from under a pointer that has not moved. One
 -- writer, every time.
 --
--- The bracket still lifts WITH the pill even though it no longer draws
--- anything: it is the hover seam's other half, and a bracket left behind while
--- the pill rose would put the two boxes a point apart mid-animation.
+-- Flat by design: hover changes the fill only. The elevation variant (bevel
+-- gradient + lift, with the bracket lifting alongside so the hover seam's two
+-- boxes stay aligned) is what the README's depth GIFs show, not what ships.
 local function paint_space(i, frames)
   local on = (i == focused)
-  local raised = hovered[i] or false
-  local color = space_color(i)
+  local color = space_color(i) -- hover is folded into the colour; no lift
   sbar.animate("sin", frames or FOCUS_FRAMES, function()
     spaces[i]:set({
       background = {
         color = color,
-        gradient_angle = 90,
-        gradient_color = raised and colors.shade(color, hover.BEVEL) or color,
-        y_offset = raised and hover.LIFT or 0,
         -- drawing stays ON in both states so only the COLOUR animates: the
         -- shadow's alpha is animatable and its drawing flag is not, so
         -- toggling the flag would pop the halo in and out instead of easing
@@ -151,7 +147,6 @@ local function paint_space(i, frames)
         },
       },
     })
-    brackets[i]:set({ background = { y_offset = raised and hover.LIFT or 0 } })
   end)
 end
 

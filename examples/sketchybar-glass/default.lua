@@ -44,13 +44,12 @@ sbar.default({
     -- parses but v1 still renders circular.
     corner_radius = 8,
     border_width = 0,
-    -- Item-level glass is the shader's bevel lighting, NOT a backdrop: a
-    -- quarter-round edge lit from above, highlight on the top arc and shade
-    -- under the bottom. It costs no extra draw and no backdrop of any kind.
-    -- The BAR's own glass stays off in bar.lua -- that flag is the DWM Acrylic
-    -- plate, which is a completely different thing and the part that reads
-    -- dated on a near-black strip.
-    glass = true,
+    -- Item-level glass is the shader's bevel lighting (a quarter-round edge
+    -- lit from above), NOT a backdrop. The shipped look is Fluent-flat, so it
+    -- stays off here; flip it on to get the lit rims shown in the README's
+    -- depth GIFs. The BAR's own glass in bar.lua is a different thing entirely
+    -- (the DWM Acrylic plate) and stays off too.
+    glass = false,
   },
   popup = {
     blur_radius = 0, -- no Acrylic behind popups: solid Fluent panels
