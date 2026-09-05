@@ -683,7 +683,9 @@ quarter-round bevel — the normal of a quarter circle at depth `t` is
 direction with no height term and cannot light a surface. Two constraints are
 easy to get wrong and are load-bearing: the coefficients are LINEAR light
 against an sRGB target, so on a near-black theme (26/255 ≈ linear 0.010) the
-usable range is only about (−0.004, +0.014); and the key light's azimuth swings
+usable range is only about (−0.004, +0.014) — and both the response and those bounds are scaled by the fill's luminance
+(gain 1 at that reference fill, capped at 8), because the same absolute numbers on a mid-grey fill are a ±2
+ripple and `glass = true` silently did nothing on the focused-workspace pill until they were; and the key light's azimuth swings
 toward the pointer at FIXED elevation, because leaning the whole vector also
 drops `L.z`, which is the flat-face reference the bevel is measured against, and
 the effect then cancels itself to 1–2 levels out of 255.
