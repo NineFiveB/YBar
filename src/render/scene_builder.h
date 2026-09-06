@@ -1,7 +1,8 @@
 // Items + layout boxes -> flat paint-ordered DisplayList in DEVICE PIXELS
-// (spec sections 3.9, 7). This slice covers: bar background, item
-// backgrounds, icon/label text. Components (graphs/sliders/gauges/images),
-// clip holes, marquee, and popups land in the next slice.
+// (spec sections 3.9, 7, 7.6): bar and popup scenes, item backgrounds and
+// shadows, icon/label text, components (graphs/sliders/gauges/images),
+// marquee, clip holes, and the Mica backdrops the window layer composes
+// under a glass pill or popup panel.
 
 #pragma once
 
@@ -51,11 +52,16 @@ void emitItem(DisplayList& list, ybar::model::Item& item, const ybar::model::Rec
 // (panel-local, spec 3.9). Same paint order as the bar. `opaquePanel` forces
 // the panel plate to full alpha — the daemon sets it when Windows'
 // Transparency effects are off, so a translucent theme panel reads flat like
-// the rest of the shell (spec 7.6).
+// the rest of the shell (spec 7.6) — unless `backdrops` is on and the panel
+// earns a Mica material (popup.blur_radius, or popup.background.glass with a
+// translucent plate): that material paints with the setting off, and the
+// plate is its tint. With `backdrops` the panel's rect is emitted as a
+// backdrop, and glass rows emit theirs plus a hole in the panel plate.
 DisplayList buildPopupScene(const std::vector<ybar::model::Item*>& members,
                             const std::vector<ybar::model::Rect>& contentBoxes,
                             const ybar::model::PopupState& popup,
                             ybar::model::Size panelSize, double scale, FontCache& fonts,
-                            GlyphAtlas& atlas, bool opaquePanel = false);
+                            GlyphAtlas& atlas, bool opaquePanel = false,
+                            bool backdrops = false);
 
 } // namespace ybar::render

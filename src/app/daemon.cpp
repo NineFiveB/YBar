@@ -1529,9 +1529,14 @@ void DaemonState::updatePopups() {
         }
 
         const auto layout = ybar::model::layoutPopup(members, host->popup, measure);
+        // Mica for the panel (spec 7.6) is decided before the surface exists:
+        // it changes the scene (a material panel keeps its translucent plate
+        // with Transparency effects off, where a plain one is forced opaque).
+        const bool mica = ybar::win::PopupSurface::backdropsAvailable();
         auto scene = ybar::render::buildPopupScene(members, layout.contentBoxes, host->popup,
                                                    layout.panelSize, scale, *fonts, *atlas,
-                                                   /*opaquePanel=*/!systemTransparency);
+                                                   /*opaquePanel=*/!systemTransparency,
+                                                   /*backdrops=*/mica);
         if (scene.empty()) { // never leave a stale, still-clickable panel
             if (liveIt != popups.end()) {
                 releaseHoverIn(liveIt->second);
@@ -1633,12 +1638,16 @@ void DaemonState::updatePopups() {
         const ybar::model::Rect anchor{origin.x + hostFrame->x * scale,
                                        origin.y + hostFrame->y * scale,
                                        hostFrame->width * scale, hostFrame->height * scale};
-        live.surface->setBackdrop(host->popup.blurRadius > 0,
+        // DWM Acrylic only stands in where the Mica layer cannot (no
+        // wallpaper brush, i.e. Windows 10); with the layer the panel's
+        // material is in the scene's backdrops.
+        live.surface->setBackdrop(host->popup.blurRadius > 0 && !mica,
                                   host->popup.background.cornerRadius);
         live.surface->present(layout.panelSize, anchor, host->popup.align,
                               settings.position == ybar::model::BarPosition::Top,
                               host->popup.yOffset,
                               host->popup.fadeInFrames);
+        live.surface->setBackdrops(scene.backdrops);
         // A panel counts as live only once its scene actually rendered.
         if (!renderer->render(scene, live.surface->renderSurface(), atlas)) {
             live.surface->hide();

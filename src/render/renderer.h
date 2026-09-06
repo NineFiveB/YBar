@@ -18,7 +18,9 @@ class Surface {
 public:
     virtual ~Surface() = default;
     virtual void resize(int widthPx, int heightPx) = 0;
-    virtual void* compositionSurface() = 0; // IDXGISwapChain1* for DComp SetContent
+    // IDXGISwapChain1*, handed to win/CompositionHost, which wraps it with
+    // ICompositorInterop::CreateCompositionSurfaceForSwapChain.
+    virtual void* compositionSurface() = 0;
 };
 
 class Renderer {

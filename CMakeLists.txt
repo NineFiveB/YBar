@@ -98,7 +98,7 @@ add_library(ybar_win
 )
 # version: FileDescription lookups; iphlpapi/wlanapi: connectivity + SSID;
 # runtimeobject: C++/WinRT (GSMTC media session, Windows.UI.Composition);
-# CoreMessaging: CreateDispatcherQueueController for the bar's compositor.
+# CoreMessaging: CreateDispatcherQueueController for the window compositor.
 target_link_libraries(ybar_win PUBLIC ybar_core lua_vendor
   ws2_32 d3d11 dxgi d3dcompiler dcomp dwrite shcore user32 gdi32
   windowscodecs ole32 oleaut32 oleacc shell32 version iphlpapi wlanapi runtimeobject uuid dwmapi uiautomationcore

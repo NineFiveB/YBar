@@ -21,7 +21,11 @@ return {
     border = 0x00000000,
   },
   popup = {
-    bg = 0xf51c1c20,         -- solid dark panel (no backdrop blur behind it)
+    -- A Mica panel: the plate is a tint over the wallpaper material, like the
+    -- pills, but heavier -- a panel floats over whatever the wallpaper has
+    -- there, and its text has to stay readable on the brightest patch of it.
+    -- 80% #1c1c20 is Windows' own dark-Mica weight.
+    bg = 0xcc1c1c20,
     border = 0x2effffff,
   },
   -- Pill surfaces are OPAQUE tones, not white overlays. Expressed as a
@@ -40,9 +44,9 @@ return {
   -- rather than lift the pill.
   mica = 0x99202020,
   mica_hover = 0x99343438,
-  -- Popup rows rest transparent on a solid panel, so their hover IS an
-  -- overlay. That is safe here in a way it is not on the bar, where the tones
-  -- above are opaque precisely so a pill can sit darker than the strip.
+  -- Popup rows rest transparent on the panel, so their hover IS an overlay.
+  -- That is safe here in a way it is not on the bar, where the tones above
+  -- are opaque precisely so a pill can sit darker than the strip.
   row_hover = 0x16ffffff,
 
   -- Scale a colour's RGB toward black (factor < 1) or white (factor > 1),

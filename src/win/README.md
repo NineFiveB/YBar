@@ -1,3 +1,3 @@
 # src/win
 
-BarSurface (HWND + Windows.UI.Composition via CompositionHost: swap chain over the per-pill Mica layer), PopupSurface (HWND + DirectComposition), DisplayManager, mouse routing, backdrops, appbar. Spec sections 6, 7.6.
+BarSurface and PopupSurface (HWND + Windows.UI.Composition via CompositionHost: swap chain over a Mica layer; the popup fade is the tree's root opacity), DisplayManager, mouse routing, backdrops, appbar. Spec sections 6, 7.6.

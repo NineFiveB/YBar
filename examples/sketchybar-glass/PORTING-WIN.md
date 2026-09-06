@@ -9,11 +9,11 @@ the item structure port verbatim; only OS-facing surfaces differ. Same-named
 item files should diff against the macOS tree (`examples/sketchybar-glass` +
 `examples/sketchybar-port` on `main`) with only OS-inherent changes. The
 overlay files (`bar.lua`, `default.lua`, `colors.lua`) diverge on purpose:
-they restyle the theme for Windows — a flat 35pt bar with no Acrylic, popup
-`blur_radius = 0`, and Mica pills (a wallpaper-material backdrop under a
-translucent `colors.mica` tint, lit by the shader's rim) in place of Liquid
-Glass; `helpers/default_font.lua` carries only the font substitution from
-the table below.
+they restyle the theme for Windows — a flat 35pt bar with no Acrylic, and
+Mica pills and popup panels (a wallpaper-material backdrop under a
+translucent tint, `colors.mica` for pills and `colors.popup.bg` for panels,
+lit by the shader's rim) in place of Liquid Glass; `helpers/default_font.lua`
+carries only the font substitution from the table below.
 
 ## Layout difference
 
@@ -91,14 +91,20 @@ installed via `ybar theme use` must be self-contained.
 
 The bar itself stays flat: `bar.lua` sets `glass = false` (bar-level glass
 is a DWM Acrylic plate that follows the Transparency-effects setting) and
-`default.lua` leaves item/popup `glass` and popup `blur_radius` off, so
-popup rows and separators never pick the material up. `ybarrc.lua` then
-turns item-level glass on BY NAME for the six widget brackets and the
-calendar item, and their fill is `colors.mica`, a 60% `#202020` tint. On
-Windows item-level glass is Mica: a blurred-wallpaper visual composed under
-the pill (spec §7.6), with the pill's translucent fill as the tint and the
-shader's lit rim on top. It follows the pill (the focused workspace carries
-one too, via `items/spaces.lua`), needs Windows 11, and works with
-Transparency effects off. What it shows is the wallpaper: a wallpaper that
-is flat under the bar gives flat grey pills, colour at the top of the
-wallpaper shows through them. Liquid Glass refraction is not reproduced.
+`default.lua` leaves item `glass` off, so popup rows and separators never
+pick the material up. `ybarrc.lua` then turns glass on BY NAME: item-level
+for the six widget brackets and the calendar item, whose fill is
+`colors.mica`, a 60% `#202020` tint, and popup-level for the seven popup
+hosts, whose panel plate is `colors.popup.bg`, an 80% tint. On Windows
+glass is Mica: a blurred-wallpaper visual composed under the pill or panel
+(spec §7.6), with the translucent fill as the tint and the shader's lit rim
+on top. It follows the pill (the focused workspace carries one too, via
+`items/spaces.lua`), needs Windows 11, and works with Transparency effects
+off. What it shows is the wallpaper: a wallpaper that is flat under the bar
+gives flat grey pills, colour at the top of the wallpaper shows through
+them, and a panel shows whatever the wallpaper has where it opens. A popup
+row can cut its own material window in the panel plate (a Windows
+extension), but only on the same gate as everything else: `blur_radius > 0`,
+or `glass = true` with a fill that actually paints. The shipped rows rest
+transparent, so `glass` alone would light them only while hovered; they stay
+flat instead. Liquid Glass refraction is not reproduced.

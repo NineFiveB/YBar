@@ -9,8 +9,10 @@
 --   * runs IN-PROCESS: callbacks are direct function calls, no mach IPC
 --   * begin_config/end_config/event_loop are no-ops (there is no batching
 --     to speak of and the daemon owns the event loop)
---   * unsupported sketchybar properties (background.image, scroll_texts,
---     blur_radius ...) are accepted and ignored by the engine
+--   * unsupported sketchybar properties (background.image, scroll_texts
+--     ...) are accepted and ignored by the engine. NOTE blur_radius is NOT
+--     one of them on Windows: it is the material gate at every level (bar
+--     Acrylic, item and popup-panel Mica -- spec 7.6)
 
 local compat = {}
 local anonymous_counter = 0
