@@ -97,14 +97,23 @@ void pushShadow(DisplayList& list, const BackgroundStyle& bg, const Rect& box, d
     list.quads.push_back(quad);
 }
 
-// Per-pill backdrop (spec 7.6). The reference's gate, verbatim: blur_radius
-// forces one; glass implies one only for a pill that actually paints, because
-// the fill IS the material's tint and a fully transparent fill would leave
-// bare wallpaper sitting in the strip.
+// The reference's gate, verbatim (spec 7.6): blur_radius forces a material;
+// glass implies one only for a surface that actually paints, because the
+// fill IS the material's tint and a fully transparent one would leave bare
+// wallpaper behind. The popup panel uses it with popup.blur_radius, the key
+// the reference hangs ITS panel material on -- and a bare blur_radius with
+// no plate is exactly the reference's untinted frosted panel, so `drawing`
+// gates only the glass arm here.
+bool wantsBackdrop(const BackgroundStyle& bg, double blurRadius) {
+    if (blurRadius > 0) return true;
+    return bg.drawing && bg.glass && bg.color.a() > 0.02f;
+}
+
+// An ITEM's backdrop takes its PLATE's rect, and that plate exists only for a
+// drawing background -- so unlike the panel, whose rect is the whole window,
+// a pill cannot carry a material without one (the divergence noted in 7.6).
 bool wantsBackdrop(const Item& item) {
-    if (!item.background.drawing) return false;
-    if (item.blurRadius > 0) return true;
-    return item.background.glass && item.background.color.a() > 0.02f;
+    return item.background.drawing && wantsBackdrop(item.background, item.blurRadius);
 }
 
 // A backdrop is a visual UNDER the swap chain, so the bar background needs a
@@ -523,24 +532,50 @@ DisplayList buildPopupScene(const std::vector<Item*>& members,
                             const std::vector<Rect>& contentBoxes,
                             const ybar::model::PopupState& popup, ybar::model::Size panelSize,
                             double scale, FontCache& fonts, GlyphAtlas& atlas,
-                            bool opaquePanel) {
+                            bool opaquePanel, bool backdrops) {
     DisplayList list;
     list.viewportSize = {static_cast<float>(snap(panelSize.width, scale)),
                          static_cast<float>(snap(panelSize.height, scale))};
+    // A Mica panel: the material is a visual under the swap chain, the whole
+    // panel rect, clipped to the plate's corners — and unlike the pills it
+    // gets NO hole, since nothing is painted beneath it. Decided BEFORE the
+    // plate and independently of it: a bare popup.blur_radius with
+    // background.drawing off is the reference's untinted frosted panel, and
+    // dropping its material would leave the rows floating on the desktop.
+    // The rect math matches backgroundQuad's exactly, so plate and material
+    // land on the same pixels whenever both exist.
+    const bool material = backdrops && wantsBackdrop(popup.background, popup.blurRadius);
+    if (material) {
+        Backdrop backdrop;
+        Float2 origin{}, size{};
+        snappedRect(Rect{0, 0, panelSize.width, panelSize.height}, scale, origin, size);
+        backdrop.origin = origin;
+        backdrop.size = size;
+        backdrop.radius = static_cast<float>(popup.background.cornerRadius * scale);
+        list.backdrops.push_back(backdrop);
+    }
+    std::size_t panelQuad = list.quads.max_size(); // none
     if (popup.background.drawing) {
         auto background = popup.background;
         // Transparency effects off: force the plate opaque so the whole panel
         // reads flat. Straight-alpha argb — set the top byte (spec 7.6). Note
         // the members still composite over it with their own alpha; the plate
-        // being opaque is what stops the desktop showing through.
-        if (opaquePanel) background.color.argb |= 0xff000000u;
+        // being opaque is what stops the desktop showing through. A material
+        // panel is exempt: its brush paints with the setting off.
+        if (opaquePanel && !material) background.color.argb |= 0xff000000u;
+        panelQuad = list.quads.size();
         list.quads.push_back(
             backgroundQuad(background, Rect{0, 0, panelSize.width, panelSize.height}, scale));
     }
     for (std::size_t i = 0; i < members.size() && i < contentBoxes.size(); ++i) {
         if (!members[i] || contentBoxes[i].isZero()) continue;
-        emitItem(list, *members[i], contentBoxes[i], scale, fonts, atlas);
+        emitItem(list, *members[i], contentBoxes[i], scale, fonts, atlas, 0, backdrops);
     }
+    // Glass rows cut the panel plate the way pills cut the bar (a Windows
+    // extension: the reference never holes a popup plate). Their material
+    // sits above the panel's in the layer, so the two agree pixel for pixel.
+    if (panelQuad < list.quads.size() && !list.holes.empty())
+        list.quads[panelQuad].flags |= kQuadFlagHoles;
     return list;
 }
 

@@ -18,6 +18,7 @@ package.path = package.path
   .. ";" .. config_dir .. "?/init.lua"
 
 sbar = require("sketchybar")
+local colors = require("colors")
 
 sbar.begin_config()
 require("bar")
@@ -54,6 +55,16 @@ sbar.set("/space\\..*/", { icon = { highlight_color = 0xffffffff } })
 -- dismissed involuntarily — the pointer merely leaving the bar — so a slow
 -- exit trails ghost panels behind a pointer sweeping across the pills.
 sbar.set("/.*/", { popup = { fade_in = 8, fade_out = 5 } })
+
+-- Mica panels: the popup plate is a translucent tint (colors.popup.bg) over
+-- a wallpaper-material visual, with the shader's rim on its edge -- the same
+-- material as the pills, on the seven popup hosts by name (the calendar's
+-- popup opens on its BRACKET, so that is the host here). Rows keep their
+-- flat fills; only the panel is material. Set here for the same reason as
+-- the fade: default.lua's popup table never reaches an item.
+sbar.set("/^(widgets\\..*\\.bracket|calendar\\.bracket)$/", {
+  popup = { background = { color = colors.popup.bg, glass = true } },
+})
 
 sbar.end_config()
 

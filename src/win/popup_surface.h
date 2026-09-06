@@ -1,11 +1,14 @@
 // Anchored popup panel (spec 3.9, 6): topmost non-activating composition
 // window above its bar, sized to the popup scene, aligned l/c/r to the host
-// frame and hung below a top bar / above a bottom bar.
+// frame and hung below a top bar / above a bottom bar. Same composition tree
+// as the bar (Windows.UI.Composition, spec 7.6): swap chain over a backdrop
+// layer that can carry a Mica material under the panel and under glass rows.
 
 #pragma once
 
 #include <functional>
 #include <memory>
+#include <vector>
 
 #include "model/bar_settings.h"
 #include "model/geometry.h"
@@ -29,7 +32,7 @@ public:
     void hide();
 
     // Opacity fades run on the COMPOSITOR, not the app: the animation is
-    // handed to DirectComposition once and this process renders no frames
+    // handed to the compositor once and this process renders no frames
     // while it plays. `frames` is at 60Hz; 0 snaps.
     //
     // present() calls fadeIn on the hidden->shown edge ONLY. Re-issuing the
@@ -40,9 +43,18 @@ public:
     // for the duration, then calls hide().
     void fadeOut(double frames);
 
-    // Acrylic plate + rounded backdrop corners (spec 7.6). Cheap and
+    // DWM Acrylic plate (the fallback material when the Mica layer is
+    // unavailable) + rounded backdrop corners (spec 7.6). Cheap and
     // idempotent; call whenever the popup's blur/corner settings may differ.
     void setBackdrop(bool acrylic, double cornerRadius);
+
+    // Mica layer (spec 7.6): whether this system composes wallpaper-material
+    // visuals, the same answer before any surface exists (a popup's scene is
+    // built first), and the per-present sync of that layer to the scene's
+    // DisplayList::backdrops (panel-local device px).
+    bool supportsBackdrops() const;
+    static bool backdropsAvailable();
+    void setBackdrops(const std::vector<ybar::render::Backdrop>& backdrops);
 
     ybar::render::Surface& renderSurface();
     double scale() const;

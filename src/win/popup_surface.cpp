@@ -1,5 +1,6 @@
 #include "win/popup_surface.h"
 
+#include "win/composition_host.h"
 #include "win/input.h"
 #include "win/system_appearance.h"
 
@@ -8,17 +9,11 @@
 #define NOMINMAX
 #include <windows.h>
 #include <windowsx.h>
-#include <d3d11.h>
 #include <dwmapi.h>
-#include <dxgi1_3.h>
-#include <dcomp.h>
-#include <wrl/client.h>
 // clang-format on
 
 #include <cmath>
 #include <cstdio>
-
-using Microsoft::WRL::ComPtr;
 
 namespace ybar::win {
 
@@ -47,10 +42,7 @@ public:
     HWND hwnd = nullptr;
     double scaleValue = 1.0;
     std::unique_ptr<ybar::render::Surface> surface;
-    ComPtr<IDCompositionDevice> compositionDevice;
-    ComPtr<IDCompositionTarget> target;
-    ComPtr<IDCompositionVisual> visual;
-    ComPtr<IDCompositionEffectGroup> effect; // carries the open/close opacity
+    std::unique_ptr<CompositionHost> host; // composition tree over `surface`
     std::function<void(const MouseEvent&)> onMouse;
     bool visible = false;
     int widthPx = 0;
@@ -59,6 +51,7 @@ public:
     bool trackingLeave = false;    // TME_LEAVE armed, for row hover exit
 
     ~PopupSurfaceImpl() {
+        host.reset(); // detach the composition target before its window goes
         if (hwnd) {
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
             DestroyWindow(hwnd);
@@ -192,28 +185,16 @@ std::unique_ptr<PopupSurface> PopupSurface::create(ybar::render::Renderer& rende
     impl->widthPx = 64;
     impl->heightPx = 64;
 
-    auto* swapChain = static_cast<IDXGISwapChain1*>(impl->surface->compositionSurface());
-    ComPtr<ID3D11Device> device;
-    if (FAILED(swapChain->GetDevice(IID_PPV_ARGS(&device)))) return nullptr;
-    ComPtr<IDXGIDevice> dxgiDevice;
-    device.As(&dxgiDevice);
-    if (FAILED(DCompositionCreateDevice(dxgiDevice.Get(),
-                                        IID_PPV_ARGS(&impl->compositionDevice))) ||
-        FAILED(impl->compositionDevice->CreateTargetForHwnd(impl->hwnd, TRUE, &impl->target)) ||
-        FAILED(impl->compositionDevice->CreateVisual(&impl->visual)))
+    // The same composition tree as the bar (composition_host.cpp): the swap
+    // chain over a backdrop layer, so a panel can carry a Mica material and
+    // glass rows inside it their own (spec 7.6). The tree's root opacity is
+    // what the open/close fade animates; it starts at 1.0, so a popup that
+    // never asks for a fade composes exactly as before.
+    impl->host = CompositionHost::create(impl->hwnd, impl->surface->compositionSurface());
+    if (!impl->host) {
+        std::fprintf(stderr, "[ybar] popup composition tree creation failed\n");
         return nullptr;
-    impl->visual->SetContent(swapChain);
-    // No transform: the target composes in the window's physical-pixel space
-    // (see bar_surface.cpp for the full note).
-    // An effect group carries the open/close opacity. Created once and left
-    // at 1.0, so a popup that never asks for a fade composes exactly as it
-    // did before this existed.
-    if (SUCCEEDED(impl->compositionDevice->CreateEffectGroup(&impl->effect))) {
-        impl->effect->SetOpacity(1.0f);
-        impl->visual->SetEffect(impl->effect.Get());
     }
-    impl->target->SetRoot(impl->visual.Get());
-    impl->compositionDevice->Commit();
 
     std::unique_ptr<PopupSurface> popup(new PopupSurface());
     popup->impl_ = std::move(impl);
@@ -281,14 +262,15 @@ void PopupSurface::present(ybar::model::Size panelSize, const ybar::model::Rect&
         // previous fade-out left at 0.
         fadeIn(fadeInFrames);
     }
-    impl_->compositionDevice->Commit();
 }
 
 void PopupSurface::setBackdrop(bool acrylic, double cornerRadius) {
-    // spec 7.6: Acrylic behind the panel when popup.blur_radius > 0, plus a
-    // rounded backdrop so the plate does not square off the painted corners.
-    // Gated on Transparency effects — off means the panel is composited opaque
-    // (see buildPopupScene), so an Acrylic material would not match.
+    // spec 7.6: DWM Acrylic behind the panel is the fallback material for a
+    // system without the wallpaper brush (the daemon passes false whenever
+    // the Mica layer is available), plus a rounded backdrop so the plate
+    // does not square off the painted corners. Gated on Transparency
+    // effects — off means the panel is composited opaque (see
+    // buildPopupScene), so an Acrylic material would not match.
     const auto backdrop = static_cast<int>(
         acrylic && systemTransparencyEnabled() ? DWMSBT_TRANSIENTWINDOW : DWMSBT_NONE);
     DwmSetWindowAttribute(impl_->hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop));
@@ -300,48 +282,26 @@ void PopupSurface::setBackdrop(bool acrylic, double cornerRadius) {
     DwmSetWindowAttribute(impl_->hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
 }
 
-namespace {
-
-// One linear ramp between two opacities. AddCubic with only the linear term
-// set is the shortest way to say "go from a to b over d seconds" through
-// IDCompositionAnimation, and End() pins the value afterwards so a dropped
-// animation holds its endpoint instead of snapping back.
-void rampOpacity(IDCompositionDevice& device, IDCompositionEffectGroup& effect, float from,
-                 float to, double seconds) {
-    ComPtr<IDCompositionAnimation> animation;
-    if (FAILED(device.CreateAnimation(&animation))) {
-        effect.SetOpacity(to); // no animation available: snap, never stall
-        return;
-    }
-    animation->AddCubic(0.0, from, static_cast<float>((to - from) / seconds), 0.0f, 0.0f);
-    animation->End(seconds, to);
-    effect.SetOpacity(animation.Get());
-}
-
-} // namespace
-
+// One linear ramp between two opacities, run by the compositor on the
+// tree's root; the host holds the endpoint afterwards, so a dropped
+// animation never snaps back. Always from the hard endpoint, as before: a
+// reopen mid fade-out goes through hide() first, which re-arms the shown
+// edge, so the ramp restarting at 0 is the intended pop.
 void PopupSurface::fadeIn(double frames) {
-    if (!impl_->effect) return;
-    if (frames <= 0) {
-        impl_->effect->SetOpacity(1.0f);
-        impl_->compositionDevice->Commit();
-        return;
-    }
-    rampOpacity(*impl_->compositionDevice.Get(), *impl_->effect.Get(), 0.0f, 1.0f,
-                frames / 60.0);
-    impl_->compositionDevice->Commit();
+    impl_->host->rampOpacity(0.0f, 1.0f, frames <= 0 ? 0.0 : frames / 60.0);
 }
 
 void PopupSurface::fadeOut(double frames) {
-    if (!impl_->effect || !impl_->visible) return;
-    if (frames <= 0) {
-        impl_->effect->SetOpacity(0.0f);
-        impl_->compositionDevice->Commit();
-        return;
-    }
-    rampOpacity(*impl_->compositionDevice.Get(), *impl_->effect.Get(), 1.0f, 0.0f,
-                frames / 60.0);
-    impl_->compositionDevice->Commit();
+    if (!impl_->visible) return;
+    impl_->host->rampOpacity(1.0f, 0.0f, frames <= 0 ? 0.0 : frames / 60.0);
+}
+
+bool PopupSurface::supportsBackdrops() const { return impl_->host->supportsBackdrops(); }
+
+bool PopupSurface::backdropsAvailable() { return CompositionHost::backdropsAvailable(); }
+
+void PopupSurface::setBackdrops(const std::vector<ybar::render::Backdrop>& backdrops) {
+    impl_->host->setBackdrops(backdrops);
 }
 
 void PopupSurface::hide() {

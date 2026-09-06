@@ -14,13 +14,14 @@
 #include <winrt/Windows.UI.Composition.Desktop.h>
 // clang-format on
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 
-// Why Windows.UI.Composition here and not DirectComposition, which the popups
-// still use: a per-pill material needs a brush that samples what is BEHIND
-// the window, and dcomp.h has no such concept. Windows.UI.Composition has
-// two candidates, and only one of them is real for an unpackaged app:
+// Why Windows.UI.Composition and not DirectComposition, which both window
+// types used before: a per-pill material needs a brush that samples what is
+// BEHIND the window, and dcomp.h has no such concept. Windows.UI.Composition
+// has two candidates, and only one of them is real for an unpackaged app:
 //
 //   * CreateHostBackdropBrush is inert outside a packaged/UWP context:
 //     measured on this window shape, it paints black.
@@ -32,14 +33,16 @@
 //     fill, painted over it in the swap chain, is the tint.
 //
 // Tree, bottom to top:
-//   root (ContainerVisual, fills the window)
-//     backdrops (ContainerVisual): one SpriteVisual per glass pill, wallpaper
+//   root (ContainerVisual, fills the window; its Opacity is the popup fade)
+//     backdrops (ContainerVisual): one SpriteVisual per entry, wallpaper
 //                                  brush, rounded-rectangle geometric clip
 //     content (SpriteVisual): the swap chain as a surface brush
 //
-// The bar background quad in the swap chain has a hole cut under every pill
-// (scene_builder, the background.clip mechanism), so the backdrop shows
-// through and only the pill's fill composites over it.
+// A bar sends one entry per glass pill, and its background quad has a hole
+// cut under each (scene_builder, the background.clip mechanism), so the
+// material shows through and only the pill's fill composites over it. A
+// popup sends one entry for the whole panel with NO hole -- nothing is
+// painted beneath a panel -- plus one per glass row, which does cut a hole.
 //
 // Coordinates: a DesktopWindowTarget composes in the window's physical-pixel
 // space for a PerMonitorV2 process, the same as the DirectComposition target
@@ -209,6 +212,39 @@ std::unique_ptr<CompositionHost> CompositionHost::create(void* hwndRaw, void* sw
 CompositionHost::~CompositionHost() = default;
 
 bool CompositionHost::supportsBackdrops() const { return shared()->wallpaper != nullptr; }
+
+bool CompositionHost::backdropsAvailable() { return shared()->wallpaper != nullptr; }
+
+void CompositionHost::rampOpacity(float from, float to, double seconds) {
+    auto& impl = *impl_;
+    try {
+        // A running ramp is replaced, not layered: a fade-out that lands
+        // mid fade-in must win, and a property assignment underneath a live
+        // animation is ignored by the compositor until it is stopped.
+        impl.root.StopAnimation(L"Opacity");
+        if (seconds <= 0) {
+            impl.root.Opacity(to);
+            impl.commit();
+            return;
+        }
+        auto* s = shared();
+        auto animation = s->compositor.CreateScalarKeyFrameAnimation();
+        auto linear = s->compositor.CreateLinearEasingFunction();
+        animation.InsertKeyFrame(0.0f, from, linear);
+        animation.InsertKeyFrame(1.0f, to, linear);
+        animation.Duration(winrt::Windows::Foundation::TimeSpan{
+            static_cast<std::int64_t>(seconds * 10'000'000.0)});
+        impl.root.StartAnimation(L"Opacity", animation);
+        impl.commit();
+    } catch (const winrt::hresult_error& e) {
+        std::fprintf(stderr, "[ybar] opacity ramp failed: 0x%08X\n",
+                     static_cast<unsigned>(e.code()));
+        try {
+            impl.root.Opacity(to); // no animation: snap, never stall
+        } catch (...) {
+        }
+    }
+}
 
 void CompositionHost::setBackdrops(const std::vector<ybar::render::Backdrop>& backdrops) {
     auto* s = shared();

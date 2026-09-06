@@ -51,9 +51,9 @@ adapter). Concretely:
 |---|---|---|---|
 | D1 | Language | **C++20**, MSVC, CMake + vcpkg | Native fit for COM/D3D; AtlasEngine/Terminal patterns lift near-verbatim; owner preference |
 | D2 | Repo | **Orphan branch `windows`** in the YBar repo, worktree checkout | One repo/issue tracker; own root history so the two lines never merge; per-branch CI; themes+examples copied in, contract doc shared |
-| D3 | Renderer | **D3D11** + DXGI flip-model composition swap chain + **Windows.UI.Composition** (bar; per-pill Mica layer, §7.6) / **DirectComposition** (popups); HLSL compiled at runtime via `D3DCompile` | Only clean per-pixel premultiplied-alpha path (`WS_EX_NOREDIRECTIONBITMAP`); preserves "no shader toolchain at build time" |
+| D3 | Renderer | **D3D11** + DXGI flip-model composition swap chain + **Windows.UI.Composition** (bar and popups; the Mica layers, §7.6); HLSL compiled at runtime via `D3DCompile` | Only clean per-pixel premultiplied-alpha path (`WS_EX_NOREDIRECTIONBITMAP`); preserves "no shader toolchain at build time" |
 | D4 | Text | **DirectWrite** full stack; **grayscale AA forced** | ClearType subpixel breaks the R8 coverage atlas and transparent composition |
-| D5 | WinRT/COM | **C++/WinRT** (GSMTC media; the bar compositor, §7.1/§7.6) + **WRL `ComPtr`** (COM lifetime; `wil` is listed in vcpkg.json but unused) | Header-only, ships with the Windows SDK |
+| D5 | WinRT/COM | **C++/WinRT** (GSMTC media; the compositor, §7.1/§7.6) + **WRL `ComPtr`** (COM lifetime; `wil` is listed in vcpkg.json but unused) | Header-only, ships with the Windows SDK |
 | D6 | Lua | Vendored **Lua 5.4 built as C**, raw C-API bridge mirroring `LuaRuntime.swift` incl. the non-raising-trampoline invariant | `lua_error` longjmp through C++ frames skips destructors — same UB class the Swift bridge engineered around |
 | D7 | IPC | **AF_UNIX** (Winsock, `afunix.h`), socket at `%LOCALAPPDATA%\ybar\` | Wire-format parity with macOS; komorebi proves AF_UNIX in production and uses the same location convention |
 | D8 | komorebi | **Native `KomorebiProvider`** speaking the socket protocol directly (no Rust crate) | C++ can't link `komorebi-client`; protocol is simple (one JSON per connection, §11) |
@@ -336,9 +336,9 @@ ybar-win/
     anim/                   — curves, scheduler (compositor-clock driven)
     render/                 — D3D11 device/swapchains, SceneBuilder, GlyphAtlas,
                               FontCache (DirectWrite), Instances (shared GPU ABI)
-    win/                    — BarSurface (HWND + Windows.UI.Composition via
-                              CompositionHost: swap chain over the per-pill Mica
-                              layer), PopupSurface (HWND+DComp), DisplayManager,
+    win/                    — BarSurface and PopupSurface (HWND +
+                              Windows.UI.Composition via CompositionHost: swap
+                              chain over a Mica layer), DisplayManager,
                               MouseRouter, backdrop, appbar
     providers/              — audio (+ audio_sessions mixer), network, media (GSMTC),
                               app_info, app_lifecycle, window_list, tray_icons, and the
@@ -606,15 +606,18 @@ One `ID3D11Device` (+ immediate context) shared across surfaces; one
 composition swap chain per surface via
 `IDXGIFactory2::CreateSwapChainForComposition`
 (`DXGI_FORMAT_B8G8R8A8_UNORM`, `DXGI_ALPHA_MODE_PREMULTIPLIED`,
-`FLIP_SEQUENTIAL`, BufferCount 3, `DXGI_SCALING_STRETCH`). The bar binds it
-with Windows.UI.Composition (`CreateDispatcherQueueController` on the UI
-thread → `Compositor` → `ICompositorDesktopInterop::CreateDesktopWindowTarget`
+`FLIP_SEQUENTIAL`, BufferCount 3, `DXGI_SCALING_STRETCH`). Every surface
+binds it with Windows.UI.Composition (`CreateDispatcherQueueController` on
+the UI thread → `Compositor` → `ICompositorDesktopInterop::CreateDesktopWindowTarget`
 → `ICompositorInterop::CreateCompositionSurfaceForSwapChain` → surface brush
-on a `SpriteVisual`; `win/composition_host.cpp`), because the per-pill Mica
-layer (§7.6) needs a backdrop brush that only that API has. Popups keep the
-DirectComposition recipe (`DCompositionCreateDevice → CreateTargetForHwnd →
-CreateVisual → SetContent → Commit`). Both are the canonical transparent
-GPU-window recipe (Kenny Kerr, MSDN 2014; Qt uses the same). The compositor,
+on a `SpriteVisual`; `win/composition_host.cpp`), because the Mica layers
+(§7.6) need a backdrop brush that only that API has; the popup open/close
+fade is a linear `ScalarKeyFrameAnimation` on the tree's root opacity
+(`CompositionHost::rampOpacity`), where it used to be a DirectComposition
+effect group. DirectComposition survives only as the animation pump's
+`DCompositionWaitForCompositorClock` (§7.2). This is the canonical
+transparent GPU-window recipe (Kenny Kerr, MSDN 2014; Qt uses the same),
+with the WinRT compositor in place of the DComp device. The compositor,
 its dispatcher queue and the wallpaper brush are created on first use and
 deliberately never destroyed: a WinRT object in static storage is released
 after COM has been torn down at exit, which is a crash for no benefit.
@@ -832,29 +835,33 @@ Model on Windows Terminal AtlasEngine + `lhecker/dwrite-hlsl`:
 
 ### 7.6 Backdrops
 
-`blur_radius>0` or `glass=on` → `DwmSetWindowAttribute(DWMWA_SYSTEMBACKDROP_TYPE,
+Bar `blur_radius>0` or `glass=on` → `DwmSetWindowAttribute(DWMWA_SYSTEMBACKDROP_TYPE,
 DWMSBT_TRANSIENTWINDOW)` (Acrylic; Win11 22621+) + dark mode via
 `DWMWA_USE_IMMERSIVE_DARK_MODE` (documented only to darken the frame; that it
 also selects the dark backdrop variant is undocumented-but-stable behavior,
-the same reliance wezterm ships); popups likewise when `popup.blur_radius>0`.
-Both are gated on Windows' **Transparency effects** setting
+the same reliance wezterm ships). A popup's material is Mica (below); the
+DWM Acrylic plate on a popup (`popup.blur_radius>0`) is only the fallback
+where the wallpaper brush is missing. The DWM backdrops are gated on
+Windows' **Transparency effects** setting
 (`HKCU\...\Themes\Personalize\EnableTransparency`, read by
-`systemTransparencyEnabled()`): with it off the bar and popups get
-`DWMSBT_NONE` and the popup plate is forced opaque
-(`buildPopupScene(opaquePanel)`); the daemon re-reads it on
+`systemTransparencyEnabled()`): with it off they become `DWMSBT_NONE`, and a
+popup plate WITHOUT a material is forced opaque
+(`buildPopupScene(opaquePanel)`) — a Mica panel keeps its translucent plate,
+since its brush paints with the setting off; the daemon re-reads it on
 `WM_SETTINGCHANGE`/`WM_THEMECHANGED` (forwarded from the bar windows) and
 re-applies the backdrops.
 The undocumented `SetWindowCompositionAttribute` accent path is dead on Win11
 — never used. Rounded backdrop corners via `DWMWA_WINDOW_CORNER_PREFERENCE`
 (popups).
 
-**Per-item glass pills are Mica** (bar surfaces only). The reference's gate
+**Per-item glass pills are Mica** (bar and popup surfaces). The reference's gate
 (`BarManager.swift`): an item gets a backdrop when `blur_radius > 0`, or when
 `background.glass` is on, the background draws, and the fill's alpha is above
-0.02 — the fill IS the tint. One difference: here `blur_radius` also needs
-`background.drawing`, because the backdrop takes the plate's rect and that
-plate only exists for a drawing background (on macOS a bare `blur_radius`
-gets a glass view with no tint). For each such plate `buildScene` emits a
+0.02 — the fill IS the tint. One difference, and only for an ITEM: a pill's
+`blur_radius` also needs `background.drawing`, because the backdrop takes the
+plate's rect and that plate only exists for a drawing background. A panel's
+rect is the whole window, so a bare `popup.blur_radius` gets a material with
+no tint there, exactly as on macOS. For each such plate `buildScene` emits a
 `DisplayList::backdrops` entry (the plate's snapped device-px rect and corner
 radius; CPU-only, outside the shared ABI) AND a `Hole` at the same rect, so
 the bar background is cut under it; the hole flag goes on the bar quad after
@@ -878,14 +885,32 @@ bar; colour at the top of the wallpaper is what makes the material visible.
 `CreateHostBackdropBrush`, the brush that would sample live windows, is
 inert for an unpackaged app (paints black) and is not used.
 
+**Popup panels are Mica** by the same gate applied to the panel:
+`popup.blur_radius > 0` (the key the reference hangs its frosted panel
+material on) or `popup.background.glass` with a translucent plate.
+`buildPopupScene(…, backdrops)` emits the panel's snapped rect and corner
+radius as a backdrop with NO hole — nothing is painted beneath a panel — and
+the plate over it is the tint, exempt from the opaque-when-transparency-off
+rule. Glass rows inside the popup go through the same `emitItem` path as
+pills: backdrop plus a hole in the panel plate, whose hole flag is set after
+the members. That is a Windows extension — the reference gives popup rows no
+material and never holes a popup plate — and the shipped theme lights no
+rows. The daemon decides `backdrops` before the surface exists
+(`PopupSurface::backdropsAvailable()`, the compositor's answer without a
+host) because it changes the scene, then syncs the layer after `present()`.
+The tooltip bubble rides the same surface with an empty layer.
+
 Fallbacks and limits: `supportsBackdrops()` is false when the brush is
 unavailable (Windows 10), and then `SceneParams::backdrops` is off and no
 hole is cut, so the translucent fill sits on the opaque strip rather than on
-the desktop. Popup surfaces stay on DirectComposition and never emit
-backdrops; `glass` on a popup item is the rim only. A square-bottom (graph)
+the desktop; a popup falls back to the DWM Acrylic plate (transparency-gated)
+and the opaque-plate rule, exactly the pre-Mica behaviour. A square-bottom (graph)
 plate gets a rounded hole (single-radius `Hole`), an accepted mismatch. The
 visual batch and the swap-chain flip are separate DWM updates, so a reflowing
-pill can lead or trail its material by one frame.
+pill can lead or trail its material by one frame. A glass row whose plate
+overhangs the panel (padding or `background.height` past the 6pt inset) cuts
+the panel's border and rim along that edge, because a hole multiplies the
+whole quad — fill, border and rim alike; the shipped theme lights no rows.
 
 ---
 
@@ -1474,8 +1499,9 @@ width, and `bounding_rects` reported one monitor's rects under every display
 key.
 
 **Also done**: Acrylic backdrops (§7.6) for bars and popups, per-pill Mica
-backdrops (§7.6; the bar surface moved to Windows.UI.Composition for them,
-popups stayed on DirectComposition), `ybar theme
+backdrops and Mica popup panels (§7.6; both surfaces moved to
+Windows.UI.Composition for them, DirectComposition remains only as the
+frame pump's clock), `ybar theme
 list|current|use`, `ybar autostart enable|disable|status`, the
 `AppUserModelID`, the shipped `examples/catppuccin-komorebi` theme, and CI
 packaging of `examples/` + app-local `d3dcompiler_47.dll`.
@@ -1816,7 +1842,8 @@ write path on the audio provider plus the `--query audio` /
 `slider.interactive` / `image.desaturate` / `image.y_offset` keys and bar
 `reserve` (§3.3, §6.1) with the desaturate shader flag behind them (§7.3),
 graph baseline clamping and squared plate bottoms (§3.9), per-item glass
-pills as Mica rather than Liquid Glass, rim kept (§7.6),
+pills as Mica rather than Liquid Glass, rim kept, popup panels as Mica rather
+than frosted glass, and glass popup rows with their own material (§7.6),
 distributed-notification bindings (§9), THERMAL_STATE always
 `nominal` (§3.5), single topmost z-band (§16).
 

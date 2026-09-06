@@ -55,7 +55,7 @@ sbar.default({
     glass = false,
   },
   popup = {
-    blur_radius = 0, -- no Acrylic behind popups: solid Fluent panels
+    blur_radius = 0, -- the panel's Mica is set by name in ybarrc.lua instead
     -- NOTE: nothing in this `popup` table actually applies. ItemStore's
     -- applyDefaults copies an explicit field list (a reference contract) and
     -- `popup` is not on it, so these are inert — the panels are getting the
@@ -66,7 +66,7 @@ sbar.default({
       border_width = 0,
       corner_radius = 8, -- OverlayCornerRadius again: a popup is a flyout
       color = colors.popup.bg,
-      glass = false,
+      glass = false, -- ybarrc.lua turns it on per host: a Mica panel + rim
     },
   },
   -- Tight outer paddings: 4pt between adjacent pills (was 10).
