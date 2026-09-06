@@ -116,11 +116,12 @@ end
 -- read as busy against its flat neighbours. The strokes go; the halo stays.
 local FOCUS_FRAMES = 8
 -- Two focus cues, each one flag. Bevel is the shipped one: the active
--- workspace is the lit pill (item-level glass, a quarter-round rim lit from
--- above) and every other pill stays flat, so focus reads as material rather
--- than as decoration on top of it. The halo is kept for one-line return.
--- glass is a bool and cannot ease, so it flips at the moment of switch while
--- the fill still animates underneath it.
+-- workspace is the glass pill -- on Windows a Mica material under its 50%
+-- grey fill, with the quarter-round rim lit from above -- and every other
+-- pill stays flat, so focus reads as material rather than as decoration on
+-- top of it. The halo is kept for one-line return. glass is a bool and cannot
+-- ease, so it flips at the moment of switch while the fill still animates
+-- underneath it.
 local FOCUS_BEVEL = true
 local FOCUS_HALO = false
 local GLOW = colors.with_alpha(colors.white, 0.42)

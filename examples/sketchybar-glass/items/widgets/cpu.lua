@@ -52,7 +52,7 @@ local cpu = sbar.add("slider", "widgets.cpu", 52, {
 })
 
 local cpu_bracket = sbar.add("bracket", "widgets.cpu.bracket", { cpu.name }, {
-  background = { color = colors.bg1 },
+  background = { color = colors.mica }, -- tint over the Mica material
   -- Inner pill margin, and the ONLY lever that can put one on the right: a
   -- pill is sized from its members' content boxes plus the BRACKET's padding,
   -- so item padding lands outside the pill entirely. The icon supplies its own

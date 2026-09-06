@@ -29,14 +29,19 @@ require("items")
 -- through glass. Strip every stroke the item files applied.
 sbar.set("/.*/", { background = { border_width = 0 } })
 
--- Bevel lighting on every widget pill: item-level glass, the quarter-round
--- rim lit from above. Set by NAME on the seven brackets rather than through
--- default.lua so it never reaches popup rows, the 2pt separators or the
--- slider plates. The workspace strip is deliberately absent: paint_space owns
--- its pills' glass and lights only the focused one, so focus keeps reading as
--- "the lit pill" -- and with the shader's luminance scaling that lit rim is
--- brighter on the grey focus fill than on these dark ones anyway.
-sbar.set("/(widgets\\..*|calendar)\\.bracket/", { background = { glass = true } })
+-- Glass on every widget pill. On Windows that is Mica -- a wallpaper-material
+-- visual composed under the pill, tinted by the pill's own translucent fill
+-- (colors.mica) -- plus the shader's quarter-round rim lit from above. Set by
+-- NAME rather than through default.lua so it never reaches popup rows, the
+-- 2pt separators or the slider plates. The calendar is named as the ITEM: its
+-- bracket is transparent, and the fill that becomes the tint lives on the
+-- item. Anchored, because a name pattern is a SEARCH (item.cpp: unanchored
+-- regex_search): a bare `calendar` would also match every calendar.* popup
+-- row and put the rim on today's cell and the separator. The workspace strip
+-- is deliberately absent: paint_space owns its pills' glass and lights only
+-- the focused one, so focus keeps reading as "the material pill" among flat
+-- ones.
+sbar.set("/^(widgets\\..*\\.bracket|calendar)$/", { background = { glass = true } })
 
 -- Focused-workspace highlight: brightest white (monochrome scheme).
 sbar.set("/space\\..*/", { icon = { highlight_color = 0xffffffff } })

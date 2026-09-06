@@ -1705,6 +1705,7 @@ void DaemonState::renderAll() {
             params.pointerX = pointerX;
             params.pointerY = pointerY;
         }
+        params.backdrops = surface->supportsBackdrops();
         trace("renderAll: buildScene");
         const auto list =
             ybar::render::buildScene(store.items(), boxes, settings, params, *fonts, *atlas);
@@ -1719,6 +1720,10 @@ void DaemonState::renderAll() {
                 break;
             }
         }
+        // The backdrop layer under the swap chain follows the pills it was
+        // cut for (spec 7.6). Change-guarded inside, so this is free while
+        // the layout holds still.
+        surface->setBackdrops(list.backdrops);
         if (!renderer->render(list, surface->renderSurface(), atlas)) {
             SetTimer(messageWindow, kRenderRetryTimer, 1000, nullptr); // spec 7.2
         }

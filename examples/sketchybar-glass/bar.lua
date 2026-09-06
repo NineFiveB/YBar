@@ -3,9 +3,11 @@ local colors = require("colors")
 sbar.bar({
   height = 35,
   color = colors.bar.bg,
-  -- Fluent minimal: a dark, near-opaque strip with NO Acrylic backdrop —
-  -- the Windows default look is flat, not glass (the macOS theme keeps its
-  -- Liquid Glass treatment; this is the deliberate Windows divergence).
+  -- A dark, near-opaque strip with NO Acrylic backdrop: the material lives on
+  -- the pills (item-level glass = Mica, see default.lua), and a strip that was
+  -- itself glass would leave them nothing to stand out against. Bar-level
+  -- glass is DWM Acrylic and follows the Transparency-effects setting; the
+  -- pills' Mica does not need it.
   glass = false,
   -- Auto-hide the bar on a monitor while an app is fullscreen there (and show
   -- it again on a non-fullscreen workspace) — the Windows-taskbar convention.

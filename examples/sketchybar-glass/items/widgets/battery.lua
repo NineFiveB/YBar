@@ -60,7 +60,7 @@ local battery = sbar.add("slider", "widgets.battery", 20, {
 })
 
 local battery_bracket = sbar.add("bracket", "widgets.battery.bracket", { battery.name }, {
-  background = { color = colors.bg1 },
+  background = { color = colors.mica }, -- tint over the Mica material
   -- Inner pill margin around the slider so the meter floats like the icon
   -- pills (whose margin comes from their icon padding, which a slider lacks).
   padding_left = 9,

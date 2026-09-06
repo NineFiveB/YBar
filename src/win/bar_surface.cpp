@@ -1,5 +1,6 @@
 #include "win/bar_surface.h"
 
+#include "win/composition_host.h"
 #include "win/input.h"
 #include "win/system_appearance.h"
 
@@ -8,9 +9,6 @@
 #define NOMINMAX
 #include <windows.h>
 #include <windowsx.h>
-#include <d3d11.h>
-#include <dxgi1_3.h>
-#include <dcomp.h>
 #include <dwmapi.h>
 #include <shellapi.h>
 #include <shobjidl_core.h> // IVirtualDesktopManager (sticky pinning)
@@ -64,9 +62,7 @@ public:
     HWND hwnd = nullptr;
     MonitorInfo monitorInfo;
     std::unique_ptr<ybar::render::Surface> surface;
-    ComPtr<IDCompositionDevice> compositionDevice;
-    ComPtr<IDCompositionTarget> target;
-    ComPtr<IDCompositionVisual> visual;
+    std::unique_ptr<CompositionHost> host; // composition tree over `surface`
     double logicalW = 0;
     double logicalH = 0;
     std::function<void(const MouseEvent&)> onMouse;
@@ -94,6 +90,7 @@ public:
 
     ~BarSurfaceImpl() {
         removeAppBar();
+        host.reset(); // detach the composition target before its window goes
         if (hwnd) {
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
             DestroyWindow(hwnd);
@@ -286,7 +283,8 @@ public:
             logicalH = heightPx / monitorInfo.scale;
         }
         applyVisibility();
-        if (frameChanged) compositionDevice->Commit();
+        // No commit step: the composition tree fills the window by relative
+        // size, and the swap chain resize above is picked up by its surface.
     }
 
     void dispatchMouse(MouseEvent::Kind kind, LPARAM lParam, const char* button,
@@ -511,41 +509,17 @@ std::unique_ptr<BarSurface> BarSurface::create(ybar::render::Renderer& renderer,
     impl->surface = renderer.createSurface(widthPx, heightPx);
     if (!impl->surface) return nullptr;
 
-    // DirectComposition: device -> target(hwnd) -> visual -> swap chain.
-    auto* d3dDevice = static_cast<ID3D11Device*>(nullptr);
-    {
-        // Recover the ID3D11Device from the renderer's swap chain.
-        auto* swapChain = static_cast<IDXGISwapChain1*>(impl->surface->compositionSurface());
-        ComPtr<ID3D11Device> device;
-        if (FAILED(swapChain->GetDevice(IID_PPV_ARGS(&device)))) return nullptr;
-        ComPtr<IDXGIDevice> dxgiDevice;
-        device.As(&dxgiDevice);
-        if (FAILED(DCompositionCreateDevice(dxgiDevice.Get(),
-                                            IID_PPV_ARGS(&impl->compositionDevice))))
-            return nullptr;
-        d3dDevice = device.Get();
-        (void)d3dDevice;
-    }
-    if (FAILED(impl->compositionDevice->CreateTargetForHwnd(impl->hwnd, TRUE, &impl->target)) ||
-        FAILED(impl->compositionDevice->CreateVisual(&impl->visual)))
-        return nullptr;
-    impl->visual->SetContent(static_cast<IDXGISwapChain1*>(impl->surface->compositionSurface()));
-    // A composition target composes in the WINDOW's coordinate space, which is
-    // physical pixels for a PerMonitorV2 process — so a physical-pixel buffer
-    // maps 1:1 with no transform. (An earlier 96/dpi counter-scale shrank the
+    // Composition tree: target(hwnd) -> [backdrop layer, swap chain]. The
+    // target composes in the WINDOW's coordinate space, which is physical
+    // pixels for a PerMonitorV2 process, so the physical-pixel buffer maps
+    // 1:1 with no transform. (An earlier 96/dpi counter-scale shrank the
     // scene to a quarter of the window on a 200% monitor: full-width window,
-    // half-width paint. YBAR_DCOMP_SCALE overrides for diagnosis.)
-    if (const char* override = std::getenv("YBAR_DCOMP_SCALE")) {
-        const auto factor = static_cast<float>(std::atof(override));
-        if (factor > 0) {
-            D2D_MATRIX_3X2_F matrix{};
-            matrix._11 = factor;
-            matrix._22 = factor;
-            impl->visual->SetTransform(matrix);
-        }
+    // half-width paint.)
+    impl->host = CompositionHost::create(impl->hwnd, impl->surface->compositionSurface());
+    if (!impl->host) {
+        std::fprintf(stderr, "[ybar] bar composition tree creation failed\n");
+        return nullptr;
     }
-    impl->target->SetRoot(impl->visual.Get());
-    impl->compositionDevice->Commit();
 
     // The window's own DPI is authoritative under PerMonitorV2 — prefer it
     // over the enumeration-time monitor scale.
@@ -658,6 +632,12 @@ void BarSurface::setMouseHandler(std::function<void(const MouseEvent&)> handler)
 
 void BarSurface::setBroadcastTarget(void* messageWindow) {
     g_broadcastTarget = static_cast<HWND>(messageWindow);
+}
+
+bool BarSurface::supportsBackdrops() const { return impl_->host->supportsBackdrops(); }
+
+void BarSurface::setBackdrops(const std::vector<ybar::render::Backdrop>& backdrops) {
+    impl_->host->setBackdrops(backdrops);
 }
 
 ybar::render::Surface& BarSurface::renderSurface() { return *impl_->surface; }

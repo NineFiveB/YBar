@@ -117,9 +117,12 @@ function M.attach(target, watchers, base, hover)
 end
 
 -- The common shape: a bracket carrying the fill around a single member.
--- Defaults are the resting pill tone lifting to the raised-surface tone.
+-- Defaults are the Mica tint lifting to its hover tint: every pill that comes
+-- through here is a glass pill (ybarrc.lua lights them by name), and over the
+-- wallpaper material the fill is a tint, not a tone -- an opaque bg1 here
+-- would simply hide the material it sits on.
 function M.pill(bracket, member, base, hover)
-  M.attach(bracket, { bracket, member }, base or colors.bg1, hover or colors.bg2)
+  M.attach(bracket, { bracket, member }, base or colors.mica, hover or colors.mica_hover)
 end
 
 -- A popup row: no bracket, no resting fill, so the row supplies its own plate

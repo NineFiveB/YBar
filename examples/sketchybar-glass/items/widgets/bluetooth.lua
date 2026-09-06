@@ -104,7 +104,7 @@ local bt_icon = sbar.add("item", "widgets.bluetooth", {
 })
 
 local bt_bracket = sbar.add("bracket", "widgets.bluetooth.bracket", { bt_icon.name }, {
-  background = { color = colors.bg1 },
+  background = { color = colors.mica }, -- tint over the Mica material
   -- wrap_width turns the popup into flow layout so the volume row can seat
   -- two items on one line (slider + mixer chevron, and the mixer panel's
   -- icon + slider pairs). It is popup_width + 4 and NOT popup_width: the

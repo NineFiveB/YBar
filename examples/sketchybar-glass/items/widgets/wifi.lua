@@ -47,7 +47,7 @@ local wifi = sbar.add("item", "widgets.wifi.padding", {
 local wifi_bracket = sbar.add("bracket", "widgets.wifi.bracket", {
   wifi.name,
 }, {
-  background = { color = colors.bg1 },
+  background = { color = colors.mica }, -- tint over the Mica material
   popup = { align = "center", height = 26 }
 })
 

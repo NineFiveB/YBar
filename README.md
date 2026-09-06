@@ -1,6 +1,6 @@
 # ybar-win
 
-**Top bar for Windows** — a GPU-rendered (D3D11 + DirectComposition),
+**Top bar for Windows** — a GPU-rendered (D3D11 + Windows.UI.Composition),
 scriptable status bar with first-class [komorebi](https://github.com/LGUG2Z/komorebi)
 integration. A native C++ implementation of [YBar](https://github.com/NineFiveB/YBar)
 that preserves its user contract: the sketchybar-style CLI/IPC grammar, the
@@ -222,7 +222,7 @@ changes:
 | `x-apple.systempreferences:` links | `ms-settings:` URIs (`ms-settings:sound`, `ms-settings:network-wifi`, `ms-settings:batterysaver`) |
 | `osascript` media/volume snippets | unnecessary — media and volume are native providers |
 | `alias` items (menu-bar extras) | not supported; `--add alias` returns an error |
-| per-item `glass` pills | rendered as the shader's glass rim and translucent fill only |
+| per-item `glass` pills | a Mica wallpaper backdrop under the pill (Windows 11 compositor), tinted by the pill's own translucent fill, plus the shader's lit rim; popup items get the rim and fill only; Liquid Glass refraction is not reproduced |
 
 Scripts run under `sh` — `%YBAR_SHELL%` if set, else `sh.exe` on `PATH` (Git
 Bash), else Git for Windows' `sh.exe` found via the registry, else
@@ -249,7 +249,7 @@ ctest --preset default
 | `src/model/` | items, styles, components, layout, property setter, query serialization | §3.3, §8 |
 | `src/anim/` | curves, scheduler (frame-clock paced) | §3.8 |
 | `src/render/` | D3D11 renderer, scene builder, glyph atlas, DirectWrite font cache, icon map | §7 |
-| `src/win/` | bar/popup surfaces (HWND + DComp), displays, input, backdrops, appbar | §6 |
+| `src/win/` | bar surface (HWND + Windows.UI.Composition, per-pill Mica layer), popup surface (HWND + DComp), displays, input, backdrops, appbar | §6, §7.6 |
 | `src/providers/` | audio + per-app audio sessions, network, app lifecycle/info, media (GSMTC), window list, tray icons, **komorebi**, ytile | §10, §11 |
 | `src/lua/` | vendored Lua 5.4 (C), bridge, prelude | §3.7, §12 |
 | `shaders/ybar.hlsl` | the SDF/glyph pipeline, compiled at runtime with `D3DCompile` | §7.3 |

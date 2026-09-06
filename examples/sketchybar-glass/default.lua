@@ -1,10 +1,11 @@
 local settings = require("settings")
 local colors = require("colors")
 
--- The port's defaults restyled Fluent-minimal for Windows: flat rounded
--- pills (no glass rim, no Acrylic), subtle single-tone fills, no borders —
--- the macOS tree keeps its Liquid Glass treatment; this divergence is the
--- point (Windows' default design language is flat Fluent).
+-- The port's defaults restyled for Windows: rounded pills with no borders on
+-- a flat strip with no Acrylic; glass is off HERE and switched on by name in
+-- ybarrc.lua for the widget pills, where on Windows it is Mica (a wallpaper
+-- material under a translucent tint, plus the shader's lit rim) rather than
+-- the macOS tree's Liquid Glass.
 sbar.default({
   updates = "when_shown",
   icon = {
@@ -44,11 +45,13 @@ sbar.default({
     -- parses but v1 still renders circular.
     corner_radius = 8,
     border_width = 0,
-    -- Item-level glass is the shader's bevel lighting (a quarter-round edge
-    -- lit from above), NOT a backdrop. The shipped look is Fluent-flat, so it
-    -- stays off here; flip it on to get the lit rims shown in the README's
-    -- depth GIFs. The BAR's own glass in bar.lua is a different thing entirely
-    -- (the DWM Acrylic plate) and stays off too.
+    -- Item-level glass on Windows is Mica: a wallpaper-material visual under
+    -- the pill, tinted by the pill's own translucent fill, plus the shader's
+    -- bevel rim (a quarter-round edge lit from above). Off by default so it
+    -- never reaches popup rows or separators; ybarrc.lua turns it on by name
+    -- for the widget pills, with colors.mica as their fill. The BAR's own
+    -- glass in bar.lua is a different thing entirely (the DWM Acrylic plate,
+    -- which also honours the Transparency-effects setting) and stays off.
     glass = false,
   },
   popup = {

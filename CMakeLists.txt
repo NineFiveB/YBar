@@ -91,15 +91,18 @@ add_library(ybar_win
   src/render/renderer.cpp
   src/render/scene_builder.cpp
   src/win/bar_surface.cpp
+  src/win/composition_host.cpp
   src/win/popup_surface.cpp
   src/win/display_manager.cpp
   src/win/input.cpp
 )
 # version: FileDescription lookups; iphlpapi/wlanapi: connectivity + SSID;
-# runtimeobject: C++/WinRT (GSMTC media session).
+# runtimeobject: C++/WinRT (GSMTC media session, Windows.UI.Composition);
+# CoreMessaging: CreateDispatcherQueueController for the bar's compositor.
 target_link_libraries(ybar_win PUBLIC ybar_core lua_vendor
   ws2_32 d3d11 dxgi d3dcompiler dcomp dwrite shcore user32 gdi32
-  windowscodecs ole32 oleaut32 oleacc shell32 version iphlpapi wlanapi runtimeobject uuid dwmapi uiautomationcore)
+  windowscodecs ole32 oleaut32 oleacc shell32 version iphlpapi wlanapi runtimeobject uuid dwmapi uiautomationcore
+  CoreMessaging)
 if(YBAR_CPPWINRT_INCLUDE)
   target_include_directories(ybar_win PRIVATE ${YBAR_CPPWINRT_INCLUDE})
 endif()
