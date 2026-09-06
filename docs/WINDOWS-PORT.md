@@ -33,11 +33,12 @@ adapter). Concretely:
 ### Non-goals (v1)
 
 - Windows 10 support (Win11 22H2+ only; needed for `DWMWA_SYSTEMBACKDROP_TYPE`
-  and simplifies DirectComposition assumptions). Win10 may work degraded; not
-  tested.
+  and the wallpaper backdrop brush, and simplifies composition assumptions).
+  Win10 may work degraded; not tested.
 - The `alias` component (macOS menu-bar-extra capture). Grammar accepted,
   creation returns a clear error (§10.6).
-- Feature parity with macOS-26 Liquid Glass. `glass=on` maps to Acrylic (§7.6).
+- Feature parity with macOS-26 Liquid Glass. Bar `glass=on` maps to DWM
+  Acrylic and item `glass=on` to a Mica backdrop (§7.6); neither refracts.
 - Wayland/Linux, other WMs (GlazeWM etc. can integrate the AeroSpace way —
   config-side — but get no native provider in v1). YTile, the sibling WM, is the
   one exception: it has an in-tree `YTileProvider` (named-pipe NDJSON; §15).
@@ -50,9 +51,9 @@ adapter). Concretely:
 |---|---|---|---|
 | D1 | Language | **C++20**, MSVC, CMake + vcpkg | Native fit for COM/D3D; AtlasEngine/Terminal patterns lift near-verbatim; owner preference |
 | D2 | Repo | **Orphan branch `windows`** in the YBar repo, worktree checkout | One repo/issue tracker; own root history so the two lines never merge; per-branch CI; themes+examples copied in, contract doc shared |
-| D3 | Renderer | **D3D11** + DXGI flip-model composition swap chain + **DirectComposition**; HLSL compiled at runtime via `D3DCompile` | Only clean per-pixel premultiplied-alpha path (`WS_EX_NOREDIRECTIONBITMAP`); preserves "no shader toolchain at build time" |
+| D3 | Renderer | **D3D11** + DXGI flip-model composition swap chain + **Windows.UI.Composition** (bar and popups; the Mica layers, §7.6); HLSL compiled at runtime via `D3DCompile` | Only clean per-pixel premultiplied-alpha path (`WS_EX_NOREDIRECTIONBITMAP`); preserves "no shader toolchain at build time" |
 | D4 | Text | **DirectWrite** full stack; **grayscale AA forced** | ClearType subpixel breaks the R8 coverage atlas and transparent composition |
-| D5 | WinRT/COM | **C++/WinRT** (GSMTC media) + **WRL `ComPtr`** (COM lifetime; `wil` is listed in vcpkg.json but unused) | Header-only, ships with the Windows SDK |
+| D5 | WinRT/COM | **C++/WinRT** (GSMTC media; the compositor, §7.1/§7.6) + **WRL `ComPtr`** (COM lifetime; `wil` is listed in vcpkg.json but unused) | Header-only, ships with the Windows SDK |
 | D6 | Lua | Vendored **Lua 5.4 built as C**, raw C-API bridge mirroring `LuaRuntime.swift` incl. the non-raising-trampoline invariant | `lua_error` longjmp through C++ frames skips destructors — same UB class the Swift bridge engineered around |
 | D7 | IPC | **AF_UNIX** (Winsock, `afunix.h`), socket at `%LOCALAPPDATA%\ybar\` | Wire-format parity with macOS; komorebi proves AF_UNIX in production and uses the same location convention |
 | D8 | komorebi | **Native `KomorebiProvider`** speaking the socket protocol directly (no Rust crate) | C++ can't link `komorebi-client`; protocol is simple (one JSON per connection, §11) |
@@ -295,8 +296,9 @@ bounds (§7.4), ink-vs-em vertical centering rules, marquee (cycle = ink+24pt,
 duration frames/60), paint order (bar bg → brackets → per item shadow → bg →
 image → icon → graph/slider/gauge → label, the image trailing the label
 instead when `image.align=r`; all quads → all triangles → all glyphs), pixel
-snapping (origin and size rounded independently), hard offset shadows (no
-blur — do not "improve"), `background.clip` holes (max 16), graph
+snapping (origin and size rounded independently), hard offset shadows (see
+the shadow note below), `background.clip` holes (max 32 here; the reference's
+16, raised because glass pills spend from the same budget, §7.6), graph
 right-to-left on the leftward-flowing cursors (`right` and `q`), gauge 270°
 dial with label centered inside contributing zero width. Deliberate graph
 deviations: the reference centers a zero sample's stroke ON the box bottom
@@ -334,7 +336,9 @@ ybar-win/
     anim/                   — curves, scheduler (compositor-clock driven)
     render/                 — D3D11 device/swapchains, SceneBuilder, GlyphAtlas,
                               FontCache (DirectWrite), Instances (shared GPU ABI)
-    win/                    — BarSurface (HWND+DComp), PopupSurface, DisplayManager,
+    win/                    — BarSurface and PopupSurface (HWND +
+                              Windows.UI.Composition via CompositionHost: swap
+                              chain over a Mica layer), DisplayManager,
                               MouseRouter, backdrop, appbar
     providers/              — audio (+ audio_sessions mixer), network, media (GSMTC),
                               app_info, app_lifecycle, window_list, tray_icons, and the
@@ -426,7 +430,8 @@ independent instance.
   stop IPC, destroy windows, exit 0.
 - Diagnostics: `YBAR_DEBUG` (any value) traces daemon bring-up, surface/DPI
   geometry, per-frame render stats and the measured animation frame rate to
-  stderr; the DComp scale override `YBAR_DCOMP_SCALE` is documented in §7.1.
+  stderr. (The `YBAR_DCOMP_SCALE` override went with the move to
+  Windows.UI.Composition; §7.1 records why no scale is needed.)
 
 ### 5.1 IPC endpoint
 
@@ -459,8 +464,11 @@ Per included monitor, `BarSurface` creates:
 HWND  WS_POPUP | (borderless)
       WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP
       [+ WS_EX_TOPMOST per topmost setting]
- └─ IDCompositionTarget → visual → DXGI composition swap chain
-    (BGRA8_UNORM + sRGB RTV, DXGI_ALPHA_MODE_PREMULTIPLIED, FLIP_SEQUENTIAL, 3 buffers)
+ └─ Windows.UI.Composition DesktopWindowTarget (win/composition_host.cpp)
+    ├─ backdrop layer: one SpriteVisual per glass pill, wallpaper backdrop
+    │  brush, rounded-rectangle geometric clip (§7.6)
+    └─ content: SpriteVisual over the DXGI composition swap chain
+       (BGRA8_UNORM + sRGB RTV, DXGI_ALPHA_MODE_PREMULTIPLIED, FLIP_SEQUENTIAL, 3 buffers)
 ```
 
 - `WS_EX_NOACTIVATE` reproduces the non-activating panel: the bar receives
@@ -534,7 +542,13 @@ HWND  WS_POPUP | (borderless)
   deleted).
 - Mouse: WndProc `WM_LBUTTONDOWN/UP`, `WM_RBUTTONUP`, `WM_MBUTTONUP`,
   `WM_MOUSEMOVE` + `TrackMouseEvent(TME_LEAVE)`, `WM_MOUSEWHEEL`
-  (`GET_WHEEL_DELTA_WPARAM/120`, sign preserved). Click fires on button-up.
+  (`GET_WHEEL_DELTA_WPARAM/120`, sign preserved). A `WM_MOUSELEAVE` is
+  believed only when `GetCursorPos` is outside the window rect, and otherwise
+  re-arms tracking: the z-order and desktop-following upkeep on the 1 s tick
+  moves the window under a stationary pointer, and Windows posts a leave the
+  pointer never performed. Untested for a year because nothing hovered — with
+  targeted `mouse.entered`/`mouse.exited` driving a highlight it made every
+  hovered item blink once a second. Click fires on button-up.
   `WM_LBUTTONDOWN` takes `SetCapture` (bar and popup WndProcs alike) so a
   slider drag keeps receiving Move/Up after the pointer leaves the thin
   window; a stolen capture (`WM_CAPTURECHANGED` that is not our own release)
@@ -592,10 +606,21 @@ One `ID3D11Device` (+ immediate context) shared across surfaces; one
 composition swap chain per surface via
 `IDXGIFactory2::CreateSwapChainForComposition`
 (`DXGI_FORMAT_B8G8R8A8_UNORM`, `DXGI_ALPHA_MODE_PREMULTIPLIED`,
-`FLIP_SEQUENTIAL`, BufferCount 3, `DXGI_SCALING_STRETCH`), bound with
-DirectComposition (`DCompositionCreateDevice → CreateTargetForHwnd →
-CreateVisual → SetContent → Commit`). This is the canonical transparent
-GPU-window recipe (Kenny Kerr, MSDN 2014; Qt uses the same).
+`FLIP_SEQUENTIAL`, BufferCount 3, `DXGI_SCALING_STRETCH`). Every surface
+binds it with Windows.UI.Composition (`CreateDispatcherQueueController` on
+the UI thread → `Compositor` → `ICompositorDesktopInterop::CreateDesktopWindowTarget`
+→ `ICompositorInterop::CreateCompositionSurfaceForSwapChain` → surface brush
+on a `SpriteVisual`; `win/composition_host.cpp`), because the Mica layers
+(§7.6) need a backdrop brush that only that API has; the popup open/close
+fade is a linear `ScalarKeyFrameAnimation` on the tree's root opacity
+(`CompositionHost::rampOpacity`), where it used to be a DirectComposition
+effect group. DirectComposition survives only as the animation pump's
+`DCompositionWaitForCompositorClock` (§7.2). This is the canonical
+transparent GPU-window recipe (Kenny Kerr, MSDN 2014; Qt uses the same),
+with the WinRT compositor in place of the DComp device. The compositor,
+its dispatcher queue and the wallpaper brush are created on first use and
+deliberately never destroyed: a WinRT object in static storage is released
+after COM has been torn down at exit, which is a crash for no benefit.
 
 Flip-model swap chains **reject `*_SRGB` backbuffer formats** (flip model is
 restricted to R16G16B16A16_FLOAT / B8G8R8A8_UNORM / R8G8B8A8_UNORM /
@@ -608,15 +633,17 @@ keep macOS-identical gradients — a plain UNORM RTV visibly changes them.
 Recreate the RTV after every `ResizeBuffers`. Alpha mode is orthogonal:
 premultiplied alpha goes through the same sRGB encode.
 
-**DComp scaling (corrected after a live miss)**: a composition target composes
-in the WINDOW's coordinate space, which is physical pixels for a PerMonitorV2
-process — so a physical-pixel swap chain maps 1:1 with **no visual transform**.
-Do NOT add a `96/windowDpi` counter-scale: it halves the scene, producing a
-full-width window that paints only its left half. That failure is easy to
-misread, because glyphs rasterized at 2× and displayed at 0.5× still *look*
-correctly sized — only the geometry betrays it. Verify by sampling painted
-pixels at the far edge of the monitor, never by eyeballing text size.
-`YBAR_DCOMP_SCALE` overrides the factor for diagnosis.
+**Composition scaling (corrected after a live miss)**: a composition target —
+DirectComposition and Windows.UI.Composition alike — composes in the WINDOW's
+coordinate space, which is physical pixels for a PerMonitorV2 process — so a
+physical-pixel swap chain maps 1:1 with **no visual transform**, and the
+backdrop visuals take the display list's device-px rects verbatim (verified at
+200 %: they land on their pills). Do NOT add a `96/windowDpi` counter-scale:
+it halves the scene, producing a full-width window that paints only its left
+half. That failure is easy to misread, because glyphs rasterized at 2× and
+displayed at 0.5× still *look* correctly sized — only the geometry betrays it.
+Verify by sampling painted pixels at the far edge of the monitor, never by
+eyeballing text size.
 
 ### 7.2 Damage model & pacing (behavior contract)
 
@@ -648,6 +675,50 @@ machines but is only documented as supported for UWP apps — app-local is the
 supported path for desktop apps and preserves the no-build-time-toolchain
 property.
 
+**Shadows — two additive Windows extensions (§3.9).** The reference draws a
+shadow as a hard offset COPY of the plate with no blur, and only for non-bracket
+items (`SceneBuilder.swift`, bracket pass emits a background quad and nothing
+else). Both still hold by default here, because both extensions are opt-in and
+both default to off:
+
+- `background.shadow.blur` (points, default **0**). Above 0 the shadow quad is
+  grown by the blur on every side, the true shape half-size is carried in
+  `fill2.xy`, the radius in `gradientDir.x`, and `kQuadFlagShadow` (bit 4)
+  selects a squared smoothstep ramp instead of the analytic AA edge. All three
+  of those fields are unused on a shadow quad, so **`QuadInstance` stays 112
+  bytes and byte-identical with Instances.swift** — a macOS build that never
+  sets the flag is unaffected. A LIGHT shadow colour at distance 0 with a blur
+  is a GLOW; that is the only bloom this pipeline has, and the workspace focus
+  halo in sketchybar-glass uses it.
+- Brackets emit shadows too, via the shared `pushShadow`. The reference does
+  not. This matters because in a bracket-based theme every pill IS a bracket,
+  so shadows and glows would otherwise be unreachable on exactly the elements
+  that want them. Invisible unless `background.shadow.drawing` is set, which
+  defaults off.
+
+**Item-level `glass` paints the bevel rim in the shader; the material under
+it is the window layer's job (§7.6).** The branch
+builds a real `float3` surface normal by treating the pill as a slab with a
+quarter-round bevel — the normal of a quarter circle at depth `t` is
+`(outward * sqrt(1 - t²), t)` — and shades it Blinn-Phong. It previously used
+`normalize(float2(ddx(d), ddy(d)))` as a "normal", which is a unit 2D screen
+direction with no height term and cannot light a surface. Two constraints are
+easy to get wrong and are load-bearing: the coefficients are LINEAR light
+against an sRGB target, so on a near-black theme (26/255 ≈ linear 0.010) the
+usable range is only about (−0.004, +0.014) — and both the response and those bounds are scaled by the fill's luminance
+(gain 1 at that reference fill, capped at 8), because the same absolute numbers on a mid-grey fill are a ±2
+ripple and `glass = true` silently did nothing on the focused-workspace pill until they were; and the key light's azimuth swings
+toward the pointer at FIXED elevation, because leaning the whole vector also
+drops `L.z`, which is the flat-face reference the bevel is measured against, and
+the effect then cancels itself to 1–2 levels out of 255.
+
+`Uniforms` is **32 bytes here, not the reference's 16**: it carries the pointer
+position (device px on the surface being drawn, negative = pointer away) for
+that key light. It is a per-frame constant buffer, not the shared per-item
+instance ABI. The daemon gates the pointer path three ways — only when a glass
+quad is actually on screen, only past 3pt of travel, and never faster than
+60 Hz — so a flat theme pays nothing and zero-work-at-rest is preserved.
+
 The MSL→HLSL translation is mechanical — validated against the shader source:
 `[[vertex_id]]/[[instance_id]]` → `SV_VertexID/SV_InstanceID`; device pointer
 vertex-pulling → `StructuredBuffer<QuadInstance>` in `t0`; `Uniforms` →
@@ -665,7 +736,10 @@ as on macOS. One Windows-added flag bit extends the ABI: `kGlyphFlagDesaturate`
 (`1u << 1`; `kGlyphFlagGrey` in the HLSL) applies a Rec. 709 luma conversion
 to colour-atlas samples — valid directly on premultiplied colour — backing
 `image.desaturate` (§3.3). The painted glass rim (`flagGlass`) ships with
-its exact constants; `nativeGlassBackdrops` is always false on Windows.
+its exact constants and stays ON over the Mica backdrop — the opposite of the
+reference's `nativeGlassBackdrops` gate, which drops the rim over macOS-26
+Liquid Glass because that material refracts and carries its own edge. Mica is
+flat, so the rim is what gives the pill one.
 
 ### 7.4 Text (DirectWrite)
 
@@ -761,23 +835,88 @@ Model on Windows Terminal AtlasEngine + `lhecker/dwrite-hlsl`:
 
 ### 7.6 Backdrops
 
-`blur_radius>0` or `glass=on` → `DwmSetWindowAttribute(DWMWA_SYSTEMBACKDROP_TYPE,
+Bar `blur_radius>0` or `glass=on` → `DwmSetWindowAttribute(DWMWA_SYSTEMBACKDROP_TYPE,
 DWMSBT_TRANSIENTWINDOW)` (Acrylic; Win11 22621+) + dark mode via
 `DWMWA_USE_IMMERSIVE_DARK_MODE` (documented only to darken the frame; that it
 also selects the dark backdrop variant is undocumented-but-stable behavior,
-the same reliance wezterm ships); popups likewise when `popup.blur_radius>0`.
-Both are gated on Windows' **Transparency effects** setting
+the same reliance wezterm ships). A popup's material is Mica (below); the
+DWM Acrylic plate on a popup (`popup.blur_radius>0`) is only the fallback
+where the wallpaper brush is missing. The DWM backdrops are gated on
+Windows' **Transparency effects** setting
 (`HKCU\...\Themes\Personalize\EnableTransparency`, read by
-`systemTransparencyEnabled()`): with it off the bar and popups get
-`DWMSBT_NONE` and the popup plate is forced opaque
-(`buildPopupScene(opaquePanel)`); the daemon re-reads it on
+`systemTransparencyEnabled()`): with it off they become `DWMSBT_NONE`, and a
+popup plate WITHOUT a material is forced opaque
+(`buildPopupScene(opaquePanel)`) — a Mica panel keeps its translucent plate,
+since its brush paints with the setting off; the daemon re-reads it on
 `WM_SETTINGCHANGE`/`WM_THEMECHANGED` (forwarded from the bar windows) and
 re-applies the backdrops.
 The undocumented `SetWindowCompositionAttribute` accent path is dead on Win11
-— never used. **Per-item glass pills have no Windows analog**: item-level
-`glass`/`blur_radius` render as the shader's painted glass rim + translucent
-fills only. Rounded backdrop corners via `DWMWA_WINDOW_CORNER_PREFERENCE`
-(popups) — the maskImage mechanism has no equivalent and isn't needed.
+— never used. Rounded backdrop corners via `DWMWA_WINDOW_CORNER_PREFERENCE`
+(popups).
+
+**Per-item glass pills are Mica** (bar and popup surfaces). The reference's gate
+(`BarManager.swift`): an item gets a backdrop when `blur_radius > 0`, or when
+`background.glass` is on, the background draws, and the fill's alpha is above
+0.02 — the fill IS the tint. One difference, and only for an ITEM: a pill's
+`blur_radius` also needs `background.drawing`, because the backdrop takes the
+plate's rect and that plate only exists for a drawing background. A panel's
+rect is the whole window, so a bare `popup.blur_radius` gets a material with
+no tint there, exactly as on macOS. For each such plate `buildScene` emits a
+`DisplayList::backdrops` entry (the plate's snapped device-px rect and corner
+radius; CPU-only, outside the shared ABI) AND a `Hole` at the same rect, so
+the bar background is cut under it; the hole flag goes on the bar quad after
+all passes, since a pill's hole is only known as its plate is emitted.
+`BarSurface::setBackdrops` then syncs the composition host's backdrop layer:
+one `SpriteVisual` per entry under the swap-chain visual, painted with
+`Compositor.TryCreateBlurredWallpaperBackdropBrush` and clipped by a
+`CompositionRoundedRectangleGeometry`, change-guarded and reused by index, so
+a static bar touches nothing. The three edges — hole, material, fill — share
+one snapped rect and the clip is antialiased, so the corner shows no seam
+(measured at 200 %: strip 20 → 29 → 50 across the arc, then the rim).
+
+What the material is, measured: the blurred desktop wallpaper in screen
+space and nothing else — a window parked behind the bar does not show
+through it (a red window behind, pill stayed neutral grey), and it paints
+with Transparency effects OFF, unlike the DWM backdrops above, because it is
+a raw compositor brush rather than a policy-following material; that is how
+it works at all on a machine with the setting off. Consequently a wallpaper
+that is flat under the strip gives flat grey pills a step lighter than the
+bar; colour at the top of the wallpaper is what makes the material visible.
+`CreateHostBackdropBrush`, the brush that would sample live windows, is
+inert for an unpackaged app (paints black) and is not used.
+
+**Popup panels are Mica** by the same gate applied to the panel:
+`popup.blur_radius > 0` (the key the reference hangs its frosted panel
+material on) or `popup.background.glass` with a translucent plate.
+`buildPopupScene(…, backdrops)` emits the panel's snapped rect and corner
+radius as a backdrop with NO hole — nothing is painted beneath a panel — and
+the plate over it is the tint, exempt from the opaque-when-transparency-off
+rule. Glass rows inside the popup go through the same `emitItem` path as
+pills: backdrop plus a hole in the panel plate, whose hole flag is set after
+the members. That is a Windows extension — the reference gives popup rows no
+material and never holes a popup plate — and the shipped theme lights no
+rows. The daemon decides `backdrops` before the surface exists
+(`PopupSurface::backdropsAvailable()`, the compositor's answer without a
+host) because it changes the scene, then syncs the layer after `present()`.
+The tooltip bubble rides the same surface with an empty layer.
+
+Fallbacks and limits: `supportsBackdrops()` is false when the brush is
+unavailable (Windows 10), and then `SceneParams::backdrops` is off and no
+hole is cut, so the translucent fill sits on the opaque strip rather than on
+the desktop; a popup falls back to the DWM Acrylic plate (transparency-gated)
+and the opaque-plate rule, exactly the pre-Mica behaviour. A square-bottom (graph)
+plate gets a rounded hole (single-radius `Hole`), an accepted mismatch. The
+visual batch and the swap-chain flip are separate DWM updates, so a reflowing
+pill can lead or trail its material by one frame. A closing popup arms
+`kPopupCloseTimer` for the length of its fade: the ramp runs on the
+compositor with this process rendering nothing, so without it the window
+stays shown at zero opacity until the next unrelated pass, and **DWM keeps
+drawing its shadow for a shown window** — the panel disappears and its
+outline hangs there (measured at 2 s on a quiet bar). Composition opacity
+never reaches that shadow; only hiding the window does. A glass row whose plate
+overhangs the panel (padding or `background.height` past the 6pt inset) cuts
+the panel's border and rim along that edge, because a hole multiplies the
+whole quad — fill, border and rim alike; the shipped theme lights no rows.
 
 ---
 
@@ -831,7 +970,7 @@ backing scale (Windows scales are commonly 1.0/1.25/1.5).
 | system_woke / system_will_sleep | `WM_POWERBROADCAST`: `PBT_APMRESUMEAUTOMATIC` / `PBT_APMSUSPEND` (forwarded from the bar windows' WndProc to the message-only mailbox, which never receives broadcasts directly — no `RegisterSuspendResumeNotification`) | |
 | app_launched / app_terminated | From komorebi `Show`/`Destroy` window events (or the YTile adapter's manage/unmanage diffs) when a WM is attached; else 2 s process-snapshot diff (`CreateToolhelp32Snapshot`, armed lazily on first subscription) | **Semantics change**: window-scoped with komorebi (background processes invisible); WMI tracing needs admin — rejected. Document. |
 | Power | `GetSystemPowerStatus` + `RegisterPowerSettingNotification(GUID_ACDC_POWER_SOURCE, GUID_BATTERY_PERCENTAGE_REMAINING)` → `PBT_POWERSETTINGCHANGE` | Push, no polling. `"AC"`/`"BATTERY"` strings + dedupe/forced split preserved; the third source condition `PoHot` (UPS) maps to `"AC"` |
-| Audio | `IMMDeviceEnumerator` → `IAudioEndpointVolume` (+`IAudioEndpointVolumeCallback`), `IMMNotificationClient::OnDefaultDeviceChanged` re-arm | Callbacks marshal to UI thread. Muted → 0, integer percent. **Write path (ybar-win extension, no macOS analog)**: `--volume <0-100>` / `ybar.volume(pct)` → `SetMasterVolumeLevelScalar` on the held endpoint (0 mutes keeping the scalar; >0 sets then unmutes, scalar first so a muted endpoint cannot blip its old level); the set's own `OnNotify` publishes the new value back through the normal path. **Per-app sessions (ybar-win extension)**: `--query audio` / `--volume <0-100> <app>` enumerate `IAudioSessionManager2` on the default endpoint STATELESSLY per call (the tray_icons pattern — no session sinks, no lifetime surface; a fresh manager per call also always sees new sessions). Sessions group by lowercase exe stem (`system` = Explorer's system-sounds session, pinned last); Expired sessions and sessions whose process image path is unreadable (SYSTEM-owned, or the pid died while merely Inactive) are skipped so a group id is never empty; group volume is the max across sessions, muted only when all are. Reads mirror muted→0; writes mirror the master ordering (0 mutes keeping the scalar, >0 sets the scalar then unmutes). Session scalars are RELATIVE to master (100 = follow master) — the Windows 11 Settings mixer convention, kept as-is deliberately |
+| Audio | `IMMDeviceEnumerator` → `IAudioEndpointVolume` (+`IAudioEndpointVolumeCallback`), `IMMNotificationClient::OnDefaultDeviceChanged` re-arm | Callbacks marshal to UI thread. Muted → 0, integer percent. **Write path (ybar-win extension, no macOS analog)**: `--volume <0-100>` / `ybar.volume(pct)` → `SetMasterVolumeLevelScalar` on the held endpoint (0 mutes keeping the scalar; >0 sets then unmutes, scalar first so a muted endpoint cannot blip its old level); the set's own `OnNotify` publishes the new value back through the normal path. **Per-app sessions (ybar-win extension)**: `--query audio` / `--volume <0-100> <app>` enumerate `IAudioSessionManager2` on the default endpoint STATELESSLY per call (the tray_icons pattern — no session sinks, no lifetime surface; a fresh manager per call also always sees new sessions). Sessions group by lowercase exe stem (`system` = Explorer's system-sounds session, pinned last); Expired sessions and sessions whose process image path is unreadable (SYSTEM-owned, or the pid died while merely Inactive) are skipped so a group id is never empty; group volume is the max across sessions, muted only when all are. Reads mirror muted→0; writes mirror the master ordering (0 mutes keeping the scalar, >0 sets the scalar then unmutes). Session scalars are RELATIVE to master (100 = follow master) — the Windows 11 Settings mixer convention, kept as-is deliberately. Each group also reports **`background`**: no process running that image owns a visible, titled, unowned top-level window. Keyed by IMAGE and not by the session's pid, because the two are frequently different — Chrome routes audio through a utility process, so a per-pid window test would hide Chrome. The provider only REPORTS it; `--query audio` stays a complete view of the endpoint, and sketchybar-glass's mixer is what drops rows that are `background && !active`. That is what keeps a merely-resident app off the list: closing the Xbox app leaves `XboxPcApp.exe` running (unsuspended, ~100 threads) holding a live Inactive session, and a row for it is indistinguishable from a mixer that failed to refresh. `active` is checked first so anything actually producing sound stays listed even with no window. Caveat: an older UWP app's window belongs to `ApplicationFrameHost.exe`, so such an app reads as background even while visible |
 | Network | `NotifyNetworkConnectivityHintChange` + `WlanRegisterNotification` (ACM connect/disconnect); SSID via `WlanQueryInterface(wlan_intf_opcode_current_connection)` | **Win11 24H2 gates SSID behind Location privacy** — degrade to `"connected"` exactly like macOS-without-authorization; `wifi_ssid_prompt=on` opens `ms-settings:privacy-location` |
 | SystemStats | `GetSystemTimes` deltas (busy = (kernel−idle)+user), `GlobalMemoryStatusEx` (Total−Avail)/Total; `GetDiskFreeSpaceExA` on `%USERPROFILE%` (else `C:\`) for `DISK_*_GB` | Microsoft explicitly recommends this over PDH for ≥1 Hz sampling. Same 2 s interval, 0–100 contract |
 | Media | **GSMTC** (`GlobalSystemMediaTransportControlsSessionManager`, C++/WinRT): `CurrentSessionChanged` + `SessionsChanged` + `MediaPropertiesChanged` + `PlaybackInfoChanged`, plus a 10 s revalidation tick (GSMTC does not reliably report a vanished session — a closed browser tab leaves a `Playing` ghost) → `media_change` with `MEDIA_APP/STATE/TITLE/ARTIST/ALBUM` | Strict superset of the macOS distributed-notification hack: covers Spotify, browsers, most players, plus artwork/seek/transport for a future now-playing popup. `MEDIA_APP` carries the session's app id — scripts matching `"Music"|"Spotify"` need the documented mapping table. Cached-env replay on reload preserved. Fails only under session-0 (not applicable) |
@@ -1271,7 +1410,8 @@ the README's third-party section.)
 ### Implementation status (as of 2026-09-02, all live-verified on hardware)
 
 **Done** — W0 (wire + komorebi protocol + HLSL, incl. a live State round-trip);
-W1 (bar windows, DComp with the §7.1 DIP counter-scale, SDF background);
+W1 (bar windows — since moved to Windows.UI.Composition for §7.6 — SDF
+background);
 W2 mostly (DirectWrite stack, atlas, layout, full CLI — the advance-based
 widths and missing icon mapping are both closed below; only the §14 macOS
 golden-value gate stays open); W3 mostly (EventBus, ScriptRunner, mouse +
@@ -1364,7 +1504,10 @@ monitor 2 hit-tested against monitor 1's geometry whenever the two differed in
 width, and `bounding_rects` reported one monitor's rects under every display
 key.
 
-**Also done**: Acrylic backdrops (§7.6) for bars and popups, `ybar theme
+**Also done**: Acrylic backdrops (§7.6) for bars and popups, per-pill Mica
+backdrops and Mica popup panels (§7.6; both surfaces moved to
+Windows.UI.Composition for them, DirectComposition remains only as the
+frame pump's clock), `ybar theme
 list|current|use`, `ybar autostart enable|disable|status`, the
 `AppUserModelID`, the shipped `examples/catppuccin-komorebi` theme, and CI
 packaging of `examples/` + app-local `d3dcompiler_47.dll`.
@@ -1705,7 +1848,9 @@ write path on the audio provider plus the `--query audio` /
 `slider.interactive` / `image.desaturate` / `image.y_offset` keys and bar
 `reserve` (§3.3, §6.1) with the desaturate shader flag behind them (§7.3),
 graph baseline clamping and squared plate bottoms (§3.9), per-item glass
-pills (§7.6), distributed-notification bindings (§9), THERMAL_STATE always
+pills as Mica rather than Liquid Glass, rim kept, popup panels as Mica rather
+than frosted glass, and glass popup rows with their own material (§7.6),
+distributed-notification bindings (§9), THERMAL_STATE always
 `nominal` (§3.5), single topmost z-band (§16).
 
 ---

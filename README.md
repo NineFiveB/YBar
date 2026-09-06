@@ -1,6 +1,6 @@
 # YBar
 
-**Top bar for macOS and Windows** — a GPU-rendered, scriptable status bar. On macOS, Metal renders everything (SDF shapes, glyph-atlas text, display-link-paced animation at near-zero CPU); a [native Windows port](#windows) mirrors the engine on Direct3D 11 + DirectComposition. The architecture is [sketchybar](https://github.com/FelixKratz/SketchyBar)'s proven live-object model: a single `ybar` binary that is both daemon and CLI client, driven entirely over IPC — plus an embedded Lua runtime so whole configs run in-process, and themes and scripts move between the two platforms with only OS-inherent edits.
+**Top bar for macOS and Windows** — a GPU-rendered, scriptable status bar. On macOS, Metal renders everything (SDF shapes, glyph-atlas text, display-link-paced animation at near-zero CPU); a [native Windows port](#windows) mirrors the engine on Direct3D 11 + Windows.UI.Composition. The architecture is [sketchybar](https://github.com/FelixKratz/SketchyBar)'s proven live-object model: a single `ybar` binary that is both daemon and CLI client, driven entirely over IPC — plus an embedded Lua runtime so whole configs run in-process, and themes and scripts move between the two platforms with only OS-inherent edits.
 
 ![YBar in use: AeroSpace workspace pills with live app icons, then the app-menus swap](docs/media/ybar-demo.gif)
 
@@ -33,7 +33,7 @@ ybar --query hello                    # live state as JSON
 - Keeps **sketchybar's command grammar and script contract** — existing configs port mechanically, and a pure-Lua compatibility shim runs SbarLua configs nearly verbatim.
 - **GPU-rendered**: instanced SDF quads + a glyph atlas, damage-driven — zero GPU work while the bar is static (Metal on macOS, Direct3D 11 on Windows).
 - **100% public APIs** in v1, so OS updates don't break it.
-- On macOS 26+, pills and popups sit on **real Liquid Glass** (`NSGlassEffectView` backdrops — clear for bar pills, frosted for popups); older systems get an in-shader approximation. On Windows they map to DWM Acrylic that follows your system Transparency setting.
+- On macOS 26+, pills and popups sit on **real Liquid Glass** (`NSGlassEffectView` backdrops — clear for bar pills, frosted for popups); older systems get an in-shader approximation. On Windows they map to a Mica backdrop — the blurred wallpaper composed under the pill or panel, which paints whether or not Transparency effects are on — under the same in-shader rim; bar-level `glass` maps to DWM Acrylic, which does follow that setting.
 
 ## What's here
 
@@ -77,9 +77,9 @@ YBar has a native **Windows 11** port — a separate C++ engine with the same so
 *The `sketchybar-glass` theme on Windows 11, restyled to Fluent: workspace
 pills tracking the active YTile/komorebi workspace (under YTile, empty
 workspaces hide their pills), with the CPU and battery pills as continuous
-fill meters, the
-notification-area tray widget, and a flat, near-black strip that follows the
-system Transparency setting.*
+fill meters, and the notification-area tray widget. The strip itself is flat
+and near-black, carrying no Acrylic of its own — the material lives on the
+pills instead, as below. Recorded before Mica landed.*
 
 ![Windows popups: system monitor, Wi-Fi, Bluetooth, calendar, battery and tray flyouts](docs/media/ybar-win-popups.gif)
 
@@ -91,12 +91,38 @@ battery panel, and the tray widget — left-click opens an app, right-click
 quits it behind a confirm. Network and device names in this recording are
 placeholders.*
 
+### Mica
+
+Item-level `background.glass` on Windows is **Mica**: a blurred-wallpaper
+visual composed *under* the pill by the window's own Windows.UI.Composition
+tree, tinted by the pill's own translucent fill, with the shader's lit rim on
+top. The shipped theme turns it on for the widget pills, the calendar, the
+focused workspace pill, and the popup panels.
+
+![Mica pills: the widget pills switch between a flat fill and a wallpaper material with a lit rim](docs/media/ybar-win-mica.gif)
+
+*The same pills with `background.glass` toggled off and on. The material is
+the desktop wallpaper, blurred and sampled in screen space: a pill shows the
+patch of wallpaper it sits over, **not** the windows in between, and its own
+fill is only the tint. On a wallpaper that is flat under the strip, as here,
+the pills read as a lighter grey rather than as texture. Popup panels get the
+same treatment across the whole panel; their rows stay flat, though a row can
+cut its own window through the panel on the same gate a pill uses.*
+
+Two things follow from where the material comes from. It needs the Windows 11
+compositor, and it renders **whether or not** the system's Transparency
+effects setting is on — unlike the DWM Acrylic that *bar-level* `glass` maps
+to, which that setting switches off and which the shipped theme leaves off
+anyway, so the pills have a flat strip to stand against. And it is not macOS's
+Liquid Glass: Mica does not refract, so the rim is what gives a pill its edge.
+
 ### Depth effects (opt-in)
 
-The Windows engine can light and lift these pills; the shipped theme keeps
-them flat. Three things it can do, each one property away in Lua. All three
-were recorded by driving the same `--animate` path a real hover takes, so no
-cursor is in frame.
+The engine can also lift and glow these pills; the shipped theme lights them
+but leaves these two off. Glow is one flag away in Lua, `FOCUS_HALO` in
+`items/spaces.lua`; elevation is a one-line swap in `helpers/hover.lua`. All
+three GIFs below were recorded before Mica landed, by driving the same
+`--animate` path a real hover takes, so no cursor is in frame.
 
 ![Hover elevation: a pill lifts a point and gains a top-lit gradient as the pointer arrives, and settles back as it leaves](docs/media/ybar-win-depth-hover.gif)
 
@@ -106,21 +132,23 @@ far as input is concerned, so the hit rect stays exact.*
 
 ![Bevel lighting: every pill's rim switches from flat to a quarter-round edge lit from above, highlight on the top arc and shade under the bottom](docs/media/ybar-win-depth-bevel.gif)
 
-*Bevel lighting — item-level `background.glass = true`. The shader builds a
-real surface normal from the rounded-box SDF and shades it Blinn-Phong. It is
-not a backdrop and costs no extra draw.*
+*Bevel lighting — the rim half of `background.glass`. The shader builds a real
+surface normal from the rounded-box SDF and shades it Blinn-Phong, and the rim
+itself costs no extra draw; today the same property also composes the Mica
+material above.*
 
 ![Glow: a soft white halo sweeps from pill to pill](docs/media/ybar-win-depth-glow.gif)
 
 *Glow — `background.shadow.blur` with a light colour at zero offset. The same
 soft-falloff quad is a drop shadow with a dark colour; either way the 112-byte
-instance ABI shared with macOS is untouched. The theme uses it for the
-focused-workspace halo.*
+instance ABI shared with macOS is untouched. It sits one flag from the
+focused-workspace halo and ships off, because the focused pill already reads
+as the Mica one.*
 
-- **Engine** — Direct3D 11 + a DirectWrite glyph atlas + DirectComposition, paced to the monitor's refresh rate (120 Hz verified), near-zero CPU while static: the macOS Metal engine's mirror.
+- **Engine** — Direct3D 11 + a DirectWrite glyph atlas + Windows.UI.Composition, which is what carries the Mica layer (DirectComposition survives only as the frame clock), paced to the monitor's refresh rate (120 Hz verified), near-zero CPU while static: the macOS Metal engine's mirror.
 - **Window management** — [komorebi](https://github.com/LGUG2Z/komorebi) and YTile as first-class workspace adapters (replacing AeroSpace/yabai), driven by their event streams rather than CLI polling.
 - **Native providers** — battery/power, audio (WASAPI), network & Wi-Fi (`wlanapi` + connectivity-hint notifications; the Wi-Fi flyout's network list shells `netsh`), now-playing media (GSMTC), and in-process CPU/memory stats, all mapped to the same events as macOS.
-- **Look** — the flagship `sketchybar-glass` theme is ported and restyled to Windows 11 Fluent: flat pills, Acrylic and popup opacity that follow your system **Transparency** setting, and Fluent Wi-Fi / Bluetooth / system-monitor / calendar popups.
+- **Look** — the flagship `sketchybar-glass` theme is ported and restyled to Windows 11 Fluent: Mica pills and popup panels over a flat near-black strip with no Acrylic of its own (bar-level `glass` maps to the DWM Acrylic plate that follows your system **Transparency** setting; the theme leaves it off so the pills have something to stand against), and Fluent Wi-Fi / Bluetooth / system-monitor / calendar popups.
 
 **Install** — one line in PowerShell: `irm https://raw.githubusercontent.com/NineFiveB/YBar/windows/scripts/install.ps1 | iex` — or with [Scoop](https://scoop.sh): `scoop install https://raw.githubusercontent.com/NineFiveB/YBar/windows/packaging/scoop/ybar-win.json` — or download `ybar-win-<version>-x64.zip` from a [`win-v*` release](../../releases). Release binaries are Authenticode-signed (Azure Trusted Signing); a winget manifest is staged under `packaging/` on the `windows` branch.
 
