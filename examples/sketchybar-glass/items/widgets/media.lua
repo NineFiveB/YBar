@@ -69,7 +69,7 @@ local media = sbar.add("item", "widgets.media", {
 -- close it. With it off, the only close paths are this widget's own
 -- (toggle, global exit, playback stop).
 local media_bracket = sbar.add("bracket", "widgets.media.bracket", { media.name }, {
-  background = { color = colors.bg1 },
+  background = { color = colors.mica }, -- tint over the Mica material
   popup = { align = "center", wrap_width = popup_width, auto_close = false },
 })
 

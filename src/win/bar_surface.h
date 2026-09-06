@@ -1,11 +1,12 @@
 // Per-monitor bar window (spec section 6): borderless non-activating
-// WS_EX_NOREDIRECTIONBITMAP popup with a DirectComposition visual hosting the
-// renderer's composition swap chain.
+// WS_EX_NOREDIRECTIONBITMAP popup with a Windows.UI.Composition tree hosting
+// the renderer's composition swap chain over the per-pill backdrop layer.
 
 #pragma once
 
 #include <functional>
 #include <memory>
+#include <vector>
 
 #include "model/bar_settings.h"
 #include "render/renderer.h"
@@ -65,6 +66,12 @@ public:
     // Broadcast messages (WM_POWERBROADCAST suspend/resume, WM_FONTCHANGE)
     // never reach message-only windows — the bar windows forward them here.
     static void setBroadcastTarget(void* messageWindow);
+
+    // Per-pill backdrops (spec 7.6): whether this system can compose a
+    // wallpaper-material visual under a glass pill, and the per-frame sync
+    // of that layer to the scene's DisplayList::backdrops (device px).
+    bool supportsBackdrops() const;
+    void setBackdrops(const std::vector<ybar::render::Backdrop>& backdrops);
 
     ybar::render::Surface& renderSurface();
     const MonitorInfo& monitor() const;

@@ -24,6 +24,10 @@ struct SceneParams {
     // Pointer in LOGICAL points on this surface; negative = not over it.
     double pointerX = -1;
     double pointerY = -1;
+    // The surface hosts a wallpaper-backdrop visual under each glass pill
+    // (spec 7.6): emit DisplayList::backdrops and cut the bar background
+    // under them. Off = the painted rim only, as before.
+    bool backdrops = false;
 };
 
 // Clips a glyph quad to a device-px box and remaps its UVs proportionally —
@@ -40,7 +44,8 @@ DisplayList buildScene(const std::vector<std::unique_ptr<ybar::model::Item>>& it
 // One item's full emission (background/shadow/icon/components/label) at a
 // given content box — shared by the bar and popup builds.
 void emitItem(DisplayList& list, ybar::model::Item& item, const ybar::model::Rect& contentBox,
-              double scale, FontCache& fonts, GlyphAtlas& atlas, double clock = 0);
+              double scale, FontCache& fonts, GlyphAtlas& atlas, double clock = 0,
+              bool backdrops = false);
 
 // Popup panel: popup.background plate + members at their layout boxes
 // (panel-local, spec 3.9). Same paint order as the bar. `opaquePanel` forces

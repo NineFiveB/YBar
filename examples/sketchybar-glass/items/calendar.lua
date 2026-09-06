@@ -59,7 +59,7 @@ local cal = sbar.add("item", "calendar", {
   padding_left = 0,
   padding_right = 1,
   background = {
-    color = colors.bg2,
+    color = colors.mica, -- tint over the Mica material (glass set in ybarrc.lua)
     border_color = colors.black,
     border_width = 1
   },
@@ -76,10 +76,11 @@ local cal_bracket = sbar.add("bracket", "calendar.bracket", { cal.name }, {
 })
 
 -- The fill lives on the ITEM here, not the bracket (see the padding note
--- above), so the hover lift starts from bg2 rather than bg1 — but both the
--- item and its transparent bracket still have to drive it, because the
--- bracket is what the hit test returns over the pill's outer padding.
-require("helpers.hover").attach(cal, { cal, cal_bracket }, colors.bg2, colors.bg3)
+-- above), so the item is what carries the Mica tint and the glass flag
+-- (ybarrc.lua names `calendar`, not its bracket) — but both the item and its
+-- transparent bracket still have to drive the hover, because the bracket is
+-- what the hit test returns over the pill's outer padding.
+require("helpers.hover").attach(cal, { cal, cal_bracket }, colors.mica, colors.mica_hover)
 
 -- Padding item required because of bracket
 sbar.add("item", { position = "right", width = settings.group_paddings })

@@ -54,7 +54,7 @@ local tray = sbar.add("item", "widgets.apps", {
 })
 
 local tray_bracket = sbar.add("bracket", "widgets.apps.bracket", { tray.name }, {
-  background = { color = colors.bg1 },
+  background = { color = colors.mica }, -- tint over the Mica material
   popup = { align = "center", height = 26 },
 })
 

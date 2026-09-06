@@ -31,6 +31,15 @@ return {
   bg1 = 0xff1a1a1c,          -- resting pill fill
   bg2 = 0xff26262a,          -- raised/selected surface, and the hover lift off bg1
   bg3 = 0xff32323a,          -- hover lift off bg2, for the pills that rest raised
+  -- Mica pills (glass = true on Windows): the wallpaper material IS the
+  -- surface and the fill is only its tint, so these carry alpha where the
+  -- tones above deliberately do not. Windows' own dark Mica is #202020 at
+  -- 80%; this sits at 60% so more of the wallpaper reads through the strip,
+  -- and it is the one line to tune. The hover is the same tint two tones
+  -- lighter: over the material a white overlay would wash the wallpaper out
+  -- rather than lift the pill.
+  mica = 0x99202020,
+  mica_hover = 0x99343438,
   -- Popup rows rest transparent on a solid panel, so their hover IS an
   -- overlay. That is safe here in a way it is not on the bar, where the tones
   -- above are opaque precisely so a pill can sit darker than the strip.

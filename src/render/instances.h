@@ -99,15 +99,33 @@ struct Uniforms {
 // cbuffers round to 16; 24 bytes of payload occupies 32.
 static_assert(sizeof(Uniforms) == 32, "Uniforms ABI stride");
 
+// A per-pill backdrop (spec 7.6): a wallpaper-material visual the window
+// layer composes UNDER the swap chain, clipped to this rounded rect. CPU-side
+// only, never uploaded, so it is outside the shared ABI. Device px, top-left
+// origin, one radius for all four corners (the same limit as Hole, and the
+// bar background carries a matching hole for every one of these).
+struct Backdrop {
+    Float2 origin;
+    Float2 size;
+    float radius = 0;
+};
+
 // Flat, paint-ordered frame content in DEVICE PIXELS (top-left origin).
 // Draw order: all quads -> all shape triangles -> all glyphs (spec 3.9).
 struct DisplayList {
-    static constexpr std::size_t kMaxHoles = 16;
+    // Windows extension: the reference caps background.clip holes at 16.
+    // Glass pills spend from the same budget here (one hole per backdrop),
+    // and six widget brackets, the calendar and a focused workspace already
+    // sit at eight;
+    // the cap is CPU-side only (the hole buffer grows, the shader loops
+    // holeCount), so it is raised rather than shared.
+    static constexpr std::size_t kMaxHoles = 32;
 
     std::vector<QuadInstance> quads;
     std::vector<ShapeVertex> shapeVertices;
     std::vector<GlyphInstance> glyphs;
     std::vector<Hole> holes;
+    std::vector<Backdrop> backdrops;
     Float2 viewportSize;
     // Device-px pointer position on this surface; negative = not over it.
     Float2 pointer{-1.0f, -1.0f};

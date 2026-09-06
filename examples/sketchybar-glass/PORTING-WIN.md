@@ -9,10 +9,11 @@ the item structure port verbatim; only OS-facing surfaces differ. Same-named
 item files should diff against the macOS tree (`examples/sketchybar-glass` +
 `examples/sketchybar-port` on `main`) with only OS-inherent changes. The
 overlay files (`bar.lua`, `default.lua`, `colors.lua`) diverge on purpose:
-they restyle the theme Fluent-flat — `glass = false`, popup
-`blur_radius = 0`, a 35pt bar, opaque pill tones — instead of reproducing
-Liquid Glass; `helpers/default_font.lua` carries only the font substitution
-from the table below.
+they restyle the theme for Windows — a flat 35pt bar with no Acrylic, popup
+`blur_radius = 0`, and Mica pills (a wallpaper-material backdrop under a
+translucent `colors.mica` tint, lit by the shader's rim) in place of Liquid
+Glass; `helpers/default_font.lua` carries only the font substitution from
+the table below.
 
 ## Layout difference
 
@@ -88,10 +89,16 @@ installed via `ybar theme use` must be self-contained.
 
 ## Glass rendering
 
-The theme ships Fluent-flat: `bar.lua` sets `glass = false` and
-`default.lua` turns item/popup `glass` and popup `blur_radius` off — the
-Windows default look is flat, while the macOS tree keeps Liquid Glass. Flip
-them on to get the glass look back: the bar's `glass = true` gets a real
-Acrylic backdrop (DWM). Item-level glass renders as the shader's specular
-rim + translucent fill — per-pill backdrop blur has no Windows analog (spec
-§7.6); the bar backdrop carries the material instead.
+The bar itself stays flat: `bar.lua` sets `glass = false` (bar-level glass
+is a DWM Acrylic plate that follows the Transparency-effects setting) and
+`default.lua` leaves item/popup `glass` and popup `blur_radius` off, so
+popup rows and separators never pick the material up. `ybarrc.lua` then
+turns item-level glass on BY NAME for the six widget brackets and the
+calendar item, and their fill is `colors.mica`, a 60% `#202020` tint. On
+Windows item-level glass is Mica: a blurred-wallpaper visual composed under
+the pill (spec §7.6), with the pill's translucent fill as the tint and the
+shader's lit rim on top. It follows the pill (the focused workspace carries
+one too, via `items/spaces.lua`), needs Windows 11, and works with
+Transparency effects off. What it shows is the wallpaper: a wallpaper that
+is flat under the bar gives flat grey pills, colour at the top of the
+wallpaper shows through them. Liquid Glass refraction is not reproduced.

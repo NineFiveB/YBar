@@ -97,6 +97,37 @@ void pushShadow(DisplayList& list, const BackgroundStyle& bg, const Rect& box, d
     list.quads.push_back(quad);
 }
 
+// Per-pill backdrop (spec 7.6). The reference's gate, verbatim: blur_radius
+// forces one; glass implies one only for a pill that actually paints, because
+// the fill IS the material's tint and a fully transparent fill would leave
+// bare wallpaper sitting in the strip.
+bool wantsBackdrop(const Item& item) {
+    if (!item.background.drawing) return false;
+    if (item.blurRadius > 0) return true;
+    return item.background.glass && item.background.color.a() > 0.02f;
+}
+
+// A backdrop is a visual UNDER the swap chain, so the bar background needs a
+// hole at the same rect or the strip would simply cover it: every backdrop
+// costs one hole from the clip budget, and past the cap the pill keeps its
+// painted rim and nothing else. Both take the plate's snapped rect, so the
+// three edges -- hole, material, fill -- share one pixel boundary. Radius is
+// the top-left corner's: a square-bottom (graph) plate gets a rounded hole,
+// an accepted mismatch for a plate no theme lights.
+void pushBackdrop(DisplayList& list, const QuadInstance& plate) {
+    if (list.holes.size() >= DisplayList::kMaxHoles) return;
+    Backdrop backdrop;
+    backdrop.origin = plate.origin;
+    backdrop.size = plate.size;
+    backdrop.radius = plate.radii.x;
+    list.backdrops.push_back(backdrop);
+    Hole hole;
+    hole.origin = plate.origin;
+    hole.size = plate.size;
+    hole.radius = plate.radii.x;
+    list.holes.push_back(hole);
+}
+
 } // namespace
 
 // Clips a glyph quad to `clip` (device px) and remaps its UVs proportionally
@@ -416,7 +447,8 @@ DisplayList buildScene(const std::vector<std::unique_ptr<Item>>& items,
                     static_cast<float>(params.pointerY < 0 ? -1.0 : params.pointerY * scale)};
 
     // 0) background.clip cutouts: items punch item-shaped rounded holes in
-    // the BAR background only, max 16 per frame (spec 3.9).
+    // the BAR background only, kMaxHoles per frame (spec 3.9). Glass pills
+    // add theirs below, as their plates are emitted.
     for (const auto& item : items) {
         if (list.holes.size() >= DisplayList::kMaxHoles) break;
         if (!item->drawing || item->background.clip <= 0) continue;
@@ -451,10 +483,10 @@ DisplayList buildScene(const std::vector<std::unique_ptr<Item>>& items,
         barBg.cornerRadius = settings.cornerRadius;
         barBg.cornerExponent = settings.cornerExponent;
         barBg.glass = settings.glass;
-        auto quad = backgroundQuad(barBg, Rect{0, 0, params.barWidth, params.barHeight}, scale);
-        if (!list.holes.empty()) quad.flags |= kQuadFlagHoles;
-        list.quads.push_back(quad);
+        list.quads.push_back(
+            backgroundQuad(barBg, Rect{0, 0, params.barWidth, params.barHeight}, scale));
     }
+    const std::size_t barQuad = list.quads.size() - 1;
 
     // 2) Bracket backgrounds, painted BEFORE members so paint order replaces
     // z-order (spec 3.9). Frames are computed post-layout by the caller.
@@ -466,7 +498,9 @@ DisplayList buildScene(const std::vector<std::unique_ptr<Item>>& items,
         const Rect box{item->frame.x, item->frame.midY() - height / 2 - item->yOffset,
                        item->frame.width, height};
         pushShadow(list, item->background, box, scale, false);
-        list.quads.push_back(backgroundQuad(item->background, box, scale));
+        const auto plate = backgroundQuad(item->background, box, scale);
+        if (params.backdrops && wantsBackdrop(*item)) pushBackdrop(list, plate);
+        list.quads.push_back(plate);
     }
 
     // 3) Per item (paint order: shadow -> background -> icon -> label; spec 3.9).
@@ -475,9 +509,13 @@ DisplayList buildScene(const std::vector<std::unique_ptr<Item>>& items,
         if (item->position == ybar::model::ItemPosition::Popup) continue;
         const auto boxIt = contentBoxes.find(item->id);
         if (boxIt == contentBoxes.end() || boxIt->second.isZero()) continue;
-        emitItem(list, *item, boxIt->second, scale, fonts, atlas, params.clock);
+        emitItem(list, *item, boxIt->second, scale, fonts, atlas, params.clock,
+                 params.backdrops);
     }
 
+    // The hole flag goes on last: clip holes are known up front, but a glass
+    // pill's hole is only cut as its plate is emitted.
+    if (!list.holes.empty()) list.quads[barQuad].flags |= kQuadFlagHoles;
     return list;
 }
 
@@ -507,7 +545,7 @@ DisplayList buildPopupScene(const std::vector<Item*>& members,
 }
 
 void emitItem(DisplayList& list, Item& item, const Rect& contentBox, double scale,
-              FontCache& fonts, GlyphAtlas& atlas, double clock) {
+              FontCache& fonts, GlyphAtlas& atlas, double clock, bool backdrops) {
     if (item.background.drawing) {
         const auto& iconLine = fonts.shape(item.icon.displayString(), item.icon.font);
         const auto& labelLine = fonts.shape(item.label.displayString(), item.label.font);
@@ -533,6 +571,7 @@ void emitItem(DisplayList& list, Item& item, const Rect& contentBox, double scal
         pushShadow(list, item.background, bgRect, scale, squareBottom);
         auto plateQuad = backgroundQuad(item.background, bgRect, scale);
         if (squareBottom) plateQuad.radii.z = plateQuad.radii.w = 0;
+        if (backdrops && wantsBackdrop(item)) pushBackdrop(list, plateQuad);
         list.quads.push_back(plateQuad);
     }
 
