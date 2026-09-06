@@ -907,7 +907,13 @@ the desktop; a popup falls back to the DWM Acrylic plate (transparency-gated)
 and the opaque-plate rule, exactly the pre-Mica behaviour. A square-bottom (graph)
 plate gets a rounded hole (single-radius `Hole`), an accepted mismatch. The
 visual batch and the swap-chain flip are separate DWM updates, so a reflowing
-pill can lead or trail its material by one frame. A glass row whose plate
+pill can lead or trail its material by one frame. A closing popup arms
+`kPopupCloseTimer` for the length of its fade: the ramp runs on the
+compositor with this process rendering nothing, so without it the window
+stays shown at zero opacity until the next unrelated pass, and **DWM keeps
+drawing its shadow for a shown window** — the panel disappears and its
+outline hangs there (measured at 2 s on a quiet bar). Composition opacity
+never reaches that shadow; only hiding the window does. A glass row whose plate
 overhangs the panel (padding or `background.height` past the 6pt inset) cuts
 the panel's border and rim along that edge, because a hole multiplies the
 whole quad — fill, border and rim alike; the shipped theme lights no rows.

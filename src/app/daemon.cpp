@@ -87,6 +87,7 @@ constexpr UINT_PTR kStatsTimer = 5;
 constexpr UINT_PTR kTooltipTimer = 6;
 constexpr UINT_PTR kAppsTimer = 7;
 constexpr UINT_PTR kDisplayChangeTimer = 8;
+constexpr UINT_PTR kPopupCloseTimer = 9;
 
 // Power setting GUIDs (winnt.h declares them; define locally to avoid
 // link-time surprises with initguid ordering).
@@ -608,6 +609,9 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                 g_state->sampleStats();
             } else if (wParam == kAppsTimer && g_state) {
                 g_state->appLifecycle.sample();
+            } else if (wParam == kPopupCloseTimer && g_state) {
+                KillTimer(hwnd, kPopupCloseTimer);
+                g_state->renderAll(); // ends in updatePopups, which hides it
             } else if (wParam == kDisplayChangeTimer && g_state) {
                 KillTimer(hwnd, kDisplayChangeTimer);
                 g_state->rebuildSurfaces();
@@ -1484,6 +1488,18 @@ void DaemonState::updatePopups() {
                     // or the dismissing click lands in a ghost.
                     live.memberIds.clear();
                     live.boxes.clear();
+                    // And something must come BACK when the fade ends. The
+                    // opacity ramp runs on the compositor, so this process
+                    // renders nothing while it plays, and the hide below only
+                    // happens on whatever pass follows -- the clock ticking, a
+                    // hover, a stats sample. Until then the window is still
+                    // SHOWN at zero opacity, and DWM keeps drawing its shadow
+                    // for it: the panel vanishes and its outline hangs there
+                    // for however long the next render takes (measured at 2 s
+                    // with a quiet bar). One shot, a frame past the end.
+                    SetTimer(messageWindow, kPopupCloseTimer,
+                             static_cast<UINT>(host->popup.fadeOutFrames * 1000.0 / 60.0) + 16,
+                             nullptr);
                     continue;
                 }
                 releaseHoverIn(live);
