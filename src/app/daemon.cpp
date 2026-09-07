@@ -83,6 +83,9 @@ constexpr UINT kMsgNetwork = WM_APP + 10;
 constexpr UINT kMsgModifier = WM_APP + 11;
 constexpr UINT kMsgGlobalMouse = WM_APP + 12; // wParam: 1 entered, 0 exited
 constexpr UINT kMsgKomorebiApp = WM_APP + 13;
+// A THREAD message, posted to the hook thread and never to a window: arm
+// WH_KEYBOARD_LL on the thread that will actually pump it.
+constexpr UINT kMsgInstallKeyboardHook = WM_APP + 14;
 constexpr UINT_PTR kStatsTimer = 5;
 constexpr UINT_PTR kTooltipTimer = 6;
 constexpr UINT_PTR kAppsTimer = 7;
@@ -207,14 +210,19 @@ struct DaemonState {
     std::unordered_map<int, LivePopup> popups;
     std::unique_ptr<ybar::win::PopupSurface> tooltip;
     int tooltipItemId = -1;
-    bool hotloadEnabled = false;  // mirrors the last --hotload state
-    void* mouseHook = nullptr;    // HHOOK (WH_MOUSE_LL) for outside-click close
-    void* keyboardHook = nullptr; // HHOOK (WH_KEYBOARD_LL), modifier_change only
+    bool hotloadEnabled = false; // mirrors the last --hotload state
+    // The low-level hooks live on their own thread now (startInputHookThread),
+    // so their HHOOKs belong to it, not here. This only latches that the
+    // keyboard one has been asked for — a re-subscription after a config
+    // reload must not install a second copy.
+    bool keyboardHookRequested = false;
     // Global pointer tracking (mouse.entered.global / mouse.exited.global) is
     // the union over every ybar window, so it rides the existing low-level
-    // hook rather than per-window WM_MOUSELEAVE.
-    bool globalMouseArmed = false;
-    bool globalMouseInside = false;
+    // hook rather than per-window WM_MOUSELEAVE. Atomic because that hook runs
+    // on its own thread while the UI thread settles the same flags from
+    // rebuildSurfaces and the slider release.
+    std::atomic<bool> globalMouseArmed{false};
+    std::atomic<bool> globalMouseInside{false};
     std::string lastModifier = "none";
 
     // Providers (spec 10): dedupe state.
@@ -273,7 +281,9 @@ struct DaemonState {
     // Slider dragging (spec 3.9): the item captured on press keeps receiving
     // motion until release, even past its own frame. Shared by the bar and
     // popup mouse paths — only the frame source differs.
-    int draggingSliderId = -1;
+    // Atomic: the low-level mouse hook runs on its own thread and reads this
+    // to veto a global mouse.exited mid-drag.
+    std::atomic<int> draggingSliderId{-1};
     double sliderContentOffset(const ybar::model::Item& item);
     void updateSlider(ybar::model::Item& item, std::size_t surfaceIndex, double localX);
     void updateSliderInPopup(ybar::model::Item& item, const LivePopup& live, double localX);
@@ -857,10 +867,12 @@ LRESULT CALLBACK mouseHookProc(int code, WPARAM wParam, LPARAM lParam) {
         // close the popup out from under the drag and eat the release. The
         // release re-checks containment.
         const bool vetoed = !inside && g_state->draggingSliderId != -1;
-        if (inside != g_state->globalMouseInside && !vetoed) {
-            g_state->globalMouseInside = inside;
+        // exchange, not compare-then-assign: this runs on the hook thread now
+        // while the UI thread settles the same flag, and a torn transition
+        // there posts a duplicate entered/exited or swallows one, which leaves
+        // the pair unbalanced for the rest of the session.
+        if (!vetoed && g_state->globalMouseInside.exchange(inside) != inside)
             PostMessageW(g_state->messageWindow, kMsgGlobalMouse, inside ? 1 : 0, 0);
-        }
     }
     return CallNextHookEx(nullptr, code, wParam, lParam);
 }
@@ -882,6 +894,90 @@ LRESULT CALLBACK keyboardHookProc(int code, WPARAM wParam, LPARAM lParam) {
         }
     }
     return CallNextHookEx(nullptr, code, wParam, lParam);
+}
+
+// The low-level hooks get a thread of their own. A WH_MOUSE_LL or
+// WH_KEYBOARD_LL hook is dispatched to the thread that INSTALLED it, and only
+// while that thread sits inside a message-retrieval call — so installing them
+// from the UI thread put every mouse event on the system behind whatever the
+// bar happened to be doing. That is a large part of why a stall here got
+// reported as a hang rather than a stutter, and Windows silently drops a hook
+// whose thread overruns LowLevelHooksTimeout, killing outside-click dismissal
+// for the session with no error anywhere. This thread does nothing but pump.
+//
+// File scope rather than DaemonState members on purpose: the thread body must
+// touch nothing that shutdown is tearing down, which is what lets
+// stopInputHookThread() give up on a thread that never came up instead of
+// blocking exit on it.
+std::thread g_hookThread;
+std::atomic<DWORD> g_hookThreadId{0};
+HANDLE g_hookThreadReady = nullptr; // manual-reset; set once the queue exists
+
+void startInputHookThread() {
+    g_hookThreadReady = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    g_hookThread = std::thread([] {
+        MSG msg;
+        // Force the message queue into existence before anyone can
+        // PostThreadMessageW to it — otherwise the keyboard-hook request
+        // loses the race and modifier_change silently never arms.
+        PeekMessageW(&msg, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
+        const HHOOK mouse =
+            SetWindowsHookExW(WH_MOUSE_LL, mouseHookProc, GetModuleHandleW(nullptr), 0);
+        HHOOK keyboard = nullptr;
+        g_hookThreadId.store(GetCurrentThreadId());
+        if (g_hookThreadReady) SetEvent(g_hookThreadReady);
+        // A plain GetMessage loop, deliberately: low-level hook calls are
+        // delivered through the message-retrieval path, and this is the shape
+        // of loop documented to service them. The queue owns no window, so
+        // there is nothing here to translate or dispatch.
+        while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+            if (msg.message == kMsgInstallKeyboardHook && !keyboard)
+                keyboard = SetWindowsHookExW(WH_KEYBOARD_LL, keyboardHookProc,
+                                             GetModuleHandleW(nullptr), 0);
+        }
+        // A hook must be removed by the thread that installed it.
+        if (keyboard) UnhookWindowsHookEx(keyboard);
+        if (mouse) UnhookWindowsHookEx(mouse);
+    });
+    // Two USER32 calls long in practice, and bounded regardless: both the
+    // arming path and shutdown need the thread id published above.
+    if (g_hookThreadReady) WaitForSingleObject(g_hookThreadReady, 2000);
+}
+
+// Arm WH_KEYBOARD_LL (modifier_change only). It has to be installed BY the
+// thread that pumps it, so this is a request rather than a call.
+bool requestKeyboardHook() {
+    const DWORD id = g_hookThreadId.load();
+    return id != 0 && PostThreadMessageW(id, kMsgInstallKeyboardHook, 0, 0) != 0;
+}
+
+void stopInputHookThread() {
+    bool joined = true;
+    if (g_hookThread.joinable()) {
+        // The queue owns no window, so WM_QUIT is the only way out of
+        // GetMessage. The id is published before the first GetMessage runs,
+        // so this all but always succeeds on the first attempt.
+        bool posted = false;
+        for (int attempt = 0; attempt < 100 && !posted; ++attempt) {
+            const DWORD id = g_hookThreadId.load();
+            if (id) posted = PostThreadMessageW(id, WM_QUIT, 0, 0) != 0;
+            if (!posted) Sleep(5);
+        }
+        // Never wedge exit on a thread that never came up: its hook procs
+        // null-check g_state and it owns nothing else, so letting it run out
+        // with the process is safe. The ready event is then left open on
+        // purpose — the abandoned thread may still be about to signal it.
+        if (posted) {
+            g_hookThread.join();
+        } else {
+            g_hookThread.detach();
+            joined = false;
+        }
+    }
+    if (g_hookThreadReady && joined) {
+        CloseHandle(g_hookThreadReady);
+        g_hookThreadReady = nullptr;
+    }
 }
 
 } // namespace
@@ -930,10 +1026,7 @@ void DaemonState::rebuildSurfaces() {
     atlases.clear();
     // A destroyed window never delivers WM_MOUSELEAVE, so the pointer would
     // stay "inside" forever and mouse.exited.global would die for the session.
-    if (globalMouseInside) {
-        globalMouseInside = false;
-        bus.trigger("mouse.exited.global", "");
-    }
+    if (globalMouseInside.exchange(false)) bus.trigger("mouse.exited.global", "");
     hoverItemId = -1;
     for (const auto& monitor : ybar::win::enumerateMonitors()) {
         if (!settings.includesDisplay(monitor.arrangementIndex, monitor.primary)) continue;
@@ -1385,10 +1478,10 @@ void DaemonState::commitSliderRelease(ybar::model::Item& item) {
         POINT cursor{};
         GetCursorPos(&cursor);
         const bool inside = ybar::win::pointOverYBarWindow(cursor.x, cursor.y);
-        if (inside != globalMouseInside) {
-            globalMouseInside = inside;
+        // exchange: the hook thread settles this same flag, and the end of a
+        // drag is exactly when both threads are looking at it.
+        if (globalMouseInside.exchange(inside) != inside)
             bus.trigger(inside ? "mouse.entered.global" : "mouse.exited.global", "");
-        }
     }
 }
 
@@ -2042,8 +2135,7 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     const HWINEVENTHOOK frontAppHook =
         SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr,
                         foregroundHook, 0, 0, WINEVENT_OUTOFCONTEXT);
-    state.mouseHook = SetWindowsHookExW(WH_MOUSE_LL, mouseHookProc,
-                                        GetModuleHandleW(nullptr), 0);
+    startInputHookThread();
     state.bus.onFirstSubscription = [&state](const std::string& event) {
         if (event == "system_stats" && !state.statsArmed) {
             state.statsArmed = true;
@@ -2066,10 +2158,11 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
                 SetTimer(state.messageWindow, kAppsTimer, 2000, nullptr);
             }
         } else if (event == "modifier_change") {
-            if (!state.keyboardHook) {
-                state.keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, keyboardHookProc,
-                                                       GetModuleHandleW(nullptr), 0);
-            }
+            // Installing it has to happen ON the hook thread, so this is a
+            // post. Leaving the latch clear when the post fails means the next
+            // subscription retries — a config reload re-arms every event.
+            if (!state.keyboardHookRequested)
+                state.keyboardHookRequested = requestKeyboardHook();
         } else if (event == "mouse.entered.global" || event == "mouse.exited.global") {
             state.globalMouseArmed = true;
         }
@@ -2297,8 +2390,7 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     }
 
     if (frontAppHook) UnhookWinEvent(frontAppHook);
-    if (state.mouseHook) UnhookWindowsHookEx(static_cast<HHOOK>(state.mouseHook));
-    if (state.keyboardHook) UnhookWindowsHookEx(static_cast<HHOOK>(state.keyboardHook));
+    stopInputHookThread(); // unhooks on the installing thread, then joins
     state.stopAnimationPump(); // join before the window (and state) go away
     if (state.frameDue) {
         CloseHandle(state.frameDue);
