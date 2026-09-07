@@ -118,15 +118,46 @@ bool renderIcon(HICON icon, int sizePx, std::vector<BYTE>& pixels) {
     return drawn;
 }
 
-// Resolves an executable path to its shell icon.
+// Resolves an executable path to its icon, read straight out of the image.
+//
+// NOT SHGetFileInfoW. That resolves an icon by instantiating the file's
+// registered shell icon handler: third-party in-process COM, which runs in
+// whatever apartment calls it. This runs inside renderAll() on the STA message
+// thread, so a handler that blocks stops the pump and Windows reports the bar
+// as hung (AppHangB1) rather than slow. Microsoft documents the call as one to
+// make from a background thread for exactly that reason.
+//
+// It went unnoticed while tray icons were the only source, because those
+// prefer their cached PNG snapshot and only fall back to an exe path. The
+// per-app mixer made it reachable for arbitrary third-party executables, one
+// icon per audio session, resolved on the frame that opens the panel.
+//
+// PrivateExtractIconsW reads the RT_GROUP_ICON resource at the size we ask
+// for, with no handler and no COM. A running app's image is already mapped, so
+// this is a resource lookup rather than a shell round trip. Icons stay
+// per-app: SHGFI_USEFILEATTRIBUTES would also avoid touching the file, but it
+// returns the generic icon registered for .exe and every mixer row would look
+// the same.
 bool iconForExecutable(const std::wstring& path, int sizePx, std::vector<BYTE>& pixels) {
-    SHFILEINFOW info{};
-    const UINT flags = SHGFI_ICON | (sizePx > 16 ? SHGFI_LARGEICON : SHGFI_SMALLICON);
-    if (!SHGetFileInfoW(path.c_str(), 0, &info, sizeof(info), flags) || !info.hIcon)
-        return false;
-    const bool ok = renderIcon(info.hIcon, sizePx, pixels);
-    DestroyIcon(info.hIcon);
-    return ok;
+    HICON icon = nullptr;
+    // Returns the count extracted; 0 and (UINT)-1 both mean no icon.
+    if (PrivateExtractIconsW(path.c_str(), 0, sizePx, sizePx, &icon, nullptr, 1, 0) == 1 &&
+        icon) {
+        const bool ok = renderIcon(icon, sizePx, pixels);
+        DestroyIcon(icon);
+        return ok;
+    }
+    // The image carries no icon resource -- true of plenty of console and host
+    // binaries (ApplicationFrameHost, and ybar itself). SHGetFileInfoW answered
+    // for those with the shell's generic executable icon, so keep that outcome
+    // rather than regressing the row to a blank: IDI_APPLICATION is the same
+    // stand-in without touching the file. It is a shared system icon and must
+    // not be destroyed.
+    // MAKEINTRESOURCEW(32512) is IDI_APPLICATION; the bare constant expands to
+    // the ANSI macro, which LoadIconW will not take.
+    if (HICON fallback = LoadIconW(nullptr, MAKEINTRESOURCEW(32512)))
+        return renderIcon(fallback, sizePx, pixels);
+    return false;
 }
 
 // Finds a running process whose executable stem matches `name`.

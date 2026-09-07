@@ -7,6 +7,8 @@
 #include <winver.h> // WIN32_LEAN_AND_MEAN drops the version API otherwise
 // clang-format on
 
+#include <mutex>
+#include <unordered_map>
 #include <vector>
 
 namespace ybar::providers {
@@ -99,10 +101,32 @@ BOOL CALLBACK findHostedChild(HWND child, LPARAM param) {
     return TRUE;
 }
 
+// Memo for appNameForExecutablePath. The per-app mixer re-resolves every
+// audio-session group once a second on the UI thread, and each miss opens and
+// maps the executable to read its version resource -- unbounded on a network
+// share or a dehydrated cloud placeholder. An image's FileDescription cannot
+// change while that image is running, so one read per path is enough. Keyed by
+// the path as given: the caller already lowercases consistently.
+std::mutex& nameCacheMutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+
+std::unordered_map<std::string, std::string>& nameCache() {
+    static std::unordered_map<std::string, std::string> cache;
+    return cache;
+}
+
 } // namespace
 
 std::string appNameForExecutablePath(const std::string& path) {
     if (path.empty()) return {};
+    {
+        std::lock_guard<std::mutex> lock(nameCacheMutex());
+        const auto& cache = nameCache();
+        const auto it = cache.find(path);
+        if (it != cache.end()) return it->second;
+    }
     const int size = MultiByteToWideChar(CP_UTF8, 0, path.c_str(),
                                          static_cast<int>(path.size()), nullptr, 0);
     std::wstring wide(static_cast<std::size_t>(size), L'\0');
@@ -116,7 +140,12 @@ std::string appNameForExecutablePath(const std::string& path) {
     std::wstring description;
     if (wide.find_first_of(L"\\/") != std::wstring::npos) description = fileDescription(wide);
     if (description.empty()) description = baseNameWithoutExe(wide);
-    return narrow(description);
+    std::string name = narrow(description);
+    {
+        std::lock_guard<std::mutex> lock(nameCacheMutex());
+        nameCache().emplace(path, name);
+    }
+    return name;
 }
 
 std::string executablePathForProcess(unsigned long processId) {
