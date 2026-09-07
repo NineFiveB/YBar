@@ -159,7 +159,13 @@ struct DaemonState {
     bool appLifecycleArmed = false;
     ybar::anim::AnimationScheduler scheduler;
     bool animationTimerLive = false;
+    // Both manual-reset. `stop` is signaled once, at shutdown, and must stay
+    // latched for every wait that observes it. `wake` means "frames are
+    // wanted": manual-reset so a wake raised while the pump is still winding
+    // down its previous run stays pending instead of being lost.
     HANDLE animationPumpStop = nullptr;
+    HANDLE animationPumpWake = nullptr;
+    bool animationPumpUnavailable = false; // event creation failed: WM_TIMER
     // Auto-reset: the pump signals it each compositor tick and the message
     // loop consumes it AFTER draining pending messages — a posted frame
     // message would outrank hardware input in GetMessage and starve clicks
@@ -303,40 +309,75 @@ struct DaemonState {
     bool marqueeOnScreen = false;
     void syncAnimationTimer() {
         const bool wanted = scheduler.active() || marqueeOnScreen;
-        if (wanted && !animationTimerLive) {
-            animationTimerLive = true;
-            animationPumpStop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-            if (!animationPumpStop) {
-                SetTimer(messageWindow, kAnimationTimer, 16, nullptr); // fallback
-                return;
-            }
-            animationPump = std::thread([this] {
-                for (;;) {
-                    const DWORD r =
-                        DCompositionWaitForCompositorClock(1, &animationPumpStop, 100);
-                    if (r == WAIT_OBJECT_0) return; // stop event
-                    if (r == WAIT_TIMEOUT) continue; // compositor idle: no frame due
-                    if (r != WAIT_OBJECT_0 + 1) { // clock unavailable: ~60 Hz fallback
-                        // WAIT_FAILED means the API never waited on our stop
-                        // handle, so pace with a stop-aware wait instead of a
-                        // blind Sleep — otherwise a persistent clock failure
-                        // spins here forever and stopAnimationPump()'s join()
-                        // (UI thread) deadlocks. animationPumpStop is
-                        // manual-reset, so this latches the moment stop fires.
-                        if (WaitForSingleObject(animationPumpStop, 16) == WAIT_OBJECT_0)
-                            return;
-                    }
-                    // Auto-reset event: signaling while already signaled is a
-                    // no-op, so a stalled UI thread coalesces ticks for free.
-                    SetEvent(frameDue);
-                }
-            });
+        if (wanted == animationTimerLive) return;
+        animationTimerLive = wanted;
+        if (!ensureAnimationPump()) { // no pump: coarse WM_TIMER fallback
+            if (wanted)
+                SetTimer(messageWindow, kAnimationTimer, 16, nullptr);
+            else
+                KillTimer(messageWindow, kAnimationTimer);
             return;
         }
-        if (!wanted && animationTimerLive) {
-            stopAnimationPump();
-            animationTimerLive = false;
-            return;
+        if (wanted) {
+            SetEvent(animationPumpWake);
+        } else {
+            ResetEvent(animationPumpWake);
+            frameWindowStart = 0; // don't average a later run across the idle gap
+        }
+    }
+
+    // The pump thread is created once, on the first frame anyone asks for, and
+    // parks on animationPumpWake in between. It used to be spawned and joined
+    // on every animation edge, which put a std::thread create/join cycle on the
+    // message thread — and join() pumps no messages, so every idle edge (a
+    // marquee scrolling off screen, a fade ending) stalled input for as long as
+    // the pump took to notice the stop event.
+    // Returns false when the events cannot be created, which is the caller's
+    // signal to drive frames from WM_TIMER instead.
+    bool ensureAnimationPump() {
+        if (animationPump.joinable()) return true;
+        if (animationPumpUnavailable) return false;
+        animationPumpStop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        animationPumpWake = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!animationPumpStop || !animationPumpWake) {
+            animationPumpUnavailable = true;
+            closeAnimationPumpEvents();
+            return false;
+        }
+        animationPump = std::thread([this] { runAnimationPump(); });
+        return true;
+    }
+
+    // Pump thread body: signals frameDue once per compositor tick while frames
+    // are wanted, and holds nothing but a parked wait when they are not.
+    void runAnimationPump() {
+        const HANDLE park[2] = {animationPumpStop, animationPumpWake};
+        for (;;) {
+            // Anything but a wake — the stop event, or a wait we cannot trust —
+            // ends the thread, so shutdown always terminates.
+            if (WaitForMultipleObjects(2, park, FALSE, INFINITE) != WAIT_OBJECT_0 + 1)
+                return;
+            // Polled, not waited on: a wait fires when an event is SET, and
+            // what ends a run is animationPumpWake being reset.
+            while (WaitForSingleObject(animationPumpWake, 0) == WAIT_OBJECT_0) {
+                const DWORD r =
+                    DCompositionWaitForCompositorClock(1, &animationPumpStop, 100);
+                if (r == WAIT_OBJECT_0) return; // stop event
+                if (r == WAIT_TIMEOUT) continue; // compositor idle: no frame due
+                if (r != WAIT_OBJECT_0 + 1) { // clock unavailable: ~60 Hz fallback
+                    // WAIT_FAILED means the API never waited on our stop
+                    // handle, so pace with a stop-aware wait instead of a
+                    // blind Sleep — otherwise a persistent clock failure
+                    // spins here forever and the shutdown join() (UI thread)
+                    // deadlocks. animationPumpStop is manual-reset, so this
+                    // latches the moment stop fires.
+                    if (WaitForSingleObject(animationPumpStop, 16) == WAIT_OBJECT_0)
+                        return;
+                }
+                // Auto-reset event: signaling while already signaled is a
+                // no-op, so a stalled UI thread coalesces ticks for free.
+                SetEvent(frameDue);
+            }
         }
     }
 
@@ -365,16 +406,30 @@ struct DaemonState {
         }
     }
 
+    void closeAnimationPumpEvents() {
+        if (animationPumpStop) {
+            CloseHandle(animationPumpStop);
+            animationPumpStop = nullptr;
+        }
+        if (animationPumpWake) {
+            CloseHandle(animationPumpWake);
+            animationPumpWake = nullptr;
+        }
+    }
+
+    // Shutdown only: the pump parks itself between animations now, so this runs
+    // once, after the message loop has exited (and again, as a no-op, from the
+    // destructor). The join is still on the UI thread and still bounded —
+    // animationPumpStop is in every wait the pump makes — but by then there is
+    // no input left to starve.
     void stopAnimationPump() {
         if (animationPump.joinable()) {
             SetEvent(animationPumpStop);
             animationPump.join();
         }
-        if (animationPumpStop) {
-            CloseHandle(animationPumpStop);
-            animationPumpStop = nullptr;
-        }
+        closeAnimationPumpEvents();
         KillTimer(messageWindow, kAnimationTimer); // no-op unless fallback armed
+        animationTimerLive = false;
         frameWindowStart = 0; // don't average a later run across the idle gap
     }
 

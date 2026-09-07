@@ -50,6 +50,14 @@ public:
     bool releasingCapture = false; // our own ReleaseCapture, not a steal
     bool trackingLeave = false;    // TME_LEAVE armed, for row hover exit
 
+    // Last DWM attributes actually pushed to the window, so setBackdrop can
+    // skip the round trips when nothing moved (see setBackdrop). Tied to this
+    // HWND: the destructor below takes both down together, so a reopened
+    // popup starts from unapplied and pushes its attributes once.
+    bool backdropApplied = false;
+    int appliedBackdrop = 0;
+    int appliedCorner = 0;
+
     ~PopupSurfaceImpl() {
         host.reset(); // detach the composition target before its window goes
         if (hwnd) {
@@ -273,13 +281,33 @@ void PopupSurface::setBackdrop(bool acrylic, double cornerRadius) {
     // buildPopupScene), so an Acrylic material would not match.
     const auto backdrop = static_cast<int>(
         acrylic && systemTransparencyEnabled() ? DWMSBT_TRANSIENTWINDOW : DWMSBT_NONE);
-    DwmSetWindowAttribute(impl_->hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop));
-    const BOOL dark = TRUE;
-    DwmSetWindowAttribute(impl_->hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
     const auto corner = static_cast<int>(cornerRadius <= 0   ? DWMWCP_DONOTROUND
                                          : cornerRadius < 6  ? DWMWCP_ROUNDSMALL
                                                              : DWMWCP_ROUND);
+    // The daemon re-drives this for every open popup on every render pass,
+    // and an open popup runs the frame loop at the compositor clock, so
+    // unguarded this was three cross-process round trips to dwm.exe per popup
+    // per frame (~360/s) on the message thread. That is the thread Windows
+    // watches: block it and the process is reported hung and killed. Skip a
+    // no-op the same way CompositionHost::setBackdrops skips an unchanged
+    // pill list; the bar's own applyBackdrop is settings-guarded already.
+    //
+    // Compared on the RESOLVED attributes, not on the arguments. The
+    // Transparency effects read above still runs on every call, so flipping
+    // that setting changes `backdrop` and misses the cache on the next frame
+    // instead of latching the stale answer. A registry read per frame is not
+    // what was hanging the thread.
+    if (impl_->backdropApplied && backdrop == impl_->appliedBackdrop &&
+        corner == impl_->appliedCorner)
+        return;
+    DwmSetWindowAttribute(impl_->hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop));
+    // Constant, so it rides the guard above and is applied once per window.
+    const BOOL dark = TRUE;
+    DwmSetWindowAttribute(impl_->hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
     DwmSetWindowAttribute(impl_->hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
+    impl_->backdropApplied = true;
+    impl_->appliedBackdrop = backdrop;
+    impl_->appliedCorner = corner;
 }
 
 // One linear ramp between two opacities, run by the compositor on the
