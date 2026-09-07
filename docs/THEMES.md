@@ -40,7 +40,7 @@ themes ship replacements for them.
 ## Writing a theme
 
 Start from `examples/darxk` — it is the smallest complete Lua theme
-(~300 lines): bar + defaults, capsule brackets, event-driven modules. The
+(under 400 lines): bar + defaults, capsule brackets, event-driven modules. The
 sketchybar compat shim (`sbar = require("sketchybar")`) or the native
 `ybar.*` API both work. Fail soft: probe for optional binaries
 (`aerospace`, `brew`, `gh`) and hide modules when they are absent, so one
