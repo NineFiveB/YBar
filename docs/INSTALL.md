@@ -28,7 +28,7 @@ directly also works: `brew tap NineFiveB/ybar https://github.com/NineFiveB/YBar.
 This builds YBar from source and installs:
 
 - `$(brew --prefix)/opt/ybar/YBar.app` — the app bundle (the daemon's TCC
-  identity, see [Permissions](#first-run-permissions))
+  identity, see [Permissions](#permissions))
 - `ybar` on your PATH — the CLI client (`ybar --help`, sketchybar-compatible
   messages)
 
@@ -114,6 +114,12 @@ script it spawns. Only the features you actually configure ask for anything:
   other apps' menu bar items via ScreenCaptureKit. macOS prompts on first
   capture; if you dismissed it, grant manually under Privacy & Security →
   Screen & System Audio Recording, then restart YBar.
+- **Automation (Apple Events)** — used to script Music and Spotify: the media
+  provider seeds now-playing state at startup from a player that is already
+  running, and the example configs send play/pause the same way. macOS prompts
+  the first time YBar scripts each app; click OK. Denied, the startup seed
+  silently finds nothing and the media widget stays empty until the player's
+  next state change.
 
 ### Keeping permissions across rebuilds
 

@@ -28,10 +28,12 @@ advisory (unless you prefer otherwise). There is no bug bounty.
 YBar runs entirely as the logged-in user with no elevated privileges, no
 network services, and no private API usage. The interesting surfaces are:
 
-- **The IPC socket** — `/tmp/ybar_$USER.socket` on macOS, and on Windows an
-  AF_UNIX socket at `%LOCALAPPDATA%\ybar\ybar_$USERNAME.sock` (falling back
-  to `%TEMP%`): anything that lets a *different* local user drive the daemon
-  or execute code through it.
+- **The IPC socket** — `/tmp/ybar_$USER.socket` on macOS (`chmod 0600`), and
+  on Windows an AF_UNIX socket at `%LOCALAPPDATA%\ybar\ybar_%USERNAME%.sock`
+  (falling back to `%TEMP%`, then to `C:\Windows\Temp` when `%TEMP%` is
+  unset), restricted after bind by an explicit DACL to the current user's
+  SID: anything that lets a *different* local user drive the daemon or
+  execute code through it.
 - **Config-adjacent execution**: the daemon runs user-authored Lua and
   shell handlers by design — that is not a vulnerability. Escalation
   *beyond* what the config author wrote (e.g. injection through externally

@@ -6,7 +6,8 @@
 -- specular rims, 20pt macOS-26 corners.
 --
 -- The item files are REUSED verbatim from ../sketchybar-port; only this
--- directory's colors.lua / bar.lua / default.lua differ.
+-- directory's colors.lua / bar.lua / default.lua / settings.lua /
+-- helpers/default_font.lua differ, plus this file.
 --
 -- Install:
 --   cp -R examples/sketchybar-port ~/.config/ybar-port-files

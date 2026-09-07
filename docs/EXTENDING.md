@@ -10,7 +10,9 @@ are live objects driven over IPC, addressed by name, with a stable property
 namespace and event model. Anything you can express in a shell script you can
 express in Lua (in-process) or over the CLI — see [Config](../README.md#config)
 for the three surfaces. The same contract holds on the [Windows
-port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
+port](WINDOWS-PORT.md), with a short list of deliberate divergences beyond the
+OS-facing providers and glyph fonts: no `alias` items, a `tray` widget and a
+`--volume` verb instead, and a few extra property keys.
 
 ## Rendering & layout
 
@@ -30,7 +32,8 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
   approximation below it); a Mica blurred-wallpaper visual on Windows 11.
   `background.blur_radius` asks for the same material by radius. Bar-level
   `glass` is a different thing — the whole strip's backdrop
-  (`NSVisualEffectView` / DWM Acrylic)
+  (`NSGlassEffectView` on macOS 26+, `NSVisualEffectView` before that; DWM
+  Acrylic on Windows)
 - Five-cursor item layout (`left right center q e`, notch-aware), fixed widths
   with align slack and clipping, `--default` prototypes
 - Per-setup notch handling: the `q`/`e` dead zone exists only on physically
@@ -68,7 +71,8 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
   `system_stats`, **`modifier_change`** (live ⌥-held UX),
   **`app_launched` / `app_terminated`**, **`media_change`** (Music/Spotify
   now-playing via distributed notifications — no private MediaRemote; state seeded
-  at startup so a bar launched mid-song shows it immediately)
+  at startup, from a running player over Apple Events, so a bar launched
+  mid-song shows it immediately once Automation is granted)
 - Native providers: NSWorkspace, IOKit battery, CoreAudio volume, NWPathMonitor,
   in-process CPU/memory stats
 - AeroSpace integration: the workspace-change hook can invoke `ybar --trigger`

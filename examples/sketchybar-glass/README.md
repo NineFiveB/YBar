@@ -5,10 +5,11 @@ Liquid Glass bar that replaces the native macOS menu bar outright.
 
 It is not a standalone config. It is a **restyle layer over
 [`../sketchybar-port`](../sketchybar-port)** — every item file is reused from
-there verbatim, and only five files in this directory differ: `colors.lua`,
+there verbatim, and only six files in this directory differ: `colors.lua`,
 `bar.lua`, `default.lua`, `settings.lua` and `helpers/default_font.lua`, which
-shadow the port's versions through `package.path` precedence. That is the whole
-theme. The widget catalog, the helper binaries and the porting notes all live
+shadow the port's versions through `package.path` precedence, plus `ybarrc.lua`,
+the entry point, which wires the two directories together and applies the
+theme's post-passes (below). That is the whole theme. The widget catalog, the helper binaries and the porting notes all live
 in the port; see its [PORTING.md](../sketchybar-port/PORTING.md).
 
 **The port must be installed beside it.** `ybarrc.lua` probes for
@@ -30,10 +31,14 @@ satisfies it; installed through `ybar-theme`, install `sketchybar-port` too.
 - **Pills** — `background.glass` on every item: a real `NSGlassEffectView`
   backdrop under the pill on macOS 26+, an in-shader approximation below it,
   tinted by the pill's own barely-there fill. 9pt corners, 28pt tall.
-- **No borders anywhere.** The specular rim *is* the edge treatment, so
+- **No borders on the pills.** The specular rim *is* the edge treatment, so
   sketchybar's border rings would read as outlines through the glass. A
-  post-pass in `ybarrc.lua` strips every stroke the port's item files applied:
-  `sbar.set("/.*/", { background = { border_width = 0 } })`.
+  post-pass in `ybarrc.lua` zeroes every item and bracket ring the port's item
+  files applied: `sbar.set("/.*/", { background = { border_width = 0 } })`.
+  Popup rings are a separate property the post-pass does not reach:
+  `default.lua` sets `popup.background.border_width = 0`, but the port's
+  `items/spaces.lua` and `items/spaces_yabai.lua` set a 5pt ring per workspace
+  item that overrides the default and survives.
 - **Popups** — `blur_radius = 30` with a glass background at the same tint as
   the pills, so there is one material everywhere.
 - **Palette** — pure neutral greys, no blue cast anywhere; states read through

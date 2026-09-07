@@ -7,7 +7,7 @@ light pills for the active workspace and the focused window, and bold
 monospace type throughout.
 
 It is also the reference theme for learning the Lua API. At just under 400
-lines across six files it is the smallest complete config here, and
+lines across six files it is small enough to read end to end, and
 [THEMES.md](../../docs/THEMES.md) points theme authors at it first: bar and
 defaults, capsule brackets, event-driven modules, nothing else.
 
@@ -40,8 +40,8 @@ binary is missing, so one config works across machines:
   zero, so no Homebrew means no module at all. Amber below ten outdated
   formulae, red at ten and above.
 - **`github`** counts unread notifications through `gh api notifications` and
-  draws only when the call succeeds, so an unauthenticated or absent `gh`
-  leaves nothing behind.
+  draws only when the call succeeds and the count is above zero, so an
+  unauthenticated or absent `gh`, or an empty inbox, leaves nothing behind.
 
 ## Credits
 
