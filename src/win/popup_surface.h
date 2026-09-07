@@ -44,8 +44,9 @@ public:
     void fadeOut(double frames);
 
     // DWM Acrylic plate (the fallback material when the Mica layer is
-    // unavailable) + rounded backdrop corners (spec 7.6). Cheap and
-    // idempotent; call whenever the popup's blur/corner settings may differ.
+    // unavailable) + rounded backdrop corners (spec 7.6). Change-guarded, so
+    // the per-frame call the daemon makes costs a registry read rather than
+    // three round trips to dwm.exe; call whenever blur/corner may differ.
     void setBackdrop(bool acrylic, double cornerRadius);
 
     // Mica layer (spec 7.6): whether this system composes wallpaper-material

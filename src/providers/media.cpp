@@ -10,10 +10,10 @@
 // clang-format on
 
 #include <atomic>
-#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <mutex>
+#include <system_error>
 #include <thread>
 
 namespace ybar::providers {
@@ -73,13 +73,25 @@ public:
     // The daemon's UI thread is an STA (WIC requires it), and every GSMTC
     // entry point here blocks on an IAsyncOperation — which deadlocks an STA.
     // So the whole provider lives on its own MTA thread.
-    std::thread worker;
-    std::mutex readyMutex;
-    std::condition_variable ready;
-    bool started = false;
-    bool startResult = false;
+    //
+    // That thread is DETACHED, and nothing ever joins or waits on it. Every
+    // GSMTC call it makes is a cross-process request with no timeout, and the
+    // only threads that could wait for it are start()'s and stop()'s — the
+    // daemon's message thread, where a stall past 5 s is what Windows reports
+    // as AppHangB1 before killing the bar. Instead the worker holds its own
+    // strong reference to this impl, so every member it still touches
+    // (stopEvent included) outlives it in every ordering, and `workerLive`
+    // keeps a second worker from ever sharing them.
+    std::atomic<bool> workerLive{false};
     std::atomic<bool> stopping{false};
     HANDLE stopEvent = nullptr;
+
+    // Closed here rather than in stop(), which cannot know when the detached
+    // worker stops waiting on it: that worker's own reference is what keeps
+    // this object — and therefore the handle — alive until it returns.
+    ~MediaProviderImpl() {
+        if (stopEvent) CloseHandle(stopEvent);
+    }
 
     // Session handlers arrive on WinRT threadpool threads and can overlap a
     // CurrentSessionChanged re-attach, so every touch of `session`/`manager`
@@ -219,11 +231,16 @@ MediaProvider::~MediaProvider() { stop(); }
 
 bool MediaProvider::start() {
     if (impl_->running) return true;
+    // A worker from an earlier run can still be winding down, and nothing can
+    // wait for it. Admitting a second one would hand two threads one manager,
+    // one stop event and one set of event tokens. armMedia() always builds a
+    // fresh provider, so this only trips on a stop()/start() in the same
+    // breath, where refusing is the only honest answer.
+    if (impl_->workerLive) return false;
     // A previous stop() (or failed start) leaves poison flags behind; a
     // restarted provider must not silently no-op every handler.
     impl_->stopping = false;
-    impl_->started = false;
-    impl_->startResult = false;
+    if (impl_->stopEvent) CloseHandle(impl_->stopEvent); // left by a finished run
     impl_->stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (!impl_->stopEvent) return false;
     {
@@ -231,20 +248,20 @@ bool MediaProvider::start() {
         impl_->onChange = onChange;
     }
 
-    // The worker owns only a weak reference too: if the provider is destroyed
-    // while RequestAsync is still in flight, the thread must not resurrect it.
-    std::weak_ptr<MediaProviderImpl> weak = impl_;
-    impl_->worker = std::thread([weak] {
+    // The worker takes a STRONG reference deliberately — the handlers it
+    // registers still take weak ones. With no join anywhere, that reference is
+    // the only thing guaranteeing the impl outlives the thread's last touch of
+    // it, and it is dropped below before the apartment goes away.
+    auto body = [impl = impl_]() mutable {
         winrt::init_apartment(winrt::apartment_type::multi_threaded);
-        auto impl = weak.lock();
-        if (!impl) {
-            winrt::uninit_apartment();
-            return;
-        }
-        bool ok = false;
+        std::weak_ptr<MediaProviderImpl> weak = impl;
         try {
-            impl->manager =
-                GlobalSystemMediaTransportControlsSessionManager::RequestAsync().get();
+            // stop() can have run before this thread was ever scheduled;
+            // there is nothing to start a cross-process handshake for then.
+            if (!impl->stopping) {
+                impl->manager =
+                    GlobalSystemMediaTransportControlsSessionManager::RequestAsync().get();
+            }
             if (impl->manager) {
                 impl->sessionsToken = impl->manager.CurrentSessionChanged([weak](auto&&,
                                                                                  auto&&) {
@@ -258,59 +275,67 @@ bool MediaProvider::start() {
                         if (auto self = weak.lock()) self->revalidate();
                     });
                 impl->attachCurrentSession();
-                ok = true;
+
+                // Timed park: the handlers fire on WinRT threadpool threads,
+                // so this thread owns the MTA and the registrations — plus a
+                // slow revalidation tick, because GSMTC does not reliably
+                // notify when a session goes away (measured on this machine:
+                // closing a browser tab that was playing leaves its session
+                // behind, still reporting Playing, with no event ever
+                // following). 10 s keeps the correction cheap, and
+                // revalidate() returns immediately when the bar is idle.
+                for (;;) {
+                    if (WaitForSingleObject(impl->stopEvent, 10000) != WAIT_TIMEOUT) break;
+                    if (impl->stopping) break;
+                    impl->revalidate();
+                }
             }
         } catch (const winrt::hresult_error& error) {
             std::fprintf(stderr, "[ybar] media provider unavailable (0x%08x)\n",
                          static_cast<unsigned>(error.code()));
         }
-        {
-            std::lock_guard<std::mutex> lock(impl->readyMutex);
-            impl->started = true;
-            impl->startResult = ok;
-        }
-        impl->ready.notify_all();
-        if (!ok) {
-            winrt::uninit_apartment();
-            return;
-        }
-
-        // Timed park: the handlers fire on WinRT threadpool threads, so this
-        // thread owns the MTA and the registrations — plus a slow
-        // revalidation tick, because GSMTC does not reliably notify when a
-        // session goes away (measured on this machine: closing a browser tab
-        // that was playing leaves its session behind, still reporting
-        // Playing, with no event ever following). 10 s keeps the correction
-        // cheap, and revalidate() returns immediately when the bar is idle.
-        for (;;) {
-            if (WaitForSingleObject(impl->stopEvent, 10000) != WAIT_TIMEOUT) break;
-            if (impl->stopping) break;
-            impl->revalidate();
-        }
         // stop() set `stopping` before signaling, so any handler entering a
         // sessionMutex-guarded section from here on is a no-op.
-        if (impl->manager && impl->sessionsToken)
-            impl->manager.CurrentSessionChanged(impl->sessionsToken);
-        if (impl->manager && impl->sessionListToken)
-            impl->manager.SessionsChanged(impl->sessionListToken);
-        impl->detachSession();
+        try {
+            if (impl->manager && impl->sessionsToken)
+                impl->manager.CurrentSessionChanged(impl->sessionsToken);
+            if (impl->manager && impl->sessionListToken)
+                impl->manager.SessionsChanged(impl->sessionListToken);
+            impl->detachSession();
+        } catch (const winrt::hresult_error&) {
+            // Unhooking a manager whose host died throws, and there is nothing
+            // left to unhook then — but an exception leaving a thread function
+            // is std::terminate, exactly the crash this rework exists to stop.
+        }
         {
             std::lock_guard<std::recursive_mutex> lock(impl->sessionMutex);
             impl->manager = nullptr;
         }
+        // Drop every reference this thread owns BEFORE tearing the apartment
+        // down: releasing the last one runs ~MediaProviderImpl, and that must
+        // not happen inside an apartment that no longer exists.
+        impl->workerLive = false;
+        impl.reset();
         winrt::uninit_apartment();
-    });
+    };
 
-    std::unique_lock<std::mutex> lock(impl_->readyMutex);
-    impl_->ready.wait(lock, [this] { return impl_->started; });
-    const bool ok = impl_->startResult;
-    lock.unlock();
-    if (!ok) {
-        impl_->worker.join();
+    impl_->workerLive = true;
+    try {
+        std::thread(std::move(body)).detach();
+    } catch (const std::system_error&) {
+        // The thread never ran, so nothing will ever clear workerLive; undo
+        // the arming here instead of wedging this provider shut for good.
+        impl_->workerLive = false;
         CloseHandle(impl_->stopEvent);
         impl_->stopEvent = nullptr;
         return false;
     }
+
+    // No handshake. The wait that used to sit here was an untimed
+    // condition_variable parked behind RequestAsync().get(), on the message
+    // thread: one wedged GSMTC host froze the whole bar, which Windows reports
+    // as AppHangB1 and kills. "Armed" now means the worker exists; the first
+    // media_change arrives whenever GSMTC gets around to answering.
     impl_->running = true;
     return true;
 }
@@ -324,10 +349,14 @@ void MediaProvider::stop() {
         std::lock_guard<std::mutex> lock(impl_->mutex);
         impl_->onChange = nullptr;
     }
-    SetEvent(impl_->stopEvent);
-    if (impl_->worker.joinable()) impl_->worker.join();
-    CloseHandle(impl_->stopEvent);
-    impl_->stopEvent = nullptr;
+    if (impl_->stopEvent) SetEvent(impl_->stopEvent);
+    // Deliberately no join, for the same reason start() no longer waits: the
+    // worker can be parked in a cross-process GSMTC read that a hung player
+    // never answers, and stop() runs on the message thread (armMedia's reset,
+    // and daemon teardown). `stopping` and the cleared callback already make
+    // that worker inert; its own reference keeps the impl and the stop event
+    // alive until it returns, and whichever side drops the last reference
+    // closes the handle in ~MediaProviderImpl.
     impl_->running = false;
 }
 

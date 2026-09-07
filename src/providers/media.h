@@ -32,6 +32,12 @@ public:
     // handler can never call through a destroyed facade.
     std::function<void(const MediaEnvironment&)> onChange;
 
+    // Both return as soon as the provider's worker thread has been asked to
+    // start or stop; neither waits for it. They run on the daemon's message
+    // thread, and every GSMTC call the worker makes is an untimed
+    // cross-process request — waiting for one froze the bar into AppHangB1.
+    // So `true` from start() means "armed", not "a session was found": the
+    // first media_change arrives whenever the session manager answers.
     bool start();
     void stop();
 
