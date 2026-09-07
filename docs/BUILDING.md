@@ -1,4 +1,8 @@
-# Building YBar
+# Building YBar on macOS
+
+(The Windows port is a separate C++/CMake tree on the orphan `windows` branch
+with its own toolchain — Visual Studio 2022, CMake 3.25+, vcpkg — and its own
+README. None of the toolchain notes below apply there.)
 
 ## Requirements
 

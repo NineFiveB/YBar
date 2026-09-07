@@ -23,6 +23,14 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
 - SDF rounded rects (per-corner radii, borders, gradients, shadows), glyph atlas
   with font fallback, color emoji, tinted SF Symbols (`icon=sf:wifi`), ink-precise
   text metrics matching sketchybar's pixel behavior
+- **Material backdrops** — `background.glass` on an item, `popup.background.glass`
+  on a panel: a real system material composed *under* it, tinted by that
+  background's own translucent fill, with a lit rim built from the SDF surface
+  normal on top. `NSGlassEffectView` Liquid Glass on macOS 26+ (an in-shader
+  approximation below it); a Mica blurred-wallpaper visual on Windows 11.
+  `background.blur_radius` asks for the same material by radius. Bar-level
+  `glass` is a different thing — the whole strip's backdrop
+  (`NSVisualEffectView` / DWM Acrylic)
 - Five-cursor item layout (`left right center q e`, notch-aware), fixed widths
   with align slack and clipping, `--default` prototypes
 - Per-setup notch handling: the `q`/`e` dead zone exists only on physically
@@ -54,9 +62,10 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
 - Message-scoped `--animate <curve> <frames>` (`linear sin quadratic tanh exp
   circ bounce overshoot`), per-channel color lerp in linear space, `width=dynamic`
   sentinel animation
-- Events: mouse enter/exit/click/scroll (+ global exit), `front_app_switched`,
-  `space_change`, wake/sleep, `power_source_change`, `volume_change`,
-  `wifi_change`, `system_stats`, **`modifier_change`** (live ⌥-held UX),
+- Events: mouse enter/exit/click/scroll (+ global enter/exit),
+  `front_app_switched`, `space_change`, `display_change`, wake/sleep,
+  `power_source_change`, `battery_change`, `volume_change`, `wifi_change`,
+  `system_stats`, **`modifier_change`** (live ⌥-held UX),
   **`app_launched` / `app_terminated`**, **`media_change`** (Music/Spotify
   now-playing via distributed notifications — no private MediaRemote; state seeded
   at startup so a bar launched mid-song shows it immediately)
@@ -67,8 +76,10 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
   with debounced, generation-guarded refreshes for rapid switching
 
 On Windows the event and provider set maps one-to-one to native equivalents
-(WASAPI, GSMTC, `netsh`/WinRT, komorebi/YTile for workspaces) — see
-[WINDOWS-PORT.md](WINDOWS-PORT.md).
+(WASAPI for audio, GSMTC for media, `wlanapi` plus connectivity-hint
+notifications for network, komorebi/YTile for workspaces) — see
+[WINDOWS-PORT.md](WINDOWS-PORT.md). That port adds two trampolines with no
+macOS counterpart: a notification-area `tray` widget and a `volume` bridge.
 
 ## Packaging & privacy
 

@@ -1,7 +1,11 @@
-# Installing YBar
+# Installing YBar on macOS
 
-YBar is distributed as source: it has no Apple Developer ID, so a downloaded
-binary would fail Gatekeeper. Building locally (Homebrew formula or `make app`)
+Windows users want [the README's Windows section](../README.md#windows)
+instead: that port ships Authenticode-signed binaries, a one-line PowerShell
+installer and a Scoop manifest, and nothing on this page applies to it.
+
+On macOS YBar is distributed as source: it has no Apple Developer ID, so a
+downloaded binary would fail Gatekeeper. Building locally (Homebrew formula or `make app`)
 produces a bundle with a fresh local signature that macOS accepts without
 ceremony. All routes need macOS 14+ and a Swift 6 toolchain — the Command Line
 Tools are sufficient, full Xcode is not required (see

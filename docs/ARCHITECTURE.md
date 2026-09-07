@@ -1,6 +1,6 @@
 # YBar Architecture
 
-This document is the synthesis of a deep dissection of sketchybar v2.24.0's source, a survey of Waybar's config/module model, and research into Metal 2D rendering and modern macOS windowing (macOS 15 Sequoia / 26 Tahoe). It is the authoritative design for YBar v1 (historical: the "v1.5" items below have since shipped). Research reports live in the project history; sketchybar `file:line` references refer to its `src/` tree.
+This document is the synthesis of a deep dissection of sketchybar v2.24.0's source, a survey of Waybar's config/module model, and research into Metal 2D rendering and modern macOS windowing (macOS 15 Sequoia / 26 Tahoe). It is the authoritative design for YBar v1, and it is a design record rather than a status report. Since it was written the "v1.5" items below have shipped, and so have three things it defers: YbarLua, `alias` via ScreenCaptureKit, and a JSONC config tier — though that last one shipped as a thin declarative layer over the command surface (bar, defaults, items, events), not the Waybar-style modules-and-CSS design sketched in section 9. Section 10 is kept in step with the code; the milestone and tier labels elsewhere are left as they were written. The Windows port is a separate engine with its own contract in [WINDOWS-PORT.md](WINDOWS-PORT.md). Research reports live in the project history; sketchybar `file:line` references refer to its `src/` tree.
 
 ## 1. Overview
 
@@ -141,19 +141,21 @@ v1.5: `--add graph|slider|bracket`, `--push`, `--clone/--rename/--move/--reorder
 ## 10. Package layout
 
 ```
-Package.swift                     — swift-tools 6.0, macOS 14+, exec `ybar` + lib `YBarKit` + tests
+Package.swift                     — swift-tools 6.0, macOS 14+, exec `ybar` + libs `YBarKit`/`CLua` + tests
 Sources/ybar/main.swift           — argv → client | daemon
+Sources/CLua/                     — vendored Lua 5.4 (C), the embedded runtime's interpreter
 Sources/YBarKit/
-  App/        Daemon, CLIClient, InstanceLock
-  Bar/        BarManager, BarSurface (protocol + AppKit impl), BarSettings, DisplayManager, MouseRouter
-  Items/      Item, ItemStore, Style types, Layout, PropertySetter (dotted paths), Serialize (query JSON)
+  App/        Daemon (lifecycle, provider wiring, config exec + hotload), JSONCConfig
+  Bar/        BarManager, BarSurface, PopupSurface, BarSettings, BarPropertySetter, DisplayManager
+  Items/      Item, Style, Components (graph/slider/gauge/image), Layout, PropertySetter (dotted paths), Serialize (query JSON)
   Render/     MetalHostView, Renderer, SceneBuilder, GlyphAtlas, FontCache, Instances, Shaders/YBar.metal
-  Animation/  AnimationScheduler, PropertyAnimation, Curves
+  Animation/  Animation (curves + scheduler)
   IPC/        WireFormat, SocketServer, SocketClient, CommandParser, CommandHandler
-  Events/     EventBus, Event, ScriptRunner
-  Providers/  WorkspaceProvider, PowerProvider, AudioProvider, NetworkProvider, SystemStatsProvider, ClockProvider
-  Config/     ConfigLocator, Hotload
-Tests/YBarKitTests/               — layout, wire format, property parsing, curves, command grammar
+  Events/     EventBus, ScriptRunner
+  Providers/  Workspace, Power, Audio, Network, SystemStats, Media, Alias
+  Lua/        LuaRuntime (the `ybar.*` API and the sketchybar compat shim)
+  Config/     Config (discovery + hotload)
+Tests/YBarKitTests/               — layout, wire format, property parsing, curves, command grammar, components, clipping, JSONC, Lua
 ```
 
 Concurrency: Swift 6 language mode; model layer is `@MainActor`; providers hop callbacks to main; renderer encodes on main (bar frames are microseconds), presents async.

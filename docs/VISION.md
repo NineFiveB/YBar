@@ -1,6 +1,6 @@
 # YBar — Vision
 
-**YBar is Waybar for macOS**: a highly customizable, GPU-rendered status bar that replaces (or augments) the macOS menu bar, rendering complex graphics and animations at full speed via Metal, and extensible the way sketchybar is — scriptable from any language, with first-class Lua configuration.
+**YBar is Waybar for macOS**: a highly customizable, GPU-rendered status bar that replaces (or augments) the macOS menu bar, rendering complex graphics and animations at full speed via Metal, and extensible the way sketchybar is — scriptable from any language, with first-class Lua configuration. That was the founding statement and it still describes the macOS engine; a native Windows 11 port has since shipped beside it, mirroring the same command grammar, wire format and Lua API on Direct3D 11 (see [the README's Windows section](../README.md#windows)).
 
 ## Why
 
@@ -33,7 +33,7 @@ Informed by a real-world heavy sketchybar setup (Lua, popups, sliders, graphs, h
 | volume | slider, output device, Bluetooth device names |
 | wifi | SSID (with location-permission handling), link status |
 | cpu / memory | live graph primitive |
-| media / now-playing | best-effort (MediaRemote status on modern macOS is volatile) |
+| media / now-playing | shipped over distributed notifications (Music/Spotify), never MediaRemote — it is entitlement-locked; the Windows port uses GSMTC |
 | custom | Waybar-style `exec` + interval/event scripts |
 
 ## Primitives (renderer-level)
@@ -42,8 +42,13 @@ Item, text run (font fallback, SF Symbols, emoji), image, rounded-rect/squircle 
 
 ## Non-goals (v1)
 
-- Windows/Linux support.
-- Replacing menu bar *extras* hosting (NSStatusItem tray) — alias/capture of existing extras is a later milestone.
+- Linux support. Windows was a v1 non-goal too, and no longer is: a native
+  Windows 11 port ships as a separate C++ engine on the orphan `windows`
+  branch, sharing the command grammar, IPC wire format and Lua API rather than
+  any Swift code.
+- Replacing menu bar *extras* hosting (NSStatusItem tray). The narrower
+  alias/capture of individual extras has since shipped (`--add alias`, via
+  ScreenCaptureKit).
 - A GUI settings app.
 
 ## Repo
