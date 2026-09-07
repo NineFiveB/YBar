@@ -326,7 +326,27 @@ local mixer_btn = sbar.add("item", "widgets.bluetooth.mixer.btn", {
 -- (reference parity), so an icon inside the slider would set the app's
 -- volume to zero when clicked. A separate item is inert.
 local MAX_MIX = 8
+
+-- Windows 11 Settings frames each row as its own rounded card, and the mixer
+-- reads as a list rather than a stack of loose sliders because of it.
+--
+-- The plate lives on the ICON item, not on the slider. Items paint in the
+-- order they were added, so the icon's plate — widened rightwards with
+-- background.padding_right, which scene_builder adds to the background rect
+-- without touching layout advance (scene_builder.cpp, contentBox.width +
+-- paddingLeft + paddingRight) — lands UNDER the slider's track and knob.
+-- Putting it on the slider instead would paint the card over the app icon.
+--
+-- Height is one under the popup's 26pt row so consecutive cards keep a hairline
+-- between them, the way the Settings list does.
+local MIX_SLIDER_W = popup_width - 35
+local MIX_CARD = 0x14ffffff       -- resting card, an overlay on the material
+local MIX_CARD_HOVER = 0x24ffffff -- same lift the device rows take
+local MIX_CARD_H = 25
+local MIX_CARD_R = 6
+
 local mix_icons, mix_sliders, mix_ids = {}, {}, {}
+local mix_levels = {} -- last bound volume per row; the reveal animates up to it
 for i = 1, MAX_MIX do
   mix_icons[i] = sbar.add("item", "widgets.bluetooth.mix.icon." .. i, {
     position = popup_pos,
@@ -334,6 +354,14 @@ for i = 1, MAX_MIX do
     width = 35,
     padding_left = 2, -- line the glyph column up with the device rows
     padding_right = 0,
+    -- Starts transparent: open_mixer fades it up, so the card arrives with
+    -- the row instead of popping in fully lit.
+    background = {
+      color = colors.transparent,
+      corner_radius = MIX_CARD_R,
+      height = MIX_CARD_H,
+      padding_right = MIX_SLIDER_W,
+    },
     icon = {
       -- Glyph face for the "system" group (system sounds have no exe icon);
       -- app groups swap to the image part instead.
@@ -416,6 +444,7 @@ local function bind_mixer()
     if g then
       shown = shown + 1
       mix_ids[i] = g.id
+      mix_levels[i] = g.volume
       if g.id == "system" then
         mix_icons[i]:set({
           drawing = true,
@@ -436,11 +465,43 @@ local function bind_mixer()
       mix_sliders[i]:set({ drawing = true, slider = { percentage = g.volume } })
     else
       mix_ids[i] = nil
+      mix_levels[i] = nil
       mix_icons[i]:set({ drawing = false })
       mix_sliders[i]:set({ drawing = false })
     end
   end
   mix_empty:set({ drawing = shown == 0 })
+  return shown
+end
+
+-- The open cascade. Each row starts as a bare transparent strip with its
+-- slider empty, then the card fades up while the fill runs out to the real
+-- level, one row behind the last.
+--
+-- Both properties go through sbar.animate, so the engine's scheduler owns
+-- them: a 1 Hz poll landing mid-reveal retargets from the live value instead
+-- of snapping, the same way the hover helper relies on for its seams. The
+-- whole cascade finishes in well under a second (8 rows * 0.035s + 9 frames),
+-- so it can never still be running when the first poll lands.
+local REVEAL_FRAMES = 9
+local REVEAL_STAGGER = 0.035
+
+local function reveal_mixer(count)
+  local gen = mix_gen
+  for i = 1, count do
+    local level = mix_levels[i] or 0
+    mix_icons[i]:set({ background = { color = colors.transparent } })
+    mix_sliders[i]:set({ slider = { percentage = 0 } })
+    sbar.delay((i - 1) * REVEAL_STAGGER, function()
+      -- A close, or a close-reopen, inside the cascade must not paint rows
+      -- the current panel no longer owns.
+      if gen ~= mix_gen or not mixer_open then return end
+      sbar.animate("sin", REVEAL_FRAMES, function()
+        mix_icons[i]:set({ background = { color = MIX_CARD } })
+        mix_sliders[i]:set({ slider = { percentage = level } })
+      end)
+    end)
+  end
 end
 
 -- 1 Hz refresh while the panel is open (the wifi scan-loop idiom): catches
@@ -466,7 +527,7 @@ local function open_mixer()
     icon = { string = "sf:chevron.left", width = 35 },
     label = { drawing = true },
   })
-  bind_mixer()
+  reveal_mixer(bind_mixer())
   mixer_poll()
 end
 
@@ -474,7 +535,10 @@ local function close_mixer()
   mix_gen = mix_gen + 1
   mixer_open = false
   for i = 1, MAX_MIX do
-    mix_icons[i]:set({ drawing = false })
+    -- Clear the card with the row. The pool is reused, and a row that kept
+    -- its lit plate would flash it for one frame on the next open, before
+    -- reveal_mixer resets it to transparent.
+    mix_icons[i]:set({ drawing = false, background = { color = colors.transparent } })
     mix_sliders[i]:set({ drawing = false })
   end
   mix_empty:set({ drawing = false })
@@ -497,8 +561,17 @@ for i = 1, MAX_MIX do
     if not pct or not id then return end
     -- Optimistic paint; the next 1 Hz bind settles on the real value.
     mix_sliders[i]:set({ slider = { percentage = pct } })
+    mix_levels[i] = pct
     ybar.volume(pct, id)
   end)
+  -- Card hover, driven by BOTH halves of the row. The pointer crosses a seam
+  -- between the icon item and the slider item, and only the icon carries the
+  -- plate, so if the slider did not drive it too the card would drop out the
+  -- moment the pointer reached the track. Same reasoning as helpers/hover's
+  -- pill seam, and the same colour-only path: a row that lifted would make
+  -- the list jitter.
+  require("helpers.hover").attachColor(mix_icons[i], { mix_icons[i], mix_sliders[i] },
+                                       MIX_CARD, MIX_CARD_HOVER)
 end
 
 -- ── Footer: More Bluetooth settings ────────────────────────────────────────
