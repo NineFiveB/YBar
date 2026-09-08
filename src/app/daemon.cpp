@@ -41,6 +41,7 @@
 #include "providers/app_lifecycle.h"
 #include "providers/audio.h"
 #include "providers/audio_sessions.h"
+#include "providers/bluetooth.h"
 #include "providers/komorebi.h"
 #include "providers/media.h"
 #include "providers/network.h"
@@ -90,6 +91,10 @@ constexpr UINT kMsgInstallKeyboardHook = WM_APP + 14;
 // which is documented not to re-enter the MMDevice API from inside the
 // callback (see audio.cpp), so the re-arm runs here instead.
 constexpr UINT kMsgAudioDevice = WM_APP + 15;
+// Nearby-device list changed, and one pairing attempt finished. Both are
+// posted from the bluetooth provider's worker thread.
+constexpr UINT kMsgBluetooth = WM_APP + 16;
+constexpr UINT kMsgBluetoothPair = WM_APP + 17;
 constexpr UINT_PTR kStatsTimer = 5;
 constexpr UINT_PTR kTooltipTimer = 6;
 constexpr UINT_PTR kAppsTimer = 7;
@@ -160,6 +165,7 @@ struct DaemonState {
     // Lazily armed on first subscription (spec 10) — a config that never
     // mentions these events pays nothing for them.
     std::unique_ptr<ybar::providers::AudioProvider> audio;
+    std::unique_ptr<ybar::providers::BluetoothProvider> bluetooth;
     std::unique_ptr<ybar::providers::MediaProvider> media;
     std::unique_ptr<ybar::providers::NetworkProvider> network;
     ybar::providers::AppLifecycleProvider appLifecycle;
@@ -271,6 +277,7 @@ struct DaemonState {
     void detachKomorebiIfReserveChanged();
     void updateFullscreenElevation();
     void armAudio();
+    void armBluetooth();
     void armMedia();
     void armNetwork();
     void publishPower(bool forced);
@@ -722,6 +729,26 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             auto* info = reinterpret_cast<std::string*>(lParam);
             if (g_state) g_state->bus.trigger("wifi_change", *info);
             delete info;
+            return 0;
+        }
+        case kMsgBluetooth:
+            // The nearby list moved. The payload is the list itself, which the
+            // config reads back with `--query bluetooth`, so the event carries
+            // no INFO of its own.
+            if (g_state) g_state->bus.trigger("bluetooth_change", "");
+            return 0;
+        case kMsgBluetoothPair: {
+            auto* outcome = reinterpret_cast<ybar::providers::PairingOutcome*>(lParam);
+            if (g_state) {
+                ybar::events::Environment env;
+                env["BT_ID"] = outcome->id;
+                env["BT_STATUS"] = outcome->status;
+                env["BT_PAIRED"] = outcome->ok ? "on" : "off";
+                env["BT_NEEDS_SETTINGS"] = outcome->needsSettings ? "on" : "off";
+                env["BT_CEREMONY"] = outcome->ceremony;
+                g_state->bus.trigger("bluetooth_pair", outcome->status, env);
+            }
+            delete outcome;
             return 0;
         }
         case kMsgMedia: {
@@ -1274,6 +1301,32 @@ void DaemonState::armAudio() {
     if (!audio->start()) {
         std::fprintf(stderr, "[ybar] audio provider unavailable\n");
         audio.reset();
+    }
+}
+
+void DaemonState::armBluetooth() {
+    if (bluetooth) return;
+    bluetooth = std::make_unique<ybar::providers::BluetoothProvider>();
+    // Both callbacks are raised on the provider's worker thread, so they do
+    // nothing but post -- the rule commit aea0b05 exists to enforce.
+    bluetooth->onNearbyChanged = [hwnd = messageWindow] {
+        PostMessageW(hwnd, kMsgBluetooth, 0, 0);
+    };
+    bluetooth->onPairingResult = [hwnd = messageWindow](
+                                     const ybar::providers::PairingOutcome& outcome) {
+        // Heap payload, the armMedia idiom: the outcome outlives this call and
+        // the message thread owns it from here.
+        auto* copy = new ybar::providers::PairingOutcome(outcome);
+        if (!PostMessageW(hwnd, kMsgBluetoothPair, 0, reinterpret_cast<LPARAM>(copy)))
+            delete copy;
+    };
+    // Custom events, like komorebi's: bus.reset() drops them on a config
+    // reload, so they are re-added there too (see the reload path above).
+    bus.addEvent("bluetooth_change");
+    bus.addEvent("bluetooth_pair");
+    if (!bluetooth->start()) {
+        std::fprintf(stderr, "[ybar] bluetooth provider unavailable\n");
+        bluetooth.reset();
     }
 }
 
@@ -2348,6 +2401,36 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
     };
     hooks.setAppVolume = [](const std::string& id, int percent) {
         return ybar::providers::setAudioSessionVolume(id, percent);
+    };
+    // Bluetooth. Both hooks arm the provider lazily, the way setVolume does,
+    // so `--query bluetooth` works before anything has subscribed. The query
+    // reads the provider's cache and makes no WinRT call; the verb only posts
+    // to its worker.
+    hooks.bluetoothQuery = [&state] {
+        state.armBluetooth();
+        if (!state.bluetooth) return std::string("{\"radio\":\"none\",\"scanning\":false,\"devices\":[]}");
+        return ybar::providers::serializeBluetooth(state.bluetooth->nearby(),
+                                                   state.bluetooth->radioState(),
+                                                   state.bluetooth->discovering());
+    };
+    hooks.bluetoothVerb = [&state](const std::string& action,
+                                   const std::string& argument) -> std::string {
+        state.armBluetooth();
+        if (!state.bluetooth) return "[!] bluetooth is not available";
+        if (action == "scan") {
+            if (argument != "on" && argument != "off")
+                return "[!] usage: --bluetooth scan on|off";
+            if (argument == "on") {
+                if (!state.bluetooth->startDiscovery()) return "[!] discovery failed to start";
+            } else {
+                state.bluetooth->stopDiscovery();
+            }
+            return {};
+        }
+        // pair: fire and forget. The outcome lands on onPairingResult seconds
+        // later, so a synchronous reply here could only ever be "accepted".
+        if (!state.bluetooth->pair(argument)) return "[!] no such device: " + argument;
+        return {};
     };
     state.handler = std::make_unique<ybar::ipc::CommandHandler>(state.store, state.settings,
                                                                 state.bus, hooks,

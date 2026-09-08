@@ -79,6 +79,7 @@ add_library(ybar_win
   src/providers/app_lifecycle.cpp
   src/providers/audio.cpp
   src/providers/audio_sessions.cpp
+  src/providers/bluetooth.cpp
   src/providers/komorebi.cpp
   src/providers/media.cpp
   src/providers/network.cpp
