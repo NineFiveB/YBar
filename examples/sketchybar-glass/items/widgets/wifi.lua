@@ -274,7 +274,10 @@ local function populate_rows()
           -- and only the arc's own ink varies, which is the point of an arc.
           icon = { string = (net.secured and icons.wifi.signal.lock
                              or icons.wifi.signal.unlock)
-            .. " " .. signal_glyph(net.signal or 0) },
+            -- Two spaces, not one: the whole run is set in Segoe Fluent
+            -- Icons, whose space advance is narrow enough that the lock and
+            -- the arc read as one composite glyph at a single space.
+            .. "  " .. signal_glyph(net.signal or 0) },
           label = { string = net.ssid },
         })
       end
