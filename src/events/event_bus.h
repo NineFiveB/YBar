@@ -1,5 +1,5 @@
 // Named events over a per-item u64 subscription bitmask (spec section 3.4).
-// The 20 built-in names and their declaration order are wire contract —
+// The 22 built-in names and their declaration order are wire contract —
 // --query exposes raw update_mask values.
 
 #pragma once

@@ -1320,10 +1320,6 @@ void DaemonState::armBluetooth() {
         if (!PostMessageW(hwnd, kMsgBluetoothPair, 0, reinterpret_cast<LPARAM>(copy)))
             delete copy;
     };
-    // Custom events, like komorebi's: bus.reset() drops them on a config
-    // reload, so they are re-added there too (see the reload path above).
-    bus.addEvent("bluetooth_change");
-    bus.addEvent("bluetooth_pair");
     if (!bluetooth->start()) {
         std::fprintf(stderr, "[ybar] bluetooth provider unavailable\n");
         bluetooth.reset();
@@ -2211,6 +2207,8 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
             SetTimer(state.messageWindow, kStatsTimer, 2000, nullptr);
         } else if (event == "volume_change") {
             state.armAudio();
+        } else if (event == "bluetooth_change" || event == "bluetooth_pair") {
+            state.armBluetooth();
         } else if (event == "wifi_change") {
             state.armNetwork();
         } else if (event == "media_change") {

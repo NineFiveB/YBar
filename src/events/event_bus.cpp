@@ -13,6 +13,7 @@ const std::vector<std::string>& EventBus::builtinEvents() {
         "mouse.scrolled", "volume_change", "power_source_change", "battery_change",
         "wifi_change", "system_stats", "mouse.exited.global", "mouse.entered.global",
         "modifier_change", "app_launched", "app_terminated", "media_change",
+        "bluetooth_change", "bluetooth_pair",
     };
     return events;
 }
