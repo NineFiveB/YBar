@@ -124,6 +124,53 @@ sbar.add("item", "widgets.bluetooth.padding", {
 
 local popup_pos = "popup." .. bt_bracket.name
 
+-- ── Frames ────────────────────────────────────────────────────────────────
+-- Windows 11 Settings groups a list into flat rounded cards and uses no rules
+-- between them: the frame IS the divider. This panel used 2pt grey separator
+-- items for the same job, which read as a denser, older list.
+--
+-- There is no bracket to hang a frame on inside a popup. buildPopupScene
+-- (scene_builder.cpp) emits its members in order and has no bracket branch at
+-- all, so a bracket positioned into a popup simply never paints. A frame is
+-- therefore a tall plate on the group's FIRST row: members paint in order, so
+-- it lands beneath every row that follows it.
+--
+-- The geometry follows scene_builder's rect, which centres an item background
+-- on the item's own box: y = contentBox.midY - height/2 - y_offset. Covering
+-- `rows` rows downward from the first therefore wants height rows*ROW_H and
+-- y_offset -(rows-1)*ROW_H/2 — negative because positive y_offset is up.
+--
+-- ROW_H must track the bracket's popup.height above; the flow lays every row
+-- out on that pitch.
+local ROW_H = 26
+-- Shortening each plate by this leaves the gap BETWEEN frames that separates
+-- them, now that no rule does. Rows inside one frame stay continuous: the gap
+-- comes off the group as a whole, not off every row.
+local FRAME_GAP = 4
+local FRAME = 0x14ffffff -- flat card over the panel material, not an opaque fill
+local FRAME_HOVER = 0x24ffffff -- a framed row that acts still needs an affordance
+local FRAME_R = 8
+
+-- `pad_right` widens the plate past the first row's own box, for a group whose
+-- rows are split across two items (the mixer's icon + slider). `x_shift` nudges
+-- the left edge, for a row that starts at x=0 where the rest start at x=2.
+local function frame_rows(item, rows, pad_right, x_shift)
+  if rows <= 0 then
+    item:set({ background = { color = colors.transparent } })
+    return
+  end
+  item:set({
+    background = {
+      color = FRAME,
+      corner_radius = FRAME_R,
+      height = rows * ROW_H - FRAME_GAP,
+      y_offset = -(rows - 1) * ROW_H / 2,
+      padding_right = pad_right or 0,
+      x_offset = x_shift or 0,
+    },
+  })
+end
+
 -- ── Header: "Bluetooth" + radio toggle (click opens the Bluetooth
 -- settings page) ───────────────────────────────────────────────────────────
 local header = sbar.add("item", "widgets.bluetooth.popup.header", {
@@ -228,14 +275,8 @@ end
 -- (paddings 2/0, advance 37, content starting at x=2 like the device rows)
 -- + slider 229 (paddings 0) = 266. The mixer-open back row is the same
 -- chevron item restyled to full width (advance 268, its own line).
-sbar.add("item", "widgets.bluetooth.mixer.sep", {
-  position = popup_pos,
-  width = popup_width,
-  icon = { drawing = false },
-  label = { drawing = false },
-  background = { height = 2, color = colors.with_alpha(colors.grey, 0.3) },
-})
-
+-- No rule above this row: the master slider carries its own frame (below),
+-- and the gap between frames is the separation.
 local vol_slider = sbar.add("slider", "widgets.bluetooth.volume", 188, {
   position = popup_pos,
   width = popup_width - 32,
@@ -291,6 +332,12 @@ vol_slider:subscribe("volume_change", function(env)
   vol_slider:set({ slider = { percentage = vol } })
 end)
 
+-- One frame over the master row, covering the chevron beside it. The slider's
+-- own box starts at x=0 where every other row's content starts at x=2, so the
+-- plate is nudged 2 right and widened by the chevron's 32 to land on the same
+-- 2..266 span as the mixer frame below.
+frame_rows(vol_slider, 1, 32, 2)
+
 -- The chevron: collapsed it is a 32-wide button sharing the master slider's
 -- line; open_mixer() restyles it into the panel's full-width back row
 -- (chevron.left + "Volume mixer"), which is also what keeps the flow layout
@@ -327,23 +374,7 @@ local mixer_btn = sbar.add("item", "widgets.bluetooth.mixer.btn", {
 -- volume to zero when clicked. A separate item is inert.
 local MAX_MIX = 8
 
--- Windows 11 Settings frames each row as its own rounded card, and the mixer
--- reads as a list rather than a stack of loose sliders because of it.
---
--- The plate lives on the ICON item, not on the slider. Items paint in the
--- order they were added, so the icon's plate — widened rightwards with
--- background.padding_right, which scene_builder adds to the background rect
--- without touching layout advance (scene_builder.cpp, contentBox.width +
--- paddingLeft + paddingRight) — lands UNDER the slider's track and knob.
--- Putting it on the slider instead would paint the card over the app icon.
---
--- Height is one under the popup's 26pt row so consecutive cards keep a hairline
--- between them, the way the Settings list does.
 local MIX_SLIDER_W = popup_width - 35
-local MIX_CARD = 0x14ffffff       -- resting card, an overlay on the material
-local MIX_CARD_HOVER = 0x24ffffff -- same lift the device rows take
-local MIX_CARD_H = 25
-local MIX_CARD_R = 6
 
 local mix_icons, mix_sliders, mix_ids = {}, {}, {}
 local mix_levels = {} -- last bound volume per row; the reveal animates up to it
@@ -354,14 +385,6 @@ for i = 1, MAX_MIX do
     width = 35,
     padding_left = 2, -- line the glyph column up with the device rows
     padding_right = 0,
-    -- Starts transparent: open_mixer fades it up, so the card arrives with
-    -- the row instead of popping in fully lit.
-    background = {
-      color = colors.transparent,
-      corner_radius = MIX_CARD_R,
-      height = MIX_CARD_H,
-      padding_right = MIX_SLIDER_W,
-    },
     icon = {
       -- Glyph face for the "system" group (system sounds have no exe icon);
       -- app groups swap to the image part instead.
@@ -471,12 +494,16 @@ local function bind_mixer()
     end
   end
   mix_empty:set({ drawing = shown == 0 })
+  -- One frame behind the whole run, re-sized every bind because the session
+  -- list changes under it. It rides the FIRST row's icon: that item paints
+  -- before the rest of the group, so the plate lands under all of them.
+  frame_rows(mix_icons[1], shown, MIX_SLIDER_W)
   return shown
 end
 
--- The open cascade. Each row starts as a bare transparent strip with its
--- slider empty, then the card fades up while the fill runs out to the real
--- level, one row behind the last.
+-- The open cascade. The frame fades up as one plate — it is one object now, so
+-- animating it per row would tear it — while the fills run out to their real
+-- levels, each a beat behind the last.
 --
 -- Both properties go through sbar.animate, so the engine's scheduler owns
 -- them: a 1 Hz poll landing mid-reveal retargets from the live value instead
@@ -487,17 +514,22 @@ local REVEAL_FRAMES = 9
 local REVEAL_STAGGER = 0.035
 
 local function reveal_mixer(count)
+  if count <= 0 then return end
   local gen = mix_gen
+  -- bind_mixer has already sized the frame; only its colour is animated, so
+  -- the plate cannot resize mid-fade.
+  mix_icons[1]:set({ background = { color = colors.transparent } })
+  sbar.animate("sin", REVEAL_FRAMES, function()
+    mix_icons[1]:set({ background = { color = FRAME } })
+  end)
   for i = 1, count do
     local level = mix_levels[i] or 0
-    mix_icons[i]:set({ background = { color = colors.transparent } })
     mix_sliders[i]:set({ slider = { percentage = 0 } })
     sbar.delay((i - 1) * REVEAL_STAGGER, function()
       -- A close, or a close-reopen, inside the cascade must not paint rows
       -- the current panel no longer owns.
       if gen ~= mix_gen or not mixer_open then return end
       sbar.animate("sin", REVEAL_FRAMES, function()
-        mix_icons[i]:set({ background = { color = MIX_CARD } })
         mix_sliders[i]:set({ slider = { percentage = level } })
       end)
     end)
@@ -564,25 +596,12 @@ for i = 1, MAX_MIX do
     mix_levels[i] = pct
     ybar.volume(pct, id)
   end)
-  -- Card hover, driven by BOTH halves of the row. The pointer crosses a seam
-  -- between the icon item and the slider item, and only the icon carries the
-  -- plate, so if the slider did not drive it too the card would drop out the
-  -- moment the pointer reached the track. Same reasoning as helpers/hover's
-  -- pill seam, and the same colour-only path: a row that lifted would make
-  -- the list jitter.
-  require("helpers.hover").attachColor(mix_icons[i], { mix_icons[i], mix_sliders[i] },
-                                       MIX_CARD, MIX_CARD_HOVER)
+  -- No per-row hover: the rows share ONE frame now, so a row-scoped fill has
+  -- nothing of its own to paint. The frame is deliberately static.
 end
 
 -- ── Footer: More Bluetooth settings ────────────────────────────────────────
-sbar.add("item", "widgets.bluetooth.sep", {
-  position = popup_pos,
-  width = popup_width,
-  icon = { drawing = false },
-  label = { drawing = false },
-  background = { height = 2, color = colors.with_alpha(colors.grey, 0.3) },
-})
-
+-- Footer, framed rather than ruled off (see Frames above).
 local settings_row = sbar.add("item", "widgets.bluetooth.settings", {
   position = popup_pos,
   width = popup_width,
@@ -597,7 +616,12 @@ local settings_row = sbar.add("item", "widgets.bluetooth.settings", {
   label = { drawing = false },
 })
 
-require("helpers.hover").row(settings_row)
+-- Framed, not hover-plated. helpers/hover.row supplies its own plate geometry
+-- (height, radius, y_offset) and rests transparent, which would overwrite the
+-- frame and leave the row bare until the pointer arrived. The frame is the
+-- resting fill instead, and hover only moves its colour.
+frame_rows(settings_row, 1)
+require("helpers.hover").attachColor(settings_row, { settings_row }, FRAME, FRAME_HOVER)
 
 -- ── State ──────────────────────────────────────────────────────────────────
 local paired_cache = {}      -- { name, dtype }
