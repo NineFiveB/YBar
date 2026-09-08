@@ -294,9 +294,13 @@ local open_nearby, close_nearby, bind_nearby -- assigned below
 local NEAR_CHEV_W = 32
 local near_btn = sbar.add("item", "widgets.bluetooth.near.btn", {
   position = popup_pos,
-  width = popup_width - NEAR_CHEV_W,
+  -- padding_left is the theme default 2, NOT 0: the glyph column is
+  -- item.padding_left + icon.padding_left, so a row that zeroes its own
+  -- padding puts its glyph 2pt left of every row that does not. The width
+  -- absorbs it, so the line still advances 2 + 230 + 0 + 36 = 268.
+  width = popup_width - NEAR_CHEV_W - 2,
   align = "left",
-  padding_left = 0,
+  padding_left = 2,
   padding_right = 0,
   icon = {
     string = icons.plus,
@@ -310,7 +314,7 @@ local near_btn = sbar.add("item", "widgets.bluetooth.near.btn", {
     string = "Add device",
     color = colors.white,
     font = { size = 11.5, style = settings.font.style_map["Semibold"] },
-    width = popup_width - NEAR_CHEV_W - 35 - inset,
+    width = popup_width - NEAR_CHEV_W - 2 - 35 - inset,
     align = "left",
   },
 })
@@ -373,8 +377,11 @@ local near_status = sbar.add("item", "widgets.bluetooth.near.status", {
     align = "left",
     color = colors.grey,
     font = { size = 10.5 },
-    width = popup_width - 35 - inset,
-    padding_left = 35 + inset,
+    -- Indented to the LABEL column (the glyph slot is 35 wide and starts at
+    -- the item's own padding), so the status text lines up under the device
+    -- names rather than under their glyphs.
+    width = popup_width - 35,
+    padding_left = 35,
   },
   label = { drawing = false },
 })
@@ -399,16 +406,21 @@ local near_status = sbar.add("item", "widgets.bluetooth.near.status", {
 -- and the gap between frames is the separation.
 local vol_slider = sbar.add("slider", "widgets.bluetooth.volume", 188, {
   position = popup_pos,
-  width = popup_width - 32,
-  padding_left = 0,
+  -- Same column rule as the rows above: padding_left 2, and the icon takes a
+  -- fixed 35pt slot so the track starts where every row's LABEL starts
+  -- (2 + 35), instead of hard against a natural-width glyph.
+  width = popup_width - 32 - 2,
+  padding_left = 2,
   padding_right = 0,
   align = "left",
   icon = {
     string = "sf:speaker.wave.2.fill",
     color = colors.grey,
     font = { size = 9.5 },
+    width = 35,
+    align = "center",
     padding_left = inset,
-    padding_right = 7,
+    padding_right = 0,
   },
   label = { drawing = false },
   slider = {
