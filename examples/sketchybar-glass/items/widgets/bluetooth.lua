@@ -112,7 +112,11 @@ local bt_bracket = sbar.add("bracket", "widgets.bluetooth.bracket", { bt_icon.na
   -- full-width row inherits the theme default item paddings (2/2), so rows
   -- advance 268. 268 also reproduces the no-wrap panel exactly (widest
   -- advance 268 + 2x6 engine inset = 280 wide), pixel-identical to before.
-  popup = { align = "center", height = 26, wrap_width = popup_width + 4 },
+  -- 28, not 26: the panel gained two lists (the mixer and Add device) since
+  -- this was set, and at a 26pt pitch a dozen single-line rows read as one
+  -- block of text. Two points per row is the smallest step that separates
+  -- them without making the panel tall. ROW_H below MUST track this.
+  popup = { align = "center", height = 28, wrap_width = popup_width + 4 },
 })
 
 require("helpers.hover").pill(bt_bracket, bt_icon)
@@ -142,7 +146,7 @@ local popup_pos = "popup." .. bt_bracket.name
 --
 -- ROW_H must track the bracket's popup.height above; the flow lays every row
 -- out on that pitch.
-local ROW_H = 26
+local ROW_H = 28
 -- Shortening each plate by this leaves the gap BETWEEN frames that separates
 -- them, now that no rule does. Rows inside one frame stay continuous: the gap
 -- comes off the group as a whole, not off every row.

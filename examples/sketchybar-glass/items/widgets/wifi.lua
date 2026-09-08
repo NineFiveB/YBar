@@ -128,7 +128,7 @@ local current_status = sbar.add("item", {
   icon = {
     align = "left",
     string = "•",
-    color = colors.green,
+    color = colors.status_green,
     font = { size = 13, style = settings.font.style_map["Bold"] },
     -- The dot occupies the glyph column, so "Connected" starts in the name
     -- column with the SSID above it and the networks below — it used to sit
@@ -139,7 +139,7 @@ local current_status = sbar.add("item", {
   label = {
     align = "left",
     string = "Connected",
-    color = colors.grey,
+    color = colors.status_green,
     font = { size = 10.5 },
     width = popup_width - glyph_col - inset,
   },
