@@ -11,6 +11,11 @@ return {
   orange = 0xffe8e8e8,
   magenta = 0xffd8d8d8,
   grey = 0xff8e8e8e,         -- secondary
+  -- The one hue in this palette, and a deliberate exception to the rule
+  -- above. `green` is an ALIAS the port's item files all use, so giving it
+  -- a real colour would repaint half the bar; this is a separate token for
+  -- the places a connected/positive state should actually read as green.
+  status_green = 0xff6ccb5f,
   transparent = 0x00000000,
 
   bar = {
