@@ -110,17 +110,44 @@ public:
     // armMutex before publishMutex, and never held while publishing.
     std::mutex armMutex;
 
-    void publish(bool forced) {
+    // Dedupe and dispatch a level that is already known. No COM call inside
+    // the lock, and none at all: that is what makes this safe to run from a
+    // WASAPI notification thread. onVolume is a PostMessage, so holding the
+    // lock across it costs nothing and keeps two racing notifications in
+    // order.
+    void publishValue(int percent, bool forced) {
         std::lock_guard<std::mutex> lock(publishMutex);
-        const int percent = percentFrom(volume.Get());
         if (!forced && percent == lastPercent) return; // deduped (spec 10)
         lastPercent = percent;
         if (facade && facade->onVolume) facade->onVolume(percent);
     }
 
+    // Reads the level from the endpoint, so it is for the daemon's own thread.
+    // The endpoint is snapshotted under the lock and queried OUTSIDE it -- the
+    // file rule setVolume() already follows. Holding publishMutex across a COM
+    // call is what let a notification thread waiting on that same mutex sit
+    // behind a message thread parked inside the audio service.
+    void publish(bool forced) {
+        ComPtr<IAudioEndpointVolume> endpoint;
+        {
+            std::lock_guard<std::mutex> lock(publishMutex);
+            endpoint = volume;
+        }
+        publishValue(percentFrom(endpoint.Get()), forced);
+    }
+
+    // Called from the device-notification thread. Takes no lock and touches no
+    // MMDevice object: the whole point is that it returns before the audio
+    // service's dispatch lock can matter. The handler on the other side is a
+    // PostMessage.
+    void requestRearm() {
+        if (facade && facade->onDeviceChanged) facade->onDeviceChanged();
+    }
+
     // (Re)binds the volume interface to the current default output device.
-    // Runs on the MMDevice notification thread (OnDefaultDeviceChanged) as
-    // well as the daemon thread, concurrently with OnNotify-driven publish()
+    // Runs on the daemon's message thread only, via rearm() -- never from a
+    // notification callback any more. Still guarded, because it races
+    // OnNotify-driven publish()
     // on yet another thread — so every swap of `volume` happens under
     // publishMutex, while register/unregister/release happen OUTSIDE it
     // (unregister can block on an in-flight OnNotify that is itself waiting
@@ -151,17 +178,40 @@ public:
     }
 };
 
-HRESULT STDMETHODCALLTYPE VolumeCallback::OnNotify(PAUDIO_VOLUME_NOTIFICATION_DATA) {
-    if (owner_) owner_->publish(false);
+// The notification already carries the new state, so read it from `data`
+// instead of calling back into the endpoint for it. Re-querying here ran a COM
+// call on a WASAPI thread, inside a callback the service dispatches under its
+// own lock -- the same hazard that deadlocked OnDefaultDeviceChanged, and
+// pointless besides, since fMasterVolume and bMuted are right here.
+HRESULT STDMETHODCALLTYPE VolumeCallback::OnNotify(PAUDIO_VOLUME_NOTIFICATION_DATA data) {
+    if (!owner_ || !data) return S_OK;
+    // Same muted -> 0 convention as percentFrom().
+    const int percent =
+        data->bMuted ? 0 : static_cast<int>(std::lround(data->fMasterVolume * 100.0f));
+    owner_->publishValue(percent, false);
     return S_OK;
 }
 
+// Hand off and return. This used to call armEndpoint() and publish() inline,
+// which deadlocked the bar: the audio service dispatches this notification
+// with an internal lock held, and IMMNotificationClient is documented not to
+// block, not to wait on a synchronization object, not to (un)register a
+// notification, and not to release the last reference on an MMDevice object
+// from inside a callback. armEndpoint() did all four -- it took armMutex and
+// publishMutex, called UnregisterControlChangeNotify, dropped the old endpoint
+// and then re-entered GetDefaultAudioEndpoint/Activate.
+//
+// Captured live (AppHangB1, a full dump of the hung process): the message
+// thread sat in MMDevAPI/AudioSes waiting, while a WASAPI notification thread
+// was inside this callback, back down in AudioSes, blocked on a KERNELBASE
+// wait. Connecting or waking a Bluetooth audio device moves the default
+// endpoint, so opening the bluetooth widget was a reliable way to fire it.
+//
+// The re-arm now happens on the daemon's message thread, which owns no audio
+// lock when it runs.
 HRESULT STDMETHODCALLTYPE DeviceCallback::OnDefaultDeviceChanged(EDataFlow flow, ERole role,
                                                                  LPCWSTR) {
-    if (owner_ && flow == eRender && role == eMultimedia) {
-        owner_->armEndpoint();
-        owner_->publish(true); // the new device's level is news either way
-    }
+    if (owner_ && flow == eRender && role == eMultimedia) owner_->requestRearm();
     return S_OK;
 }
 
@@ -216,6 +266,15 @@ void AudioProvider::stop() {
     old.Reset();
     impl_->enumerator.Reset();
     impl_->running = false;
+}
+
+bool AudioProvider::rearm() {
+    if (!impl_->running) return false;
+    // Both halves were what OnDefaultDeviceChanged used to run inline; they
+    // are safe here because this thread holds no audio-service lock.
+    const bool ok = impl_->armEndpoint();
+    impl_->publish(true); // the new device's level is news either way
+    return ok;
 }
 
 bool AudioProvider::refresh() {

@@ -86,6 +86,10 @@ constexpr UINT kMsgKomorebiApp = WM_APP + 13;
 // A THREAD message, posted to the hook thread and never to a window: arm
 // WH_KEYBOARD_LL on the thread that will actually pump it.
 constexpr UINT kMsgInstallKeyboardHook = WM_APP + 14;
+// The default audio endpoint moved. Posted from a WASAPI notification thread,
+// which is documented not to re-enter the MMDevice API from inside the
+// callback (see audio.cpp), so the re-arm runs here instead.
+constexpr UINT kMsgAudioDevice = WM_APP + 15;
 constexpr UINT_PTR kStatsTimer = 5;
 constexpr UINT_PTR kTooltipTimer = 6;
 constexpr UINT_PTR kAppsTimer = 7;
@@ -709,6 +713,11 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             if (g_state) g_state->bus.trigger("volume_change",
                                               std::to_string(static_cast<int>(wParam)));
             return 0;
+        case kMsgAudioDevice:
+            // Re-bind off the notification thread. rearm() publishes the new
+            // device's level itself, which arrives back here as kMsgVolume.
+            if (g_state && g_state->audio) g_state->audio->rearm();
+            return 0;
         case kMsgNetwork: {
             auto* info = reinterpret_cast<std::string*>(lParam);
             if (g_state) g_state->bus.trigger("wifi_change", *info);
@@ -1255,6 +1264,12 @@ void DaemonState::armAudio() {
     audio = std::make_unique<ybar::providers::AudioProvider>();
     audio->onVolume = [hwnd = messageWindow](int percent) {
         PostMessageW(hwnd, kMsgVolume, static_cast<WPARAM>(percent), 0);
+    };
+    // Posted, not called: the notification thread that raises this is holding
+    // the audio service's dispatch lock, and re-entering the MMDevice API from
+    // there deadlocks against whatever the message thread is doing (audio.cpp).
+    audio->onDeviceChanged = [hwnd = messageWindow] {
+        PostMessageW(hwnd, kMsgAudioDevice, 0, 0);
     };
     if (!audio->start()) {
         std::fprintf(stderr, "[ybar] audio provider unavailable\n");
