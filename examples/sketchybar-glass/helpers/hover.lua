@@ -25,6 +25,11 @@ local M = {}
 M.ENTER_FRAMES = 5  -- ~83ms
 M.EXIT_FRAMES = 10  -- ~167ms
 
+-- The selection plate's radius, exported because anything drawn AROUND a row
+-- has to match it: a frame at a different radius from the selection sitting
+-- inside it reads as two unrelated shapes at every corner. M.row's default.
+M.ROW_RADIUS = 4
+
 -- ELEVATION (the pseudo-3D half of the hover).
 --
 -- The usual lift cue is a drop shadow, and it is the wrong one here twice
@@ -145,7 +150,7 @@ function M.row(item, opts)
     background = {
       color = colors.transparent,
       height = opts.height or 22,
-      corner_radius = opts.radius or 4,
+      corner_radius = opts.radius or M.ROW_RADIUS,
       y_offset = opts.y_offset or -1,   -- positive is up
     },
   })
