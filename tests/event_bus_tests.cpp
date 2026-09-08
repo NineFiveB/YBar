@@ -13,17 +13,19 @@ TEST_CASE("builtin events occupy fixed bits in declaration order") {
     CHECK(bus.eventBit("front_app_switched") == 1ull << 0);
     CHECK(bus.eventBit("space_change") == 1ull << 1);
     CHECK(bus.eventBit("media_change") == 1ull << 19);
-    CHECK(bus.definitions().size() == 20);
+    CHECK(bus.definitions().size() == 22);
     CHECK_FALSE(bus.eventBit("unknown"));
 }
 
 TEST_CASE("custom events append and cap at 64; duplicates are no-ops") {
     EventBus bus;
     CHECK_FALSE(bus.addEvent("komorebi_workspace_change"));
-    CHECK(bus.eventBit("komorebi_workspace_change") == 1ull << 20);
+    CHECK(bus.eventBit("komorebi_workspace_change") == 1ull << 22);
     CHECK_FALSE(bus.addEvent("komorebi_workspace_change")); // silent no-op
-    CHECK(bus.definitions().size() == 21);
-    for (int i = 0; i < 43; ++i) CHECK_FALSE(bus.addEvent("e" + std::to_string(i)));
+    CHECK(bus.definitions().size() == 23);
+    // 22 builtins + komorebi + 41 = 64, the cap. This count tracks the
+    // builtin list: adding a builtin event costs one of these.
+    for (int i = 0; i < 41; ++i) CHECK_FALSE(bus.addEvent("e" + std::to_string(i)));
     CHECK(bus.addEvent("overflow") == "[!] event limit reached (64)");
 }
 
