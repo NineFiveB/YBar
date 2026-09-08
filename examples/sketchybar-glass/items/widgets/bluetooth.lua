@@ -148,8 +148,10 @@ local ROW_H = 26
 -- comes off the group as a whole, not off every row.
 local FRAME_GAP = 4
 local FRAME = 0x14ffffff -- flat card over the panel material, not an opaque fill
-local FRAME_HOVER = 0x24ffffff -- a framed row that acts still needs an affordance
-local FRAME_R = 8
+-- Taken from the hover helper rather than set here: a frame and the selection
+-- plate that lands inside it have to share a radius, or every corner shows two
+-- different curves.
+local FRAME_R = require("helpers.hover").ROW_RADIUS
 
 -- `pad_right` widens the plate past the first row's own box, for a group whose
 -- rows are split across two items (the mixer's icon + slider). `x_shift` nudges
@@ -616,12 +618,10 @@ local settings_row = sbar.add("item", "widgets.bluetooth.settings", {
   label = { drawing = false },
 })
 
--- Framed, not hover-plated. helpers/hover.row supplies its own plate geometry
--- (height, radius, y_offset) and rests transparent, which would overwrite the
--- frame and leave the row bare until the pointer arrived. The frame is the
--- resting fill instead, and hover only moves its colour.
-frame_rows(settings_row, 1)
-require("helpers.hover").attachColor(settings_row, { settings_row }, FRAME, FRAME_HOVER)
+-- Deliberately unframed. It is a link out of the panel, not a setting in it,
+-- and a frame here grouped it with the content above as if it belonged to the
+-- same list. Plain hover selection, like the device rows.
+require("helpers.hover").row(settings_row)
 
 -- ── State ──────────────────────────────────────────────────────────────────
 local paired_cache = {}      -- { name, dtype }
