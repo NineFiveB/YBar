@@ -285,14 +285,23 @@ local open_nearby, close_nearby, bind_nearby -- assigned below
 
 -- The title row doubles as the expander, exactly like the mixer chevron: its
 -- own background IS the section frame, so it takes no hover fill of its own.
+-- Two items on one line, the master volume row's shape exactly: the label row
+-- takes popup_width - 32 and the chevron takes the remaining 32, so the
+-- advance is 232 + 36 = 268 and the chevron's right edge lands on the same x
+-- as every full-width row's. The leading glyph is a plus, matching what
+-- Windows puts on its own "Add device" button, and it sits in the same 35pt
+-- column as the paired rows and the nearby rows below.
+local NEAR_CHEV_W = 32
 local near_btn = sbar.add("item", "widgets.bluetooth.near.btn", {
   position = popup_pos,
-  width = popup_width,
+  width = popup_width - NEAR_CHEV_W,
   align = "left",
+  padding_left = 0,
+  padding_right = 0,
   icon = {
-    string = "sf:chevron.right",
-    color = colors.grey,
-    font = { size = 10.5 },
+    string = icons.plus,
+    color = colors.white,
+    font = { size = 12.5 },
     width = 35,
     align = "center",
     padding_left = inset,
@@ -301,9 +310,27 @@ local near_btn = sbar.add("item", "widgets.bluetooth.near.btn", {
     string = "Add device",
     color = colors.white,
     font = { size = 11.5, style = settings.font.style_map["Semibold"] },
-    width = popup_width - 35 - inset,
+    width = popup_width - NEAR_CHEV_W - 35 - inset,
     align = "left",
   },
+})
+
+-- The disclosure arrow, on the right where the mixer's is. A separate item
+-- because a row paints one icon and one label and this is a third part; it is
+-- inert on its own and simply shares the title row's click.
+local near_chev = sbar.add("item", "widgets.bluetooth.near.chev", {
+  position = popup_pos,
+  width = NEAR_CHEV_W,
+  icon = {
+    string = "sf:chevron.right",
+    color = colors.grey,
+    font = { size = 10.5 },
+    width = NEAR_CHEV_W,
+    align = "center",
+    padding_left = 0,
+    padding_right = 0,
+  },
+  label = { drawing = false },
 })
 
 -- Geometry byte-identical to dev_rows, so a nearby name and a paired name sit
@@ -651,7 +678,10 @@ local function open_mixer()
     icon = { string = "sf:chevron.left", width = 35 },
     label = { drawing = true },
   })
-  if near_open then close_nearby() end -- one expansion at a time
+  -- The two sections are independent. Opening the mixer used to collapse the
+  -- nearby list, which threw away a scan in progress for a reason no user
+  -- would guess. They stack instead: each keeps its own generation counter
+  -- and its own poll, so neither can close the other's rows.
   reveal_mixer(bind_mixer())
   mixer_poll()
 end
@@ -927,7 +957,11 @@ bind_nearby = function()
   -- behind one row reads as an outline around a control rather than a card
   -- grouping a list -- the same reason the volume row and the footer carry
   -- none. The chevron is the affordance.
-  frame_rows(near_btn, near_open and (1 + shown + (status and 1 or 0)) or 0)
+  -- Reaches over the chevron beside it, and starts at x=2 where the rest of
+  -- the panel does: the title row sets its own paddings to 0, so its box
+  -- begins at 0 rather than the theme default 2.
+  frame_rows(near_btn, near_open and (1 + shown + (status and 1 or 0)) or 0,
+             NEAR_CHEV_W, 2)
 end
 
 -- 2 s refresh AND keepalive. The provider expires discovery on its own after
@@ -953,7 +987,7 @@ open_nearby = function()
   near_open = true
   near_order, near_meta, near_mark = {}, {}, {} -- a fresh look every time
   near_busy = nil
-  near_btn:set({ icon = { string = "sf:chevron.down" } })
+  near_chev:set({ icon = { string = "sf:chevron.down" } })
   ybar.bluetooth("scan", "on")
   bind_nearby()
   near_tick()
@@ -964,18 +998,21 @@ close_nearby = function()
   near_open = false
   near_busy = nil
   ybar.bluetooth("scan", "off")
-  near_btn:set({ icon = { string = "sf:chevron.right" } })
+  near_chev:set({ icon = { string = "sf:chevron.right" } })
   for i = 1, MAX_NEAR do
     near_row_ids[i] = nil
     near_rows[i]:set({ drawing = false })
   end
   near_status:set({ drawing = false })
-  frame_rows(near_btn, 0)
+  frame_rows(near_btn, 0, NEAR_CHEV_W, 2)
 end
 
-near_btn:subscribe("mouse.clicked", function()
+local function toggle_nearby()
   if near_open then close_nearby() else open_nearby() end
-end)
+end
+
+near_btn:subscribe("mouse.clicked", toggle_nearby)
+near_chev:subscribe("mouse.clicked", toggle_nearby)
 
 for i = 1, MAX_NEAR do
   near_rows[i]:subscribe("mouse.clicked", function()
