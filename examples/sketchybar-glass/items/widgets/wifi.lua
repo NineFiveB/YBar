@@ -203,7 +203,11 @@ local settings_row = sbar.add("item", {
   label = { drawing = false },
 })
 
-require("helpers.hover").row(settings_row)
+-- No selection plate here, matching the bluetooth flyout's footer: this is a
+-- link out of the panel rather than another entry in the network list above,
+-- and a hover fill made it read as one. Static text that happens to be
+-- clickable -- the mouse.clicked handler below still opens Settings, and the
+-- theme default draws no background unless something sets a colour.
 
 -- ── State ──────────────────────────────────────────────────────────────────
 local wifi_power = true

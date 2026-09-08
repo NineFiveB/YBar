@@ -618,10 +618,11 @@ local settings_row = sbar.add("item", "widgets.bluetooth.settings", {
   label = { drawing = false },
 })
 
--- Deliberately unframed. It is a link out of the panel, not a setting in it,
--- and a frame here grouped it with the content above as if it belonged to the
--- same list. Plain hover selection, like the device rows.
-require("helpers.hover").row(settings_row)
+-- No frame and no selection plate. This is a link out of the panel, not a row
+-- of the list above: framing it grouped it with content it does not belong to,
+-- and a hover fill made it read as another selectable entry. Static text that
+-- happens to be clickable -- the click handler below is untouched, and the
+-- theme default draws no background unless something sets a colour.
 
 -- ── State ──────────────────────────────────────────────────────────────────
 local paired_cache = {}      -- { name, dtype }
