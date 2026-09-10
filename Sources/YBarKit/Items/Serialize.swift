@@ -122,6 +122,10 @@ public enum Serialize {
             "wrap_width": item.popup.wrapWidth,
             "height": item.popup.cellHeight,
             "auto_close": item.popup.autoClose,
+            "align": String(item.popup.align),
+            "y_offset": item.popup.yOffset,
+            "blur_radius": item.popup.blurRadius,
+            "background": backgroundDictionary(item.popup.background),
         ] as [String: Any]
         if item.position == .popup {
             dictionary["popup_host"] = item.popupHost ?? ""
@@ -157,6 +161,7 @@ public enum Serialize {
             "padding_right": background.paddingRight,
             "x_offset": background.xOffset,
             "y_offset": background.yOffset,
+            "glass": background.glass ? "on" : "off",
             "shadow": [
                 "drawing": background.shadow.drawing ? "on" : "off",
                 "color": hex(background.shadow.color),
