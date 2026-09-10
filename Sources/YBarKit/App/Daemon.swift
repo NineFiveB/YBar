@@ -214,19 +214,30 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
             self?.networkProvider.requestLocationAuthorization()
         }
 
-        statsProvider.onSample = { [weak self] cpu, memory in
+        statsProvider.onSample = { [weak self] cpu, memory, gpu in
+            var environment = [
+                "CPU_USAGE": "\(Int((cpu * 100).rounded()))",
+                "CPU_FRACTION": String(format: "%.2f", cpu),
+                "MEMORY_USAGE": "\(Int((memory * 100).rounded()))",
+                "MEMORY_FRACTION": String(format: "%.2f", memory),
+                "DISK_FREE_GB": DaemonCore.diskGB().free,
+                "DISK_TOTAL_GB": DaemonCore.diskGB().total,
+                "THERMAL_STATE": DaemonCore.thermalStateName(),
+            ]
+            // Env-only, and only when the driver reports one: the INFO JSON
+            // is the cross-port contract, and a widget can tell "no GPU
+            // figure on this Mac" from "idle" by the key's absence.
+            if let gpu {
+                environment["GPU_USAGE"] = "\(Int((gpu.utilization * 100).rounded()))"
+                environment["GPU_FRACTION"] = String(format: "%.2f", gpu.utilization)
+                if let bytes = gpu.memoryUsedBytes {
+                    environment["GPU_MEMORY_USED_MB"] = "\(bytes / 1_048_576)"
+                }
+            }
             self?.eventBus.trigger(
                 name: "system_stats",
                 info: "{\"cpu\": \(Int((cpu * 100).rounded())), \"memory\": \(Int((memory * 100).rounded()))}",
-                extraEnvironment: [
-                    "CPU_USAGE": "\(Int((cpu * 100).rounded()))",
-                    "CPU_FRACTION": String(format: "%.2f", cpu),
-                    "MEMORY_USAGE": "\(Int((memory * 100).rounded()))",
-                    "MEMORY_FRACTION": String(format: "%.2f", memory),
-                    "DISK_FREE_GB": DaemonCore.diskGB().free,
-                    "DISK_TOTAL_GB": DaemonCore.diskGB().total,
-                    "THERMAL_STATE": DaemonCore.thermalStateName(),
-                ])
+                extraEnvironment: environment)
         }
 
         barManager.onDisplaysChanged = { [weak self] in
