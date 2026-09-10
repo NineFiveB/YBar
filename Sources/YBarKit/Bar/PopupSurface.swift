@@ -79,25 +79,50 @@ public final class PopupSurface {
     /// Place and show the panel. `anchor` is the host item's frame in global
     /// AppKit coordinates (bottom-left origin, y-up); the popup hangs below it
     /// for a top bar and sits above it for a bottom bar. `align` anchors the
-    /// panel's left/center/right edge against the host.
+    /// panel's left/center/right edge against the host. The panel is kept
+    /// inside `screen` horizontally, `edgeMargin` short of its edges.
     public func present(anchor: CGRect, size: CGSize, barPosition: BarPosition,
-                        yOffset: CGFloat, align: Character) {
-        let x: CGFloat
+                        yOffset: CGFloat, align: Character,
+                        screen: NSScreen, edgeMargin: CGFloat) {
+        let frame = PopupSurface.frame(
+            anchor: anchor, size: size, barPosition: barPosition, yOffset: yOffset,
+            align: align, screenFrame: screen.frame, edgeMargin: edgeMargin)
+        panel.setFrame(frame, display: true)
+        backdropView.frame = panel.contentView?.bounds ?? .zero
+        hostView.frame = panel.contentView?.bounds ?? .zero
+        hostView.updateDrawableSize()
+        panel.orderFrontRegardless()
+    }
+
+    /// Panel frame for `present`. A borderless non-activating panel keeps
+    /// whatever frame it is given, so an item near a screen edge would push
+    /// a centred 320 pt popup onto the neighbouring display or off the
+    /// desktop entirely. Clamp the right edge first, then the left: a popup
+    /// wider than the screen then lands on the left margin and overflows to
+    /// the right instead of being shoved off-screen to the left.
+    ///
+    /// No vertical correction: the popup only overshoots the far edge when
+    /// it is taller than the space beyond the bar, and any vertical move
+    /// would then land it over its own host and swallow the clicks meant
+    /// for it (the Windows port's flip is a no-op in that case for the same
+    /// reason).
+    static func frame(anchor: CGRect, size: CGSize, barPosition: BarPosition,
+                      yOffset: CGFloat, align: Character,
+                      screenFrame: CGRect, edgeMargin: CGFloat) -> CGRect {
+        var x: CGFloat
         switch align {
         case "c": x = anchor.midX - size.width / 2
         case "r": x = anchor.maxX - size.width
         default: x = anchor.minX
         }
+        x = min(x, screenFrame.maxX - edgeMargin - size.width)
+        x = max(x, screenFrame.minX + edgeMargin)
         let y: CGFloat
         switch barPosition {
         case .top: y = anchor.minY - size.height - yOffset
         case .bottom: y = anchor.maxY + yOffset
         }
-        panel.setFrame(CGRect(x: x, y: y, width: size.width, height: size.height), display: true)
-        backdropView.frame = panel.contentView?.bounds ?? .zero
-        hostView.frame = panel.contentView?.bounds ?? .zero
-        hostView.updateDrawableSize()
-        panel.orderFrontRegardless()
+        return CGRect(x: x, y: y, width: size.width, height: size.height)
     }
 
     /// Glass behind the whole panel (popup.blur_radius > 0).
