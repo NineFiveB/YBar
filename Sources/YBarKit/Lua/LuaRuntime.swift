@@ -211,6 +211,16 @@ public final class LuaRuntime {
         return nil
     }
 
+    /// Drop a removed item's callback refs; the registry would otherwise
+    /// hold them (and whatever they close over) until the next reload.
+    private func releaseSubscriptions(for item: Item) {
+        guard let refs = subscriptions.removeValue(forKey: item.id) else { return }
+        if let state {
+            for ref in refs.values { luaL_unref(state, registryIndex, ref) }
+        }
+        item.hasLuaHandlers = false
+    }
+
     // MARK: - Raw module registration
 
     private func registerRawModule(_ state: OpaquePointer) {
@@ -458,6 +468,8 @@ public final class LuaRuntime {
                 guard let runtime = LuaRuntime.current else { return 0 }
                 guard let name = argString(L, 1) else { return 0 }
                 for item in runtime.barManager.store.items(matching: name) {
+                    runtime.scheduler.cancel(prefix: "item.\(item.id).")
+                    runtime.releaseSubscriptions(for: item)
                     _ = runtime.barManager.store.remove(name: item.name)
                 }
                 runtime.barManager.setNeedsRender()
@@ -487,13 +499,23 @@ public final class LuaRuntime {
         case "item":
             guard resolve(position) != nil else { return "[!] add failed: \(name) \(position)" }
         case "graph":
+            // Same envelope as `--add graph`: the sketchybar shim forwards
+            // theme widths verbatim, Int(inf) traps, and 1e9 allocates gigabytes.
+            let capacity = width ?? 60
+            guard capacity.isFinite, capacity >= 1, capacity <= 8192 else {
+                return "[!] usage: --add graph <name> <position> <width> (1...8192)"
+            }
             guard let item = resolve(position) else { return "[!] add failed: \(name) \(position)" }
             item.kind = .graph
-            item.graph = GraphState(capacity: Int(width ?? 60))
+            item.graph = GraphState(capacity: Int(capacity))
         case "slider":
+            let sliderWidth = width ?? 100
+            guard sliderWidth.isFinite, sliderWidth > 0 else {
+                return "[!] usage: --add slider <name> <position> <width>"
+            }
             guard let item = resolve(position) else { return "[!] add failed: \(name) \(position)" }
             item.kind = .slider
-            item.slider = SliderState(width: width ?? 100)
+            item.slider = SliderState(width: sliderWidth)
         case "alias":
             guard let item = resolve(position) else { return "[!] add failed: \(name) \(position)" }
             item.kind = .alias

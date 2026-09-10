@@ -994,8 +994,10 @@ value is read with `_wgetenv` so non-ASCII shell paths survive. Dispatch is
 `sh -c <script>` / `cmd /c <script>` / `powershell -NoProfile -Command
 <script>` by kind, cwd = config dir, 60 s watchdog that closes a
 **`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`** Job Object (kills the whole child
-*tree* — the latent "children of the shell survive" gap macOS shares is
-fixed here), fire-and-forget, PATH prepended with the `ybar.exe` directory
+*tree*; macOS signals the child's process group — Process spawns the shell
+as its own group leader — and escalates to SIGKILL, so only a helper that
+`setsid()`s into its own session outlives its 60 s there), fire-and-forget,
+PATH prepended with the `ybar.exe` directory
 and the resolved shell's directory (`;` separator). `ybar.exec` shares the
 interpreter choice, the PATH prepend and the 60 s limit but not the rest: its
 watchdog `TerminateProcess`es the shell alone (no Job Object, so grandchildren

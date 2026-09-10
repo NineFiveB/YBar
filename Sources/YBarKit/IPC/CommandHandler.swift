@@ -191,6 +191,7 @@ public final class CommandHandler {
                     emit("[!] no item matching \(name)")
                 }
                 for item in targets {
+                    scheduler.cancel(prefix: "item.\(item.id).")
                     _ = barManager.store.remove(name: item.name)
                 }
                 barManager.setNeedsRender()
@@ -296,7 +297,7 @@ public final class CommandHandler {
             return nil
 
         case "slider":
-            guard args.count >= 4, let width = Float(args[3]), width > 0 else {
+            guard args.count >= 4, let width = Float(args[3]), width.isFinite, width > 0 else {
                 return "[!] usage: --add slider <name> <position> <width>"
             }
             guard let item = addItem(name: args[1], positionToken: args[2]) else {

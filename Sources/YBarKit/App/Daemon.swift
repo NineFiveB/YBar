@@ -59,6 +59,8 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
 
     var routineTimer: Timer?
     var configURL: URL?
+    /// The IPC node, which doubles as the instance lock (tests redirect it).
+    var socketPath: String
     /// Last reported modifier state (modifier_change dedupe).
     var lastModifier = "none"
     var luaRuntime: LuaRuntime?
@@ -66,18 +68,37 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
     init(explicitConfigPath: String?) throws {
         self.instanceName = Version.instanceName
         self.explicitConfigPath = explicitConfigPath
+        self.socketPath = WireFormat.socketPath(instanceName: instanceName)
         self.barManager = try BarManager()
         super.init()
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        // Instance lock FIRST (the Windows port's order): a second launch must
+        // fail before it creates windows or starts providers. Under launchd's
+        // KeepAlive a manual launch races the respawn, and the loser used to
+        // bring up a full bar and tear shared state down on its way out.
+        do {
+            try bindInstanceSocket()
+        } catch {
+            FileHandle.standardError.write(Data("[!] \(error)\n".utf8))
+            NSApp.terminate(nil)
+            return
+        }
+
         barManager.begin()
         wireScheduler()
         wireEventBus()
         wireProviders()
         wireMouse()
         startRoutineTimer()
+        executeConfig()
+    }
 
+    /// Bind the IPC socket. Safe before anything else exists: the handler hops
+    /// through `DispatchQueue.main.sync`, so a request that lands early simply
+    /// waits on the accept thread until didFinishLaunching returns.
+    func bindInstanceSocket() throws {
         commandHandler = CommandHandler(
             barManager: barManager, eventBus: eventBus,
             scriptRunner: scriptRunner, scheduler: scheduler)
@@ -86,19 +107,10 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         }
         wireCommandHandler()
 
-        let socketPath = WireFormat.socketPath(instanceName: instanceName)
         socketServer = SocketServer(path: socketPath) { [weak self] arguments in
             self?.commandHandler.handle(arguments: arguments) ?? ""
         }
-        do {
-            try socketServer.start()
-        } catch {
-            FileHandle.standardError.write(Data("[!] \(error)\n".utf8))
-            NSApp.terminate(nil)
-            return
-        }
-
-        executeConfig()
+        try socketServer.start()
     }
 
     public func applicationWillTerminate(_ notification: Notification) {

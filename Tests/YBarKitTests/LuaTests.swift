@@ -120,6 +120,43 @@ import Testing
         #expect(bracket?.members == ["a"])
     }
 
+    @Test func removeReleasesLuaHandlers() throws {
+        let stack = try makeStack()
+        defer { stack.runtime.shutdown() }
+        // Added from Swift so the test still holds the item after Lua drops it.
+        let item = try #require(stack.barManager.store.add(name: "gone", position: .left))
+        let error = run("""
+        ybar.subscribe("gone", "system_woke", function(env) end)
+        ybar.remove("gone")
+        """, stack.runtime)
+        #expect(error == nil)
+        #expect(stack.barManager.store.item(named: "gone") == nil)
+        #expect(!stack.runtime.hasHandlers(for: item))
+        #expect(!item.hasLuaHandlers)
+    }
+
+    @Test func rawAddRejectsUnusableWidths() throws {
+        let stack = try makeStack()
+        defer { stack.runtime.shutdown() }
+        // The sketchybar shim forwards theme widths verbatim: Int(inf) used to
+        // trap the daemon (a silent respawn loop under KeepAlive) and 1e9
+        // allocated gigabytes. Every call must fail cleanly and add nothing.
+        let error = run("""
+        ybar.add("graph", "g_inf", "left", 1/0)
+        ybar.add("graph", "g_nan", "left", 0/0)
+        ybar.add("graph", "g_big", "left", 1e30)
+        ybar.add("graph", "g_zero", "left", 0)
+        ybar.add("slider", "s_inf", "left", 1/0)
+        ybar.add("slider", "s_zero", "left", 0)
+        ybar.add("graph", "g_ok", "left", 8192)
+        """, stack.runtime)
+        #expect(error == nil)
+        for name in ["g_inf", "g_nan", "g_big", "g_zero", "s_inf", "s_zero"] {
+            #expect(stack.barManager.store.item(named: name) == nil, "\(name) was added")
+        }
+        #expect(stack.barManager.store.item(named: "g_ok")?.graph?.capacity == 8192)
+    }
+
     @Test func animateWrapperScopesContext() throws {
         let stack = try makeStack()
         defer { stack.runtime.shutdown() }
