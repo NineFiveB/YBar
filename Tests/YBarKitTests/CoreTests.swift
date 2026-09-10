@@ -135,6 +135,28 @@ import Testing
     }
 }
 
+// MARK: - Script PATH
+
+@Suite struct ScriptPATHTests {
+    @Test func selfDirectoryLeadsAnInheritedPATH() {
+        let selfDir = "/Applications/YBar.app/Contents/MacOS"
+        // A LaunchAgent PATH that lists a bin dir holding another `ybar`.
+        let path = ScriptRunner.augmentedPATH("/opt/homebrew/bin:/usr/bin:/bin", selfDir: selfDir)
+        #expect(path == "\(selfDir):/opt/homebrew/bin:/usr/bin:/bin:/usr/local/bin")
+    }
+
+    @Test func inheritedPATHAlreadyListingSelfIsUntouched() {
+        let selfDir = "/opt/homebrew/opt/ybar/YBar.app/Contents/MacOS"
+        let path = ScriptRunner.augmentedPATH("/usr/bin:\(selfDir):/bin", selfDir: selfDir)
+        #expect(path == "/usr/bin:\(selfDir):/bin:/opt/homebrew/bin:/usr/local/bin")
+    }
+
+    @Test func missingPATHGetsTheLaunchdDefault() {
+        let path = ScriptRunner.augmentedPATH(nil, selfDir: "/x")
+        #expect(path == "/x:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin")
+    }
+}
+
 // MARK: - Script watchdog
 
 @Suite struct ScriptWatchdogTests {
