@@ -53,4 +53,36 @@ import Testing
         #expect((background["border_width"] as? NSNumber)?.floatValue == 2)
         #expect(background["glass"] as? String == "on")
     }
+
+    /// `--default popup.*` is how themes make every panel glass; it must reach
+    /// items added afterwards, while the open state stays per item.
+    @Test func popupDefaultsReachNewItems() throws {
+        let stack = try makeStack()
+        let reply = stack.handler.handle(arguments: [
+            "--default", "popup.background.color=0xff123456", "popup.blur_radius=30",
+            "popup.background.glass=on", "popup.drawing=on",
+            "--add", "item", "x", "left",
+        ])
+        #expect(reply.isEmpty)
+        let popup = try #require(try query(stack, "x")["popup"] as? [String: Any])
+        #expect(popup["drawing"] as? String == "off")
+        #expect((popup["blur_radius"] as? NSNumber)?.floatValue == 30)
+        let background = try #require(popup["background"] as? [String: Any])
+        #expect(background["color"] as? String == "0xff123456")
+        #expect(background["glass"] as? String == "on")
+    }
+
+    @Test func cloneCarriesPopupStyling() throws {
+        let stack = try makeStack()
+        let reply = stack.handler.handle(arguments: [
+            "--add", "item", "a", "left",
+            "--set", "a", "popup.blur_radius=12", "popup.align=c", "popup.drawing=on",
+            "--clone", "b", "a",
+        ])
+        #expect(reply.isEmpty)
+        let popup = try #require(try query(stack, "b")["popup"] as? [String: Any])
+        #expect((popup["blur_radius"] as? NSNumber)?.floatValue == 12)
+        #expect(popup["align"] as? String == "c")
+        #expect(popup["drawing"] as? String == "off")
+    }
 }
