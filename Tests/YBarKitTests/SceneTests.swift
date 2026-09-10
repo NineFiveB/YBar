@@ -288,3 +288,29 @@ struct HeadlessScene {
         #expect(SceneBuilder.symbolCacheKey(name: "wifi.slash", size: 14) != steady)
     }
 }
+
+/// The slider knob is a single glyph and centres its ink on the track like
+/// an icon does (review finding E12); em-box centring only looked right
+/// because SF's circle happens to be symmetric about the em centre.
+@MainActor
+@Suite struct SliderKnobTests {
+    @Test func knobInkIsCentredOnTheTrack() {
+        let scene = HeadlessScene()
+        let item = Item(name: "s", position: .left)
+        item.kind = .slider
+        let slider = SliderState(width: 100)
+        slider.percentage = 50
+        // An apostrophe's ink sits far above the em centre: em-centring
+        // would place it ~3.5pt (7px here) too high.
+        slider.knob.string = "'"
+        item.slider = slider
+        let (list, boxes) = scene.build([item])
+        #expect(list.glyphs.count == 1)
+        guard let box = boxes[item.id], let knob = list.glyphs.first else {
+            Issue.record("slider was not laid out or drew no knob")
+            return
+        }
+        let knobCenterY = knob.origin.y + knob.size.y / 2
+        #expect(abs(knobCenterY - Float(box.midY * scene.scale)) <= 2)
+    }
+}
