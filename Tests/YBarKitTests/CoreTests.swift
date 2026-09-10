@@ -101,6 +101,24 @@ import Testing
     }
 }
 
+// MARK: - Scheduler
+
+@MainActor
+@Suite struct AnimationSchedulerTests {
+    @Test func cancelPrefixDropsOnlyThatNamespace() {
+        let scheduler = AnimationScheduler()
+        for key in ["item.1.width", "item.1.icon.color", "item.12.width"] {
+            scheduler.animate(key: key, from: .float(0), to: .float(1),
+                              durationFrames: 60, curve: .linear) { _ in }
+        }
+        scheduler.cancel(prefix: "item.1.")
+        // The trailing dot keeps item 12 out of item 1's namespace.
+        #expect(scheduler.isAnimating)
+        scheduler.cancel(prefix: "item.12.")
+        #expect(!scheduler.isAnimating)
+    }
+}
+
 // MARK: - Fonts & positions
 
 @Suite struct StyleParsingTests {
@@ -117,11 +135,179 @@ import Testing
         #expect(font.size == 14.0)
     }
 
+    @Test func fontSpecKeepsSizeOnUnusableValues() {
+        var font = FontSpec()
+        font.apply("Hack:Bold:14")
+        for spec in ["Hack:Bold:inf", "Hack:Bold:nan", "Hack:Bold:0", "Hack:Bold:-3"] {
+            font.apply(spec)
+            #expect(font.size == 14, "\(spec)")
+        }
+        #expect(font.family == "Hack")
+    }
+
     @Test func positionParsing() {
         #expect(ItemPosition.parse("left") == .left)
         #expect(ItemPosition.parse("q") == .centerLeft)
         #expect(ItemPosition.parse("center_right") == .centerRight)
         #expect(ItemPosition.parse("bogus") == nil)
+    }
+}
+
+// MARK: - Script PATH
+
+@Suite struct ScriptPATHTests {
+    @Test func selfDirectoryLeadsAnInheritedPATH() {
+        let selfDir = "/Applications/YBar.app/Contents/MacOS"
+        // A LaunchAgent PATH that lists a bin dir holding another `ybar`.
+        let path = ScriptRunner.augmentedPATH("/opt/homebrew/bin:/usr/bin:/bin", selfDir: selfDir)
+        #expect(path == "\(selfDir):/opt/homebrew/bin:/usr/bin:/bin:/usr/local/bin")
+    }
+
+    @Test func inheritedPATHAlreadyListingSelfIsUntouched() {
+        let selfDir = "/opt/homebrew/opt/ybar/YBar.app/Contents/MacOS"
+        let path = ScriptRunner.augmentedPATH("/usr/bin:\(selfDir):/bin", selfDir: selfDir)
+        #expect(path == "/usr/bin:\(selfDir):/bin:/opt/homebrew/bin:/usr/local/bin")
+    }
+
+    @Test func missingPATHGetsTheLaunchdDefault() {
+        let path = ScriptRunner.augmentedPATH(nil, selfDir: "/x")
+        #expect(path == "/x:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin")
+    }
+}
+
+// MARK: - Script watchdog
+
+@Suite struct ScriptWatchdogTests {
+    /// The shell writes `$$` (its pid, and as group leader its pgid) here so
+    /// the test can ask the kernel whether anything in the group is left.
+    private func launch(_ runner: ScriptRunner, _ script: String) throws -> pid_t {
+        let marker = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ybar-pgid-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: marker) }
+        runner.run(script: "echo $$ > '\(marker.path)'; " + script, environment: [:])
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            if let text = try? String(contentsOf: marker, encoding: .utf8),
+               let pgid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return pgid
+            }
+            usleep(20_000)
+        }
+        throw CocoaError(.fileNoSuchFile)
+    }
+
+    private func groupIsGone(_ pgid: pid_t, within seconds: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if killpg(pgid, 0) != 0, errno == ESRCH { return true }
+            usleep(50_000)
+        }
+        return false
+    }
+
+    @Test func watchdogReapsBackgroundedHelpers() throws {
+        let runner = ScriptRunner()
+        runner.timeout = 0.3
+        let pgid = try launch(runner, "sleep 300 & sleep 300")
+        #expect(killpg(pgid, 0) == 0)
+        #expect(groupIsGone(pgid, within: 5))
+    }
+
+    @Test func watchdogEscalatesToKillWhenTermIsIgnored() throws {
+        let runner = ScriptRunner()
+        runner.timeout = 0.3
+        runner.killGrace = 0.3
+        // The ignored disposition is inherited, so the whole group shrugs off
+        // SIGTERM; only the escalation can end it.
+        let pgid = try launch(runner, "trap '' TERM; sleep 300 & sleep 300")
+        #expect(killpg(pgid, 0) == 0)
+        #expect(groupIsGone(pgid, within: 5))
+    }
+}
+
+// MARK: - Config discovery
+
+@Suite struct ConfigLocatorTests {
+    private func scratchHome() throws -> URL {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ybar-config-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: home.appendingPathComponent(".config/ybar"), withIntermediateDirectories: true)
+        return home
+    }
+
+    @Test func everyEntryPointIsDiscoveredInPriorityOrder() throws {
+        let home = try scratchHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let directory = home.appendingPathComponent(".config/ybar")
+        // Lowest priority first: each new file must win over the ones before it.
+        for name in ["ybar.jsonc", "ybarrc.jsonc", "ybarrc", "ybarrc.lua"] {
+            FileManager.default.createFile(atPath: directory.appendingPathComponent(name).path, contents: nil)
+            let found = ConfigLocator.locate(
+                explicitPath: nil, instanceName: "ybar", environment: [:], home: home)
+            #expect(found?.lastPathComponent == name, "\(name)")
+        }
+    }
+
+    @Test func xdgDirectoryWinsOverHome() throws {
+        let home = try scratchHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let xdg = home.appendingPathComponent("xdg")
+        try FileManager.default.createDirectory(
+            at: xdg.appendingPathComponent("ybar"), withIntermediateDirectories: true)
+        FileManager.default.createFile(
+            atPath: home.appendingPathComponent(".config/ybar/ybarrc.lua").path, contents: nil)
+        FileManager.default.createFile(
+            atPath: xdg.appendingPathComponent("ybar/ybar.jsonc").path, contents: nil)
+        let found = ConfigLocator.locate(
+            explicitPath: nil, instanceName: "ybar",
+            environment: ["XDG_CONFIG_HOME": xdg.path], home: home)
+        #expect(found?.path == xdg.appendingPathComponent("ybar/ybar.jsonc").path)
+    }
+}
+
+// MARK: - Boolean leaves
+
+@MainActor
+@Suite struct BooleanToggleTests {
+    /// Every boolean leaf in the item namespace.
+    private static let leaves = [
+        "drawing", "scroll_texts",
+        "icon.drawing", "icon.highlight", "label.drawing", "label.highlight",
+        "icon.shadow", "icon.shadow.drawing", "label.background.drawing",
+        "background.drawing", "background.glass", "background.image.drawing",
+        "background.shadow.drawing", "image.drawing", "slider.knob.drawing",
+        "popup.drawing", "popup.horizontal", "popup.auto_close", "popup.background.glass",
+    ]
+
+    @Test func toggleFlipsEveryBooleanLeaf() {
+        let item = Item(name: "t", position: .left)
+        item.slider = SliderState(width: 10)
+        let ctx = PropertyContext(scheduler: AnimationScheduler(), invalidate: {})
+        // The leaves that used to reject the word outright, read back directly.
+        let read: [String: () -> Bool] = [
+            "scroll_texts": { item.scrollTexts },
+            "background.glass": { item.background.glass },
+            "background.image.drawing": { item.background.imageDrawing },
+            "image.drawing": { item.image?.drawing ?? false },
+            "slider.knob.drawing": { item.slider?.knob.drawing ?? false },
+            "popup.drawing": { item.popup.isOpen },
+            "popup.horizontal": { item.popup.horizontal },
+            "popup.auto_close": { item.popup.autoClose },
+            "popup.background.glass": { item.popup.background.glass },
+        ]
+        for leaf in Self.leaves {
+            func set(_ value: String) -> String? {
+                PropertySetter.set(item: item, property: leaf, value: value, context: ctx)
+            }
+            #expect(set("off") == nil, "\(leaf)=off")
+            #expect(set("toggle") == nil, "\(leaf)=toggle")
+            if let read = read[leaf] { #expect(read(), "\(leaf) after toggle") }
+            // Case-insensitive like every other boolean spelling.
+            #expect(set("TOGGLE") == nil, "\(leaf)=TOGGLE")
+            if let read = read[leaf] { #expect(!read(), "\(leaf) after TOGGLE") }
+            #expect(set("maybe") != nil, "\(leaf)=maybe")
+        }
     }
 }
 

@@ -239,7 +239,14 @@ public enum JSONCConfig {
             }
             commands.append(["--add", "bracket", name] + members)
         } else {
-            let position = entry["position"] as? String ?? "left"
+            // Only absence means "left": a wrong type (null included) is an
+            // error like every sibling key, and like the port.
+            let position = try entry["position"].map { value -> String in
+                guard let string = value as? String else {
+                    throw ConfigError.badEntry("items[\(index)].position must be a string")
+                }
+                return string
+            } ?? "left"
             commands.append(["--add", "item", name, position])
         }
         if let props = entry["props"] {
