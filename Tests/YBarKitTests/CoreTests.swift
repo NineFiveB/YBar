@@ -135,6 +135,56 @@ import Testing
     }
 }
 
+// MARK: - Script watchdog
+
+@Suite struct ScriptWatchdogTests {
+    /// The shell writes `$$` (its pid, and as group leader its pgid) here so
+    /// the test can ask the kernel whether anything in the group is left.
+    private func launch(_ runner: ScriptRunner, _ script: String) throws -> pid_t {
+        let marker = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ybar-pgid-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: marker) }
+        runner.run(script: "echo $$ > '\(marker.path)'; " + script, environment: [:])
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            if let text = try? String(contentsOf: marker, encoding: .utf8),
+               let pgid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return pgid
+            }
+            usleep(20_000)
+        }
+        throw CocoaError(.fileNoSuchFile)
+    }
+
+    private func groupIsGone(_ pgid: pid_t, within seconds: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if killpg(pgid, 0) != 0, errno == ESRCH { return true }
+            usleep(50_000)
+        }
+        return false
+    }
+
+    @Test func watchdogReapsBackgroundedHelpers() throws {
+        let runner = ScriptRunner()
+        runner.timeout = 0.3
+        let pgid = try launch(runner, "sleep 300 & sleep 300")
+        #expect(killpg(pgid, 0) == 0)
+        #expect(groupIsGone(pgid, within: 5))
+    }
+
+    @Test func watchdogEscalatesToKillWhenTermIsIgnored() throws {
+        let runner = ScriptRunner()
+        runner.timeout = 0.3
+        runner.killGrace = 0.3
+        // The ignored disposition is inherited, so the whole group shrugs off
+        // SIGTERM; only the escalation can end it.
+        let pgid = try launch(runner, "trap '' TERM; sleep 300 & sleep 300")
+        #expect(killpg(pgid, 0) == 0)
+        #expect(groupIsGone(pgid, within: 5))
+    }
+}
+
 // MARK: - Config discovery
 
 @Suite struct ConfigLocatorTests {
