@@ -186,6 +186,50 @@ private func mouse(_ kind: MouseEventKind, x: CGFloat = 50) -> MouseEventInfo {
     }
 }
 
+@MainActor
+@Suite(.serialized) struct HoverReleaseTests {
+    /// The contract every panel-teardown path relies on: the hovered row gets
+    /// exactly one targeted mouse.exited, and nothing on a second release.
+    @Test func popupReleaseFiresOneExitAndClearsState() throws {
+        let manager = try makeHeadlessManager()
+        let popup = PopupSurface(hostItemID: -1, device: manager.device)
+        let row = try #require(manager.store.add(name: "row", position: .popup))
+        popup.itemFrames = [(row.id, CGRect(x: 0, y: 0, width: 100, height: 25))]
+        var events: [(String, Bool)] = []
+        manager.onItemHover = { item, entered in events.append((item.name, entered)) }
+
+        manager.handlePopupMouse(mouse(.moved), on: popup)
+        #expect(popup.hoveredItemID == row.id)
+        #expect(row.mouseOver)
+
+        manager.releaseHover(in: popup)
+        #expect(popup.hoveredItemID == nil)
+        #expect(!row.mouseOver)
+        manager.releaseHover(in: popup)
+        #expect(events.map(\.0) == ["row", "row"])
+        #expect(events.map(\.1) == [true, false])
+    }
+
+    @Test func barReleaseFiresOneExitAndClearsState() throws {
+        let manager = try makeHeadlessManager()
+        let screen = try #require(NSScreen.screens.first)
+        let surface = BarSurface(screen: screen, arrangementIndex: 1)
+        let item = try #require(manager.store.add(name: "clock", position: .right))
+        surface.itemFrames = [(item.id, CGRect(x: 0, y: 0, width: 100, height: 25))]
+        var exits = 0
+        manager.onItemHover = { _, entered in if !entered { exits += 1 } }
+
+        manager.handleMouse(mouse(.moved), on: surface)
+        #expect(surface.hoveredItemID == item.id)
+
+        manager.releaseHover(on: surface)
+        manager.releaseHover(on: surface)
+        #expect(surface.hoveredItemID == nil)
+        #expect(!item.mouseOver)
+        #expect(exits == 1)
+    }
+}
+
 @Suite struct ScrollStepperTests {
     @Test func wheelNotchesPassThroughUnchanged() {
         var stepper = ScrollStepper()
