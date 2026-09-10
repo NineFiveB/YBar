@@ -513,6 +513,9 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
     func reload(explicitPath: String?) {
         scheduler.cancelAll()
         barManager.store.removeAll()
+        // Release before the settings reset below forgets the flag; the new
+        // config re-states idle_inhibit=on if it still wants it.
+        barManager.setIdleInhibit(false)
         barManager.settings = BarSettings()
         barManager.fontCache.clear()
         eventBus.reset()
