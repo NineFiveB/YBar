@@ -160,3 +160,59 @@ struct HeadlessScene {
         #expect(!scene.build([bar]).list.hasMarquee)
     }
 }
+
+/// A graph on a bordered plate runs inside the frame (review finding A3):
+/// the box is inset by the border width, and the stroke never leaves it.
+@MainActor
+@Suite struct GraphPlateTests {
+    private func graphItem(borderWidth: Float) -> Item {
+        let item = Item(name: "g", position: .left)
+        item.kind = .graph
+        let graph = GraphState(capacity: 40)
+        for sample in [0, 1, 0.5, 0, 1] as [Float] { graph.push(sample) }
+        item.graph = graph
+        item.background.drawing = true
+        item.background.height = 20
+        item.background.borderWidth = borderWidth
+        return item
+    }
+
+    @Test func borderInsetsTheGraphBox() {
+        let scene = HeadlessScene(scale: 1)
+        let item = graphItem(borderWidth: 3)
+        let (list, boxes) = scene.build([item])
+        guard let box = boxes[item.id] else {
+            Issue.record("graph item was not laid out")
+            return
+        }
+        let xs = list.triangles.map(\.position.x)
+        let ys = list.triangles.map(\.position.y)
+        #expect(!xs.isEmpty)
+        // Plate is 40 wide, 20 tall, centred on the content box; the graph
+        // keeps 3pt clear of the frame on every side. Sample columns land
+        // exactly on the inset edges; a sloped stroke's end cap may overhang
+        // them sideways by up to half a line width (unclamped in x).
+        let cap = Float(item.graph!.lineWidth) / 2
+        #expect(xs.contains(Float(box.minX + 3)))
+        #expect(xs.contains(Float(box.minX + 40 - 3)))
+        #expect(xs.allSatisfy { $0 >= Float(box.minX + 3) - cap && $0 <= Float(box.minX + 40 - 3) + cap })
+        #expect(ys.min() == Float(box.midY - 10 + 3))
+        #expect(ys.max() == Float(box.midY + 10 - 3))
+    }
+
+    @Test func noBorderMeansNoInset() {
+        let scene = HeadlessScene(scale: 1)
+        let item = graphItem(borderWidth: 0)
+        let (list, boxes) = scene.build([item])
+        guard let box = boxes[item.id] else {
+            Issue.record("graph item was not laid out")
+            return
+        }
+        let xs = list.triangles.map(\.position.x)
+        let ys = list.triangles.map(\.position.y)
+        #expect(xs.contains(Float(box.minX)))
+        #expect(xs.contains(Float(box.minX + 40)))
+        #expect(ys.min() == Float(box.midY - 10))
+        #expect(ys.max() == Float(box.midY + 10))
+    }
+}
