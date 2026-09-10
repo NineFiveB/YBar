@@ -63,6 +63,12 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
     var socketPath: String
     /// Last reported modifier state (modifier_change dedupe).
     var lastModifier = "none"
+    /// The flagsChanged monitors, kept for the daemon's lifetime.
+    var modifierMonitors: [Any] = []
+    /// The Accessibility warning fires once per process, not once per
+    /// reload (reset() clears the armed set, so the subscription hook
+    /// re-runs on every config save).
+    var warnedAccessibility = false
     var luaRuntime: LuaRuntime?
 
     init(explicitConfigPath: String?) throws {
@@ -160,6 +166,26 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                 self.networkProvider.start()
             case "system_stats":
                 self.statsProvider.start()
+            case "media_change":
+                // Arming seeds via osascript, which is what raises the
+                // Automation (Music/Spotify) prompt — only for configs
+                // that actually show now-playing.
+                self.mediaProvider.start()
+            case "modifier_change":
+                // The global flagsChanged monitor is key-related, which
+                // macOS gates behind Accessibility — and it fails silently:
+                // no prompt, no error, the event simply never fires outside
+                // our own windows. Say so once, since nothing else will.
+                if !self.warnedAccessibility, !AXIsProcessTrusted() {
+                    self.warnedAccessibility = true
+                    FileHandle.standardError.write(Data("""
+                        [!] modifier_change needs Accessibility: without it modifier keys are \
+                        only seen while the pointer is over the bar. Grant it under \
+                        System Settings > Privacy & Security > Accessibility > + > YBar.app, \
+                        then restart YBar (ybar --exit and relaunch).
+
+                        """.utf8))
+                }
             default:
                 break
             }
@@ -190,8 +216,6 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         mediaProvider.onEvent = { [weak self] name, info, env in
             self?.eventBus.trigger(name: name, info: info, extraEnvironment: env)
         }
-        mediaProvider.start()
-
         audioProvider.onEvent = { [weak self] name, info in
             self?.eventBus.trigger(name: name, info: info)
         }
@@ -202,19 +226,30 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
             self?.networkProvider.requestLocationAuthorization()
         }
 
-        statsProvider.onSample = { [weak self] cpu, memory in
+        statsProvider.onSample = { [weak self] cpu, memory, gpu in
+            var environment = [
+                "CPU_USAGE": "\(Int((cpu * 100).rounded()))",
+                "CPU_FRACTION": String(format: "%.2f", cpu),
+                "MEMORY_USAGE": "\(Int((memory * 100).rounded()))",
+                "MEMORY_FRACTION": String(format: "%.2f", memory),
+                "DISK_FREE_GB": DaemonCore.diskGB().free,
+                "DISK_TOTAL_GB": DaemonCore.diskGB().total,
+                "THERMAL_STATE": DaemonCore.thermalStateName(),
+            ]
+            // Env-only, and only when the driver reports one: the INFO JSON
+            // is the cross-port contract, and a widget can tell "no GPU
+            // figure on this Mac" from "idle" by the key's absence.
+            if let gpu {
+                environment["GPU_USAGE"] = "\(Int((gpu.utilization * 100).rounded()))"
+                environment["GPU_FRACTION"] = String(format: "%.2f", gpu.utilization)
+                if let bytes = gpu.memoryUsedBytes {
+                    environment["GPU_MEMORY_USED_MB"] = "\(bytes / 1_048_576)"
+                }
+            }
             self?.eventBus.trigger(
                 name: "system_stats",
                 info: "{\"cpu\": \(Int((cpu * 100).rounded())), \"memory\": \(Int((memory * 100).rounded()))}",
-                extraEnvironment: [
-                    "CPU_USAGE": "\(Int((cpu * 100).rounded()))",
-                    "CPU_FRACTION": String(format: "%.2f", cpu),
-                    "MEMORY_USAGE": "\(Int((memory * 100).rounded()))",
-                    "MEMORY_FRACTION": String(format: "%.2f", memory),
-                    "DISK_FREE_GB": DaemonCore.diskGB().free,
-                    "DISK_TOTAL_GB": DaemonCore.diskGB().total,
-                    "THERMAL_STATE": DaemonCore.thermalStateName(),
-                ])
+                extraEnvironment: environment)
         }
 
         barManager.onDisplaysChanged = { [weak self] in
@@ -294,12 +329,16 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
             self.eventBus.trigger(name: "modifier_change",
                                   extraEnvironment: ["MODIFIER": name])
         }
-        NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { event in
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: { event in
             MainActor.assumeIsolated { reportFlags(event.modifierFlags) }
+        }) {
+            modifierMonitors.append(global)
         }
-        NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
+        if let local = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged, handler: { event in
             MainActor.assumeIsolated { reportFlags(event.modifierFlags) }
             return event
+        }) {
+            modifierMonitors.append(local)
         }
         barManager.onSliderDragStarted = { [weak self] item in
             // An in-flight percentage animation would fight the drag every frame.
@@ -410,11 +449,13 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                 self?.statsProvider.sample()
             },
             "media_change": { [weak self] in
+                guard let self else { return }
+                self.mediaProvider.start()
                 // Replay the last seen playback state — the provider is
                 // notification-driven, so a bare trigger (or a config reload
                 // mid-song) would otherwise dispatch with no MEDIA_* env and
                 // widgets would read it as "stopped".
-                guard let self, !self.mediaProvider.current.isEmpty else { return }
+                guard !self.mediaProvider.current.isEmpty else { return }
                 let env = self.mediaProvider.current
                 self.eventBus.trigger(
                     name: "media_change",

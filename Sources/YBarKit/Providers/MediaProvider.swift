@@ -2,7 +2,8 @@ import AppKit
 
 /// Now-playing provider: listens for the distributed notifications Music and
 /// Spotify post on every playback change — public API, unlike MediaRemote,
-/// which macOS 15.4+ gates to entitled processes. Emits `media_change` with
+/// which macOS 15.4+ gates to entitled processes. Lazily armed on the first
+/// `media_change` subscription. Emits `media_change` with
 /// MEDIA_APP/MEDIA_STATE/MEDIA_TITLE/MEDIA_ARTIST/MEDIA_ALBUM.
 @MainActor
 public final class MediaProvider {
@@ -12,6 +13,14 @@ public final class MediaProvider {
     public private(set) var current: [String: String] = [:]
 
     private var tokens: [NSObjectProtocol] = []
+    private var terminationToken: NSObjectProtocol?
+
+    /// The whitelisted players, by bundle ID (process checks) and the name
+    /// the AppleScript dictionary and MEDIA_APP use.
+    nonisolated static let players: [(bundleID: String, app: String)] = [
+        ("com.apple.Music", "Music"),
+        ("com.spotify.client", "Spotify"),
+    ]
 
     public init() {}
 
@@ -23,20 +32,31 @@ public final class MediaProvider {
             ("com.spotify.client.PlaybackStateChanged", "Spotify"),
         ]
         seedFromRunningPlayers()
+        // Neither player posts a final playback notification when it QUITS,
+        // so the cache would keep the dead track and every reload (hotload
+        // runs one per config save) would resurrect the pill from it.
+        terminationToken = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didTerminateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            let bundleID = app?.bundleIdentifier ?? ""
+            MainActor.assumeIsolated {
+                guard let self,
+                      let env = MediaProvider.reduce(termination: bundleID, current: self.current)
+                else { return }
+                self.current = [:]
+                self.onEvent?("media_change", env["MEDIA_STATE"] ?? "", env)
+            }
+        }
         for source in sources {
             let token = center.addObserver(
                 forName: NSNotification.Name(source.notification),
                 object: nil,
                 queue: .main
             ) { [weak self] note in
-                let info = note.userInfo ?? [:]
-                let env: [String: String] = [
-                    "MEDIA_APP": source.app,
-                    "MEDIA_STATE": ((info["Player State"] as? String) ?? "").lowercased(),
-                    "MEDIA_TITLE": (info["Name"] as? String) ?? "",
-                    "MEDIA_ARTIST": (info["Artist"] as? String) ?? "",
-                    "MEDIA_ALBUM": (info["Album"] as? String) ?? "",
-                ]
+                let env = MediaProvider.environment(app: source.app, userInfo: note.userInfo ?? [:])
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     self.current = env
@@ -51,6 +71,59 @@ public final class MediaProvider {
         let center = DistributedNotificationCenter.default()
         tokens.forEach { center.removeObserver($0) }
         tokens.removeAll()
+        if let terminationToken {
+            NSWorkspace.shared.notificationCenter.removeObserver(terminationToken)
+        }
+        terminationToken = nil
+    }
+
+    /// Pure: the env for a player's playback notification. Music and Spotify
+    /// share the key names; the state is lowercased so "Playing"/"Paused"
+    /// match the seed's AppleScript spelling. Split out for testability.
+    nonisolated static func environment(app: String, userInfo: [AnyHashable: Any]) -> [String: String] {
+        [
+            "MEDIA_APP": app,
+            "MEDIA_STATE": ((userInfo["Player State"] as? String) ?? "").lowercased(),
+            "MEDIA_TITLE": (userInfo["Name"] as? String) ?? "",
+            "MEDIA_ARTIST": (userInfo["Artist"] as? String) ?? "",
+            "MEDIA_ALBUM": (userInfo["Album"] as? String) ?? "",
+        ]
+    }
+
+    /// Pure: the env for the seed script's tab-joined
+    /// `state<TAB>title<TAB>artist<TAB>album` line, or nil when the player
+    /// is not actually playing/paused (stopped, no output, an error line).
+    nonisolated static func seedEnvironment(app: String, output: String) -> [String: String]? {
+        let fields = output
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: "\t")
+        let state = fields.first?.lowercased() ?? ""
+        guard state == "playing" || state == "paused" else { return nil }
+        return [
+            "MEDIA_APP": app,
+            "MEDIA_STATE": state,
+            "MEDIA_TITLE": fields.count > 1 ? fields[1] : "",
+            "MEDIA_ARTIST": fields.count > 2 ? fields[2] : "",
+            "MEDIA_ALBUM": fields.count > 3 ? fields[3] : "",
+        ]
+    }
+
+    /// Pure: the env to publish when the process `bundleID` quit, or nil when
+    /// the cached state is not that player's (a quitting app that was never
+    /// the source must not blank a still-playing one). All five MEDIA_* keys
+    /// stay present so consumers see one shape; "stopped" is the state the
+    /// players' own scripting dictionaries use, and widgets that only show
+    /// on playing/paused hide on it.
+    nonisolated static func reduce(termination bundleID: String, current: [String: String]) -> [String: String]? {
+        guard let app = players.first(where: { $0.bundleID == bundleID })?.app,
+              current["MEDIA_APP"] == app else { return nil }
+        return [
+            "MEDIA_APP": app,
+            "MEDIA_STATE": "stopped",
+            "MEDIA_TITLE": "",
+            "MEDIA_ARTIST": "",
+            "MEDIA_ALBUM": "",
+        ]
     }
 
     /// The notifications only cover playback CHANGES, so a daemon started
@@ -60,12 +133,8 @@ public final class MediaProvider {
     /// runs when the app was seen alive). Async; fires onEvent like a real
     /// notification when it finds active playback.
     private func seedFromRunningPlayers() {
-        let players: [(bundleID: String, app: String)] = [
-            ("com.apple.Music", "Music"),
-            ("com.spotify.client", "Spotify"),
-        ]
         let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
-        for player in players where running.contains(player.bundleID) {
+        for player in MediaProvider.players where running.contains(player.bundleID) {
             // Tab-joined so titles containing "|" or "," survive splitting.
             let script = """
             if application "\(player.app)" is running then
@@ -100,18 +169,9 @@ public final class MediaProvider {
             DispatchQueue.global(qos: .utility).async {
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
                 process.waitUntilExit()
-                let fields = String(decoding: data, as: UTF8.self)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .components(separatedBy: "\t")
-                let state = fields.first?.lowercased() ?? ""
-                guard state == "playing" || state == "paused" else { return }
-                let env: [String: String] = [
-                    "MEDIA_APP": player.app,
-                    "MEDIA_STATE": state,
-                    "MEDIA_TITLE": fields.count > 1 ? fields[1] : "",
-                    "MEDIA_ARTIST": fields.count > 2 ? fields[2] : "",
-                    "MEDIA_ALBUM": fields.count > 3 ? fields[3] : "",
-                ]
+                guard let env = MediaProvider.seedEnvironment(
+                    app: player.app, output: String(decoding: data, as: UTF8.self))
+                else { return }
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated { [weak self] in
                         guard let self else { return }
@@ -119,7 +179,7 @@ public final class MediaProvider {
                         // was in flight — never clobber fresher state.
                         guard self.current.isEmpty else { return }
                         self.current = env
-                        self.onEvent?("media_change", state, env)
+                        self.onEvent?("media_change", env["MEDIA_STATE"] ?? "", env)
                     }
                 }
             }
