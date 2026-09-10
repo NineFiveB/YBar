@@ -116,3 +116,47 @@ struct HeadlessScene {
         #expect(shadow?["color"] as? String == "0xff000000")
     }
 }
+
+/// The marquee flag rides on each scene's DisplayList (review finding A1):
+/// the frame clock was armed from a per-builder flag that the last surface
+/// to render overwrote, and popup scenes never reported at all.
+@MainActor
+@Suite struct MarqueeDemandTests {
+    private func marqueeItem(position: ItemPosition) -> Item {
+        let item = Item(name: "m", position: position)
+        item.label.string = "a title far too long for its slot"
+        item.label.customWidth = 20
+        item.scrollTexts = true
+        return item
+    }
+
+    @Test func barSceneFlagsOverflowingMarquee() {
+        let scene = HeadlessScene()
+        #expect(scene.build([marqueeItem(position: .left)]).list.hasMarquee)
+        let plain = Item(name: "p", position: .left)
+        plain.label.string = "x"
+        #expect(!scene.build([plain]).list.hasMarquee)
+    }
+
+    @Test func popupSceneCarriesItsOwnFlag() {
+        let scene = HeadlessScene()
+        let host = Item(name: "host", position: .left)
+        let member = marqueeItem(position: .popup)
+        member.popupHost = host.name
+        let popup = scene.builder.buildPopup(
+            host: host, members: [member], scale: scene.scale, atlas: scene.atlas)
+        #expect(popup.hasMarquee)
+
+        // Per scene, not per builder: neither a plain popup nor a plain bar
+        // scene built afterwards inherits the flag.
+        let plain = Item(name: "p", position: .popup)
+        plain.popupHost = host.name
+        plain.label.string = "x"
+        let plainPopup = scene.builder.buildPopup(
+            host: host, members: [plain], scale: scene.scale, atlas: scene.atlas)
+        #expect(!plainPopup.hasMarquee)
+        let bar = Item(name: "b", position: .left)
+        bar.label.string = "x"
+        #expect(!scene.build([bar]).list.hasMarquee)
+    }
+}
