@@ -241,6 +241,15 @@ public final class BarManager {
 
     // MARK: - Popups
 
+    /// Inset a clamped popup keeps from the screen edge: the bar's own edge
+    /// inset, so a clamped popup lines up with one that never needed
+    /// clamping (the rightmost pill already sits that far in). A bar flush
+    /// with the edge falls back to the Windows port's 7 pt.
+    private var popupEdgeMargin: CGFloat {
+        let inset = CGFloat(settings.margin + settings.paddingRight)
+        return inset > 0 ? inset : 7
+    }
+
     private func updatePopups() {
         // A host only counts as live once its scene actually rendered; anything
         // else (closed, hostless, empty, zero-size) tears its panel down —
@@ -294,7 +303,9 @@ public final class BarManager {
                 size: scene.sizePoints,
                 barPosition: settings.position,
                 yOffset: CGFloat(host.popup.yOffset),
-                align: host.popup.align)
+                align: host.popup.align,
+                screen: surface.screen,
+                edgeMargin: popupEdgeMargin)
             if renderer.render(list: scene.list, layer: popupSurface.hostView.metalLayer, atlas: atlas) {
                 liveHostIDs.insert(host.id)
             } else {
@@ -736,7 +747,8 @@ public final class BarManager {
             width: frame.width,
             height: frame.height)
         tooltip.present(anchor: anchor, size: built.sizePoints,
-                        barPosition: settings.position, yOffset: 4, align: "c")
+                        barPosition: settings.position, yOffset: 4, align: "c",
+                        screen: surface.screen, edgeMargin: popupEdgeMargin)
         _ = renderer.render(list: built.list, layer: tooltip.hostView.metalLayer, atlas: atlas)
     }
 
