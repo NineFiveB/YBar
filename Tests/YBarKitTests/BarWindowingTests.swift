@@ -96,3 +96,44 @@ private func makeHeadlessManager() throws -> BarManager {
         #expect(above.minY == 30)   // host maxY 25 + yOffset 5
     }
 }
+
+@Suite struct ScrollStepperTests {
+    @Test func wheelNotchesPassThroughUnchanged() {
+        var stepper = ScrollStepper()
+        #expect(stepper.delta(scrollingDeltaY: 1, precise: false, gestureBegan: false) == 1)
+        #expect(stepper.delta(scrollingDeltaY: -3, precise: false, gestureBegan: false) == -3)
+    }
+
+    @Test func trackpadSamplesAccumulateToOneStepPerTenPoints() {
+        var stepper = ScrollStepper()
+        // Three 3 pt samples (9 pt) stay silent; the 2 pt one crosses 10.
+        #expect(stepper.delta(scrollingDeltaY: 3, precise: true, gestureBegan: true) == nil)
+        #expect(stepper.delta(scrollingDeltaY: 3, precise: true, gestureBegan: false) == nil)
+        #expect(stepper.delta(scrollingDeltaY: 3, precise: true, gestureBegan: false) == nil)
+        #expect(stepper.delta(scrollingDeltaY: 2, precise: true, gestureBegan: false) == 1)
+        // The 1 pt remainder carries: 9 more points is the next step.
+        #expect(stepper.delta(scrollingDeltaY: 9, precise: true, gestureBegan: false) == 1)
+    }
+
+    @Test func fastSampleEmitsItsWholeStepCountAtOnce() {
+        var stepper = ScrollStepper()
+        #expect(stepper.delta(scrollingDeltaY: -35, precise: true, gestureBegan: true) == -3)
+        // -5 pt remainder; a further -5 completes the fourth step.
+        #expect(stepper.delta(scrollingDeltaY: -5, precise: true, gestureBegan: false) == -1)
+    }
+
+    @Test func directionReversalCancelsTheRemainder() {
+        var stepper = ScrollStepper()
+        #expect(stepper.delta(scrollingDeltaY: 8, precise: true, gestureBegan: true) == nil)
+        #expect(stepper.delta(scrollingDeltaY: -12, precise: true, gestureBegan: false) == nil)
+        #expect(stepper.delta(scrollingDeltaY: -7, precise: true, gestureBegan: false) == -1)
+    }
+
+    @Test func newGestureDropsThePreviousTail() {
+        var stepper = ScrollStepper()
+        #expect(stepper.delta(scrollingDeltaY: 8, precise: true, gestureBegan: true) == nil)
+        // 8 pt pending from the last swipe must not turn this 3 pt nudge
+        // into a step.
+        #expect(stepper.delta(scrollingDeltaY: 3, precise: true, gestureBegan: true) == nil)
+    }
+}
