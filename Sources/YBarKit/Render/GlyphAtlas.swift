@@ -29,9 +29,15 @@ public final class GlyphAtlas {
         /// a fresh atlas entry per interpolation frame until the page fills.
         init(fontName: String, fontSize: CGFloat, glyph: CGGlyph) {
             self.fontName = fontName
-            self.fontSize = (fontSize * 4).rounded() / 4
+            self.fontSize = GlyphAtlas.quarterPoint(fontSize)
             self.glyph = glyph
         }
+    }
+
+    /// The size bucket every cache key uses (glyphs, images, symbols): the
+    /// shelf packer never reclaims, so a key must not change per frame.
+    nonisolated static func quarterPoint(_ size: CGFloat) -> CGFloat {
+        (size * 4).rounded() / 4
     }
 
     public let scale: CGFloat

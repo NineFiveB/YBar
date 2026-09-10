@@ -362,7 +362,8 @@ public final class SceneBuilder {
     ) {
         guard let nsImage = image.resolvedImage() else { return }
         let sizePoints = CGSize(width: CGFloat(image.size), height: CGFloat(image.size))
-        let key = "img:\(image.source)@\(image.size)r\(Int(image.rotation.rounded()))"
+        let key = SceneBuilder.imageCacheKey(
+            source: image.source, size: image.size, rotation: image.rotation)
         guard let entry = atlas.entry(colorImage: nsImage, cacheKey: key,
                                       sizePoints: sizePoints) else { return }
         let rect = CGRect(
@@ -608,7 +609,9 @@ public final class SceneBuilder {
 
         if let symbolName = FontCache.sfSymbolName(in: text) {
             guard let image = fontCache.symbolImage(name: symbolName, pointSize: CGFloat(part.font.size)),
-                  let entry = atlas.entry(symbolImage: image, cacheKey: "sf:\(symbolName)#\(part.font.size)")
+                  let entry = atlas.entry(
+                    symbolImage: image,
+                    cacheKey: SceneBuilder.symbolCacheKey(name: symbolName, size: part.font.size))
             else { return }
             let originX = (penX * scale).rounded()
             let originY = (partCenterY * scale - CGFloat(entry.sizePx.y) / 2).rounded()
@@ -755,6 +758,19 @@ public final class SceneBuilder {
     }
 
     // MARK: - Helpers
+
+    /// Atlas keys for images and SF symbols bucket their size to the quarter
+    /// point exactly as glyph keys do: an animated `image.size` or an `sf:`
+    /// icon's `font.size` would otherwise mint a fresh cell per interpolation
+    /// frame on a packer that never reclaims. Rotation stays per degree --
+    /// spinner.lua steps 12°, and a full per-degree sweep still fits.
+    nonisolated static func imageCacheKey(source: String, size: Float, rotation: Float) -> String {
+        "img:\(source)@\(GlyphAtlas.quarterPoint(CGFloat(size)))r\(Int(rotation.rounded()))"
+    }
+
+    nonisolated static func symbolCacheKey(name: String, size: Float) -> String {
+        "sf:\(name)#\(GlyphAtlas.quarterPoint(CGFloat(size)))"
+    }
 
     static func pixelOrigin(_ rect: CGRect, scale: CGFloat) -> SIMD2<Float> {
         SIMD2(Float((rect.minX * scale).rounded()), Float((rect.minY * scale).rounded()))
