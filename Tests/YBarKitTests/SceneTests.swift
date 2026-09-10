@@ -216,3 +216,46 @@ struct HeadlessScene {
         #expect(ys.max() == Float(box.midY + 10))
     }
 }
+
+/// background.padding_left/right were parsed and published by --query but
+/// never applied (review finding A7): they widen the pill beyond the content
+/// box. The clip hole and the glass backdrop share backgroundRect, so they
+/// follow for free; the hit frame stays the content width.
+@MainActor
+@Suite struct BackgroundPaddingTests {
+    @Test func paddingWidensThePillAroundTheContentBox() {
+        let item = Item(name: "b", position: .left)
+        item.background.paddingLeft = 6
+        item.background.paddingRight = 4
+        item.background.xOffset = 1
+        let contentBox = CGRect(x: 100, y: 0, width: 50, height: 32)
+        let rect = SceneBuilder.backgroundRect(item: item, contentBox: contentBox, contentHeight: 14)
+        #expect(rect.minX == 95)
+        #expect(rect.width == 60)
+        #expect(rect.height == 22)
+        #expect(rect.midY == contentBox.midY)
+    }
+
+    @Test func paddedPillIsWhatGetsPainted() {
+        let scene = HeadlessScene(scale: 1)
+        let item = Item(name: "b", position: .left)
+        item.label.string = "x"
+        item.background.drawing = true
+        item.background.paddingLeft = 6
+        item.background.paddingRight = 4
+        let (list, boxes) = scene.build([item])
+        guard let box = boxes[item.id] else {
+            Issue.record("item was not laid out")
+            return
+        }
+        // quads[0] is the bar background; the pill follows it.
+        #expect(list.quads.count >= 2)
+        guard list.quads.count >= 2 else { return }
+        let pill = list.quads[1]
+        #expect(pill.origin.x == Float(box.minX - 6))
+        #expect(pill.size.x == Float(box.width + 10))
+        // The interactive frame is unchanged by the pill's padding.
+        #expect(item.frame.minX == box.minX)
+        #expect(item.frame.width == box.width)
+    }
+}

@@ -298,16 +298,21 @@ public final class SceneBuilder {
     }
 
     /// The item background's rect (bar-local, y-down) — shared with the glass
-    /// backdrop sync so blur views land exactly under the painted pill.
+    /// backdrop sync and the bar-background clip hole so both land exactly
+    /// under the painted pill. background.padding_left/right widen the pill
+    /// beyond the content box; the hit frame stays the content width
+    /// (sketchybar behavior).
     static func backgroundRect(item: Item, contentBox: CGRect, contentHeight: CGFloat) -> CGRect {
         let centerY = contentBox.midY - CGFloat(item.yOffset)
         let backgroundHeight = item.background.height > 0
             ? CGFloat(item.background.height)
             : min(contentBox.height, contentHeight + 8)
+        let paddingLeft = CGFloat(item.background.paddingLeft)
+        let paddingRight = CGFloat(item.background.paddingRight)
         return CGRect(
-            x: contentBox.minX + CGFloat(item.background.xOffset),
+            x: contentBox.minX - paddingLeft + CGFloat(item.background.xOffset),
             y: centerY - backgroundHeight / 2 - CGFloat(item.background.yOffset),
-            width: contentBox.width,
+            width: contentBox.width + paddingLeft + paddingRight,
             height: backgroundHeight)
     }
 
