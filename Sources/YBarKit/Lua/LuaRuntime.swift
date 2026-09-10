@@ -211,6 +211,16 @@ public final class LuaRuntime {
         return nil
     }
 
+    /// Drop a removed item's callback refs; the registry would otherwise
+    /// hold them (and whatever they close over) until the next reload.
+    private func releaseSubscriptions(for item: Item) {
+        guard let refs = subscriptions.removeValue(forKey: item.id) else { return }
+        if let state {
+            for ref in refs.values { luaL_unref(state, registryIndex, ref) }
+        }
+        item.hasLuaHandlers = false
+    }
+
     // MARK: - Raw module registration
 
     private func registerRawModule(_ state: OpaquePointer) {
@@ -458,6 +468,8 @@ public final class LuaRuntime {
                 guard let runtime = LuaRuntime.current else { return 0 }
                 guard let name = argString(L, 1) else { return 0 }
                 for item in runtime.barManager.store.items(matching: name) {
+                    runtime.scheduler.cancel(prefix: "item.\(item.id).")
+                    runtime.releaseSubscriptions(for: item)
                     _ = runtime.barManager.store.remove(name: item.name)
                 }
                 runtime.barManager.setNeedsRender()
