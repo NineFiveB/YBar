@@ -97,6 +97,95 @@ private func makeHeadlessManager() throws -> BarManager {
     }
 }
 
+@MainActor
+private func mouse(_ kind: MouseEventKind, x: CGFloat = 50) -> MouseEventInfo {
+    MouseEventInfo(kind: kind, point: CGPoint(x: x, y: 10), button: "left",
+                   modifier: "none", scrollDelta: 0)
+}
+
+@MainActor
+@Suite(.serialized) struct StaleSliderDragTests {
+    private let slot = CGRect(x: 0, y: 0, width: 100, height: 25)
+
+    /// A bar surface whose panel is created but never ordered on screen.
+    private func makeSurface() throws -> BarSurface {
+        let screen = try #require(NSScreen.screens.first)
+        return BarSurface(screen: screen, arrangementIndex: 1)
+    }
+
+    private func addSlider(to manager: BarManager, frames: inout [(itemID: Int, frame: CGRect)]) throws -> Item {
+        let slider = try #require(manager.store.add(name: "vol", position: .left))
+        slider.slider = SliderState(width: 80)
+        frames = [(slider.id, slot)]
+        return slider
+    }
+
+    /// Simulate reload / --remove mid-drag: the slider is gone and a plain
+    /// item now occupies the same slot.
+    private func replaceWithPlainItem(in manager: BarManager, frames: inout [(itemID: Int, frame: CGRect)]) throws -> Item {
+        manager.store.removeAll()
+        let plain = try #require(manager.store.add(name: "plain", position: .left))
+        frames = [(plain.id, slot)]
+        return plain
+    }
+
+    @Test func barReleaseAfterRemovalIsNotAClick() throws {
+        let manager = try makeHeadlessManager()
+        let surface = try makeSurface()
+        let slider = try addSlider(to: manager, frames: &surface.itemFrames)
+        manager.handleMouse(mouse(.down), on: surface)
+        #expect(manager.draggingSliderID == slider.id)
+
+        let plain = try replaceWithPlainItem(in: manager, frames: &surface.itemFrames)
+        var clicked: [String] = []
+        manager.onItemClicked = { item, _ in clicked.append(item.name) }
+        manager.handleMouse(mouse(.clicked), on: surface)
+        #expect(clicked.isEmpty)
+        #expect(manager.draggingSliderID == nil)
+
+        // The next release is an ordinary click again.
+        manager.handleMouse(mouse(.clicked), on: surface)
+        #expect(clicked == [plain.name])
+    }
+
+    @Test func barDragAfterRemovalDropsTheStaleID() throws {
+        let manager = try makeHeadlessManager()
+        let surface = try makeSurface()
+        _ = try addSlider(to: manager, frames: &surface.itemFrames)
+        manager.handleMouse(mouse(.down), on: surface)
+        _ = try replaceWithPlainItem(in: manager, frames: &surface.itemFrames)
+        manager.handleMouse(mouse(.dragged, x: 60), on: surface)
+        #expect(manager.draggingSliderID == nil)
+    }
+
+    @Test func popupReleaseAfterRemovalIsNotAClick() throws {
+        let manager = try makeHeadlessManager()
+        let popup = PopupSurface(hostItemID: -1, device: manager.device)
+        let slider = try addSlider(to: manager, frames: &popup.itemFrames)
+        manager.handlePopupMouse(mouse(.down), on: popup)
+        #expect(manager.draggingSliderID == slider.id)
+
+        _ = try replaceWithPlainItem(in: manager, frames: &popup.itemFrames)
+        var clicked: [String] = []
+        manager.onItemClicked = { item, _ in clicked.append(item.name) }
+        manager.handlePopupMouse(mouse(.clicked), on: popup)
+        #expect(clicked.isEmpty)
+        #expect(manager.draggingSliderID == nil)
+        manager.handlePopupMouse(mouse(.clicked), on: popup)
+        #expect(clicked == ["plain"])
+    }
+
+    @Test func popupDragAfterRemovalDropsTheStaleID() throws {
+        let manager = try makeHeadlessManager()
+        let popup = PopupSurface(hostItemID: -1, device: manager.device)
+        _ = try addSlider(to: manager, frames: &popup.itemFrames)
+        manager.handlePopupMouse(mouse(.down), on: popup)
+        _ = try replaceWithPlainItem(in: manager, frames: &popup.itemFrames)
+        manager.handlePopupMouse(mouse(.dragged, x: 60), on: popup)
+        #expect(manager.draggingSliderID == nil)
+    }
+}
+
 @Suite struct ScrollStepperTests {
     @Test func wheelNotchesPassThroughUnchanged() {
         var stepper = ScrollStepper()
