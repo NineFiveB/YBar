@@ -89,3 +89,101 @@ import Testing
         #expect(SystemStatsProvider.gpuSample(performance: ["Device Utilization %": -3])?.utilization == 0)
     }
 }
+
+@Suite struct AudioPercentTests {
+    @Test func mutedIsZeroRegardlessOfVolume() {
+        #expect(AudioProvider.percent(channels: [(muted: true, volume: 0.8)]) == 0)
+        // A muted channel 1 wins even when the main element had no reading.
+        #expect(AudioProvider.percent(channels: [(muted: nil, volume: nil), (muted: true, volume: 0.8)]) == 0)
+    }
+
+    @Test func mainElementWinsAndChannelOneIsTheFallback() {
+        #expect(AudioProvider.percent(channels: [(muted: false, volume: 0.5), (muted: false, volume: 0.9)]) == 50)
+        // AirPods/DisplayPort devices expose no main-element volume.
+        #expect(AudioProvider.percent(channels: [(muted: nil, volume: nil), (muted: false, volume: 0.73)]) == 73)
+        // A zero main volume defers too (the device reports per channel).
+        #expect(AudioProvider.percent(channels: [(muted: false, volume: 0), (muted: false, volume: 0.25)]) == 25)
+    }
+
+    @Test func nothingUsableIsZero() {
+        #expect(AudioProvider.percent(channels: []) == 0)
+        #expect(AudioProvider.percent(channels: [(muted: nil, volume: nil), (muted: nil, volume: nil)]) == 0)
+        #expect(AudioProvider.percent(channels: [(muted: false, volume: 0)]) == 0)
+    }
+}
+
+@Suite struct NetworkInfoTests {
+    @Test func offlineIsEmpty() {
+        #expect(NetworkProvider.info(satisfied: false, isWifi: true, ssid: "Home") == "")
+    }
+
+    @Test func ssidOnlyOnWifiWhenReadable() {
+        #expect(NetworkProvider.info(satisfied: true, isWifi: true, ssid: "Home") == "Home")
+        // No Location grant: CoreWLAN hands back nil and the widget degrades.
+        #expect(NetworkProvider.info(satisfied: true, isWifi: true, ssid: nil) == "connected")
+        // Wired: an SSID from a still-associated Wi-Fi interface is not the path.
+        #expect(NetworkProvider.info(satisfied: true, isWifi: false, ssid: "Home") == "connected")
+    }
+}
+
+@Suite struct MediaEnvironmentTests {
+    @Test func notificationMapsToMediaKeys() {
+        let userInfo: [AnyHashable: Any] = [
+            "Player State": "Playing", "Name": "Song", "Artist": "Artist", "Album": "Album",
+            "Total Time": 240_000,
+        ]
+        let env = MediaProvider.environment(app: "Music", userInfo: userInfo)
+        #expect(env == [
+            "MEDIA_APP": "Music", "MEDIA_STATE": "playing",
+            "MEDIA_TITLE": "Song", "MEDIA_ARTIST": "Artist", "MEDIA_ALBUM": "Album",
+        ])
+    }
+
+    @Test func missingNotificationFieldsAreEmptyNotAbsent() {
+        let env = MediaProvider.environment(app: "Spotify", userInfo: ["Player State": "Paused"])
+        #expect(env["MEDIA_STATE"] == "paused")
+        #expect(env["MEDIA_TITLE"] == "")
+        #expect(env["MEDIA_ARTIST"] == "")
+        #expect(env["MEDIA_ALBUM"] == "")
+    }
+
+    @Test func seedLineIsTabJoinedSoPunctuationSurvives() {
+        let env = MediaProvider.seedEnvironment(
+            app: "Spotify", output: "playing\tSong, Pt. 1 | Remix\tA, B\tAlbum\n")
+        #expect(env?["MEDIA_STATE"] == "playing")
+        #expect(env?["MEDIA_TITLE"] == "Song, Pt. 1 | Remix")
+        #expect(env?["MEDIA_ARTIST"] == "A, B")
+        #expect(env?["MEDIA_ALBUM"] == "Album")
+    }
+
+    @Test func seedOnlyReportsActivePlayback() {
+        #expect(MediaProvider.seedEnvironment(app: "Music", output: "stopped\t\t\t\n") == nil)
+        #expect(MediaProvider.seedEnvironment(app: "Music", output: "") == nil)
+        #expect(MediaProvider.seedEnvironment(app: "Music", output: "execution error: ...") == nil)
+        // A paused player with no readable track still shows the pill.
+        let paused = MediaProvider.seedEnvironment(app: "Music", output: "paused")
+        #expect(paused?["MEDIA_STATE"] == "paused")
+        #expect(paused?["MEDIA_TITLE"] == "")
+    }
+}
+
+@Suite struct CPUDeltaTests {
+    @Test func firstSampleHasNoBaseline() {
+        #expect(SystemStatsProvider.cpuFraction(previous: nil, current: (busy: 10, total: 100)) == nil)
+    }
+
+    @Test func fractionIsTheBusyShareOfElapsedTicks() {
+        let fraction = SystemStatsProvider.cpuFraction(
+            previous: (busy: 100, total: 1000), current: (busy: 150, total: 1100))
+        #expect(fraction == 0.5)
+    }
+
+    @Test func stalledClockAndOverrunAreHandled() {
+        // Same tick count twice (timer fired before the kernel advanced).
+        #expect(SystemStatsProvider.cpuFraction(
+            previous: (busy: 100, total: 1000), current: (busy: 100, total: 1000)) == nil)
+        // Busy outpacing total cannot exceed 1.
+        #expect(SystemStatsProvider.cpuFraction(
+            previous: (busy: 100, total: 1000), current: (busy: 300, total: 1100)) == 1)
+    }
+}

@@ -56,14 +56,7 @@ public final class MediaProvider {
                 object: nil,
                 queue: .main
             ) { [weak self] note in
-                let info = note.userInfo ?? [:]
-                let env: [String: String] = [
-                    "MEDIA_APP": source.app,
-                    "MEDIA_STATE": ((info["Player State"] as? String) ?? "").lowercased(),
-                    "MEDIA_TITLE": (info["Name"] as? String) ?? "",
-                    "MEDIA_ARTIST": (info["Artist"] as? String) ?? "",
-                    "MEDIA_ALBUM": (info["Album"] as? String) ?? "",
-                ]
+                let env = MediaProvider.environment(app: source.app, userInfo: note.userInfo ?? [:])
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     self.current = env
@@ -82,6 +75,37 @@ public final class MediaProvider {
             NSWorkspace.shared.notificationCenter.removeObserver(terminationToken)
         }
         terminationToken = nil
+    }
+
+    /// Pure: the env for a player's playback notification. Music and Spotify
+    /// share the key names; the state is lowercased so "Playing"/"Paused"
+    /// match the seed's AppleScript spelling. Split out for testability.
+    nonisolated static func environment(app: String, userInfo: [AnyHashable: Any]) -> [String: String] {
+        [
+            "MEDIA_APP": app,
+            "MEDIA_STATE": ((userInfo["Player State"] as? String) ?? "").lowercased(),
+            "MEDIA_TITLE": (userInfo["Name"] as? String) ?? "",
+            "MEDIA_ARTIST": (userInfo["Artist"] as? String) ?? "",
+            "MEDIA_ALBUM": (userInfo["Album"] as? String) ?? "",
+        ]
+    }
+
+    /// Pure: the env for the seed script's tab-joined
+    /// `state<TAB>title<TAB>artist<TAB>album` line, or nil when the player
+    /// is not actually playing/paused (stopped, no output, an error line).
+    nonisolated static func seedEnvironment(app: String, output: String) -> [String: String]? {
+        let fields = output
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: "\t")
+        let state = fields.first?.lowercased() ?? ""
+        guard state == "playing" || state == "paused" else { return nil }
+        return [
+            "MEDIA_APP": app,
+            "MEDIA_STATE": state,
+            "MEDIA_TITLE": fields.count > 1 ? fields[1] : "",
+            "MEDIA_ARTIST": fields.count > 2 ? fields[2] : "",
+            "MEDIA_ALBUM": fields.count > 3 ? fields[3] : "",
+        ]
     }
 
     /// Pure: the env to publish when the process `bundleID` quit, or nil when
@@ -138,18 +162,9 @@ public final class MediaProvider {
             DispatchQueue.global(qos: .utility).async {
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
                 process.waitUntilExit()
-                let fields = String(decoding: data, as: UTF8.self)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .components(separatedBy: "\t")
-                let state = fields.first?.lowercased() ?? ""
-                guard state == "playing" || state == "paused" else { return }
-                let env: [String: String] = [
-                    "MEDIA_APP": player.app,
-                    "MEDIA_STATE": state,
-                    "MEDIA_TITLE": fields.count > 1 ? fields[1] : "",
-                    "MEDIA_ARTIST": fields.count > 2 ? fields[2] : "",
-                    "MEDIA_ALBUM": fields.count > 3 ? fields[3] : "",
-                ]
+                guard let env = MediaProvider.seedEnvironment(
+                    app: player.app, output: String(decoding: data, as: UTF8.self))
+                else { return }
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated { [weak self] in
                         guard let self else { return }
@@ -157,7 +172,7 @@ public final class MediaProvider {
                         // was in flight — never clobber fresher state.
                         guard self.current.isEmpty else { return }
                         self.current = env
-                        self.onEvent?("media_change", state, env)
+                        self.onEvent?("media_change", env["MEDIA_STATE"] ?? "", env)
                     }
                 }
             }

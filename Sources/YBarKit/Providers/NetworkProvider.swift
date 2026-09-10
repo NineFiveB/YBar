@@ -76,19 +76,21 @@ public final class NetworkProvider {
     }
 
     public func publish(satisfied: Bool, isWifi: Bool, forced: Bool) {
-        let info: String
-        if satisfied {
-            if isWifi, let ssid = NetworkProvider.currentSSID() {
-                info = ssid
-            } else {
-                info = "connected"
-            }
-        } else {
-            info = ""
-        }
+        let info = NetworkProvider.info(
+            satisfied: satisfied, isWifi: isWifi,
+            ssid: satisfied && isWifi ? NetworkProvider.currentSSID() : nil)
         guard forced || info != lastInfo else { return }
         lastInfo = info
         onEvent?("wifi_change", info)
+    }
+
+    /// Pure: the wifi_change INFO — "" offline, the SSID on Wi-Fi when it is
+    /// readable, "connected" otherwise (wired, or no Location grant). Split
+    /// out for testability.
+    nonisolated static func info(satisfied: Bool, isWifi: Bool, ssid: String?) -> String {
+        guard satisfied else { return "" }
+        if isWifi, let ssid { return ssid }
+        return "connected"
     }
 
     public func refresh() {
