@@ -191,6 +191,7 @@ public final class CommandHandler {
                     emit("[!] no item matching \(name)")
                 }
                 for item in targets {
+                    scheduler.cancel(prefix: "item.\(item.id).")
                     _ = barManager.store.remove(name: item.name)
                 }
                 barManager.setNeedsRender()

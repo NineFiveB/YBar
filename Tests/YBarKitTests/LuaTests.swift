@@ -120,6 +120,21 @@ import Testing
         #expect(bracket?.members == ["a"])
     }
 
+    @Test func removeReleasesLuaHandlers() throws {
+        let stack = try makeStack()
+        defer { stack.runtime.shutdown() }
+        // Added from Swift so the test still holds the item after Lua drops it.
+        let item = try #require(stack.barManager.store.add(name: "gone", position: .left))
+        let error = run("""
+        ybar.subscribe("gone", "system_woke", function(env) end)
+        ybar.remove("gone")
+        """, stack.runtime)
+        #expect(error == nil)
+        #expect(stack.barManager.store.item(named: "gone") == nil)
+        #expect(!stack.runtime.hasHandlers(for: item))
+        #expect(!item.hasLuaHandlers)
+    }
+
     @Test func rawAddRejectsUnusableWidths() throws {
         let stack = try makeStack()
         defer { stack.runtime.shutdown() }
