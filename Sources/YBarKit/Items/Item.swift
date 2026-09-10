@@ -91,6 +91,10 @@ public final class Item {
         blurRadius = prototype.blurRadius
         customWidth = prototype.customWidth
         align = prototype.align
+        // Popup styling is part of the prototype (`--default popup.*` is how
+        // a theme makes every panel glass); whether a panel is open is not.
+        popup = prototype.popup
+        popup.isOpen = false
     }
 
     public var isVisible: Bool {
