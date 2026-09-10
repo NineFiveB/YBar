@@ -142,6 +142,16 @@ public enum Serialize {
             "y_offset": part.yOffset,
             "max_chars": part.maxChars,
             "background": backgroundDictionary(part.background),
+            "shadow": shadowDictionary(part.shadow),
+        ]
+    }
+
+    static func shadowDictionary(_ shadow: ShadowStyle) -> [String: Any] {
+        [
+            "drawing": shadow.drawing ? "on" : "off",
+            "color": hex(shadow.color),
+            "distance": shadow.distance,
+            "angle": shadow.angle,
         ]
     }
 
@@ -157,12 +167,7 @@ public enum Serialize {
             "padding_right": background.paddingRight,
             "x_offset": background.xOffset,
             "y_offset": background.yOffset,
-            "shadow": [
-                "drawing": background.shadow.drawing ? "on" : "off",
-                "color": hex(background.shadow.color),
-                "distance": background.shadow.distance,
-                "angle": background.shadow.angle,
-            ] as [String: Any],
+            "shadow": shadowDictionary(background.shadow),
         ]
     }
 
