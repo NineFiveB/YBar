@@ -2,7 +2,8 @@ import AppKit
 
 /// Now-playing provider: listens for the distributed notifications Music and
 /// Spotify post on every playback change — public API, unlike MediaRemote,
-/// which macOS 15.4+ gates to entitled processes. Emits `media_change` with
+/// which macOS 15.4+ gates to entitled processes. Lazily armed on the first
+/// `media_change` subscription. Emits `media_change` with
 /// MEDIA_APP/MEDIA_STATE/MEDIA_TITLE/MEDIA_ARTIST/MEDIA_ALBUM.
 @MainActor
 public final class MediaProvider {
