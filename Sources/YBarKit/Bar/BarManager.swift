@@ -58,13 +58,16 @@ public final class BarManager {
     /// The last built scene contains marquee text (drives the display link).
     public var onMarqueeDemand: ((Bool) -> Void)?
     /// Waybar idle_inhibitor analogue: a power-management assertion that
-    /// keeps the display awake while active.
-    private var idleAssertion: IOPMAssertionID = 0
+    /// keeps the display awake while active. The held id, not the settings
+    /// flag, decides whether to create or release: a reload resets the
+    /// settings while the assertion is still held, and keying off the flag
+    /// then leaked one assertion per config save (and made `off` a no-op).
+    private(set) var idleAssertion: IOPMAssertionID = 0
 
     public func setIdleInhibit(_ active: Bool) {
-        guard active != settings.idleInhibit else { return }
-        settings.idleInhibit = active
+        if settings.idleInhibit != active { settings.idleInhibit = active }
         if active {
+            guard idleAssertion == 0 else { return }
             var id = IOPMAssertionID(0)
             let ok = IOPMAssertionCreateWithName(
                 kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
@@ -161,6 +164,7 @@ public final class BarManager {
     }
 
     public func shutdown() {
+        setIdleInhibit(false)
         displayManager.stop()
         surfaces.forEach { $0.close() }
         surfaces.removeAll()
