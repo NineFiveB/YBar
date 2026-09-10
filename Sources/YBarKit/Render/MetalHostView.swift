@@ -21,12 +21,39 @@ public struct MouseEventInfo {
     public let scrollDelta: CGFloat
 }
 
+/// Turns trackpad scrolling into wheel-style steps. A wheel notch arrives as
+/// one non-precise event carrying whole lines (scrollingDeltaY 1.0 per notch,
+/// measured on this toolchain) and is forwarded as-is. A trackpad instead
+/// delivers a stream of precise, pixel-sized samples at the sensor rate, and
+/// forwarding each one fired `mouse.scrolled` dozens of times per swipe —
+/// the shipped volume helper steps 4 % per event. AppKit's own legacy
+/// mapping (deltaY = scrollingDeltaY / 10 for precise devices, measured)
+/// treats 10 pt as one line, so that is the step: accumulate per gesture and
+/// emit the signed number of whole steps crossed, at most once per sample.
+struct ScrollStepper {
+    static let pointsPerStep: CGFloat = 10
+    private var accumulated: CGFloat = 0
+
+    /// Delta to forward for one sample, or nil to swallow it.
+    mutating func delta(scrollingDeltaY: CGFloat, precise: Bool, gestureBegan: Bool) -> CGFloat? {
+        guard precise else { return scrollingDeltaY }
+        // A new gesture must not inherit the tail of the previous one.
+        if gestureBegan { accumulated = 0 }
+        accumulated += scrollingDeltaY
+        let steps = (accumulated / ScrollStepper.pointsPerStep).rounded(.towardZero)
+        guard steps != 0 else { return nil }
+        accumulated -= steps * ScrollStepper.pointsPerStep
+        return steps
+    }
+}
+
 /// Layer-hosting NSView owning the CAMetalLayer, forwarding mouse interaction.
 /// Flipped so view coordinates match the bar's top-left-origin layout space.
 @MainActor
 public final class MetalHostView: NSView {
     public let metalLayer = CAMetalLayer()
     public var onMouse: ((MouseEventInfo) -> Void)?
+    private var scrollStepper = ScrollStepper()
     /// Fired when backingScaleFactor changes (window moved across displays) —
     /// the owner must schedule a corrective frame at the new scale.
     public var onBackingChanged: (() -> Void)?
@@ -96,7 +123,11 @@ public final class MetalHostView: NSView {
     public override func mouseEntered(with event: NSEvent) { forward(event, kind: .moved) }
     public override func mouseExited(with event: NSEvent) { forward(event, kind: .exited) }
     public override func scrollWheel(with event: NSEvent) {
-        forward(event, kind: .scrolled, scrollDelta: event.scrollingDeltaY)
+        guard let delta = scrollStepper.delta(
+            scrollingDeltaY: event.scrollingDeltaY,
+            precise: event.hasPreciseScrollingDeltas,
+            gestureBegan: event.phase == .began) else { return }
+        forward(event, kind: .scrolled, scrollDelta: delta)
     }
 
     private func forward(
