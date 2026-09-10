@@ -7,6 +7,7 @@ public final class SocketServer: @unchecked Sendable {
     public enum ServerError: Error, CustomStringConvertible {
         case alreadyRunning(String)
         case bindFailed(String)
+        case foreignNode(String)
 
         public var description: String {
             switch self {
@@ -14,6 +15,8 @@ public final class SocketServer: @unchecked Sendable {
                 return "another ybar daemon is already running (socket: \(path))"
             case .bindFailed(let path):
                 return "could not bind socket at \(path)"
+            case .foreignNode(let path):
+                return "socket path owned by another user: \(path)"
             }
         }
     }
@@ -36,8 +39,17 @@ public final class SocketServer: @unchecked Sendable {
             if SocketClient.ping(socketPath: path) {
                 throw ServerError.alreadyRunning(path)
             }
-            unlink(path)
+            // /tmp is sticky: a dead node left by another user is not ours
+            // to recycle, and bind() alone would only say "address in use".
+            if unlink(path) != 0, errno == EPERM {
+                throw ServerError.foreignNode(path)
+            }
         }
+
+        // bind() creates the node under the process umask; the chmod below
+        // narrows it after the fact, so keep the instant before it closed too.
+        let previousMask = umask(0o077)
+        defer { umask(previousMask) }
 
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw ServerError.bindFailed(path) }
