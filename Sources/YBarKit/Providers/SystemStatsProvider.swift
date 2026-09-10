@@ -130,12 +130,21 @@ public final class SystemStatsProvider {
         let idle = UInt64(info.cpu_ticks.2)
         let nice = UInt64(info.cpu_ticks.3)
         let busy = user + system + nice
-        let total = busy + idle
+        let current = (busy: busy, total: busy + idle)
 
-        defer { previousTicks = (busy, total) }
-        guard let previous = previousTicks, total > previous.total else { return nil }
-        let deltaTotal = Double(total - previous.total)
-        let deltaBusy = Double(busy - previous.busy)
+        defer { previousTicks = current }
+        return SystemStatsProvider.cpuFraction(previous: previousTicks, current: current)
+    }
+
+    /// Pure: the busy share of the ticks elapsed since the previous sample;
+    /// nil without a baseline or when the clock did not advance. Split out
+    /// for testability.
+    nonisolated static func cpuFraction(
+        previous: (busy: UInt64, total: UInt64)?, current: (busy: UInt64, total: UInt64)
+    ) -> Double? {
+        guard let previous, current.total > previous.total else { return nil }
+        let deltaTotal = Double(current.total - previous.total)
+        let deltaBusy = Double(current.busy - previous.busy)
         return min(1, max(0, deltaBusy / deltaTotal))
     }
 
