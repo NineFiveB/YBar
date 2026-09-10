@@ -487,13 +487,23 @@ public final class LuaRuntime {
         case "item":
             guard resolve(position) != nil else { return "[!] add failed: \(name) \(position)" }
         case "graph":
+            // Same envelope as `--add graph`: the sketchybar shim forwards
+            // theme widths verbatim, Int(inf) traps, and 1e9 allocates gigabytes.
+            let capacity = width ?? 60
+            guard capacity.isFinite, capacity >= 1, capacity <= 8192 else {
+                return "[!] usage: --add graph <name> <position> <width> (1...8192)"
+            }
             guard let item = resolve(position) else { return "[!] add failed: \(name) \(position)" }
             item.kind = .graph
-            item.graph = GraphState(capacity: Int(width ?? 60))
+            item.graph = GraphState(capacity: Int(capacity))
         case "slider":
+            let sliderWidth = width ?? 100
+            guard sliderWidth.isFinite, sliderWidth > 0 else {
+                return "[!] usage: --add slider <name> <position> <width>"
+            }
             guard let item = resolve(position) else { return "[!] add failed: \(name) \(position)" }
             item.kind = .slider
-            item.slider = SliderState(width: width ?? 100)
+            item.slider = SliderState(width: sliderWidth)
         case "alias":
             guard let item = resolve(position) else { return "[!] add failed: \(name) \(position)" }
             item.kind = .alias

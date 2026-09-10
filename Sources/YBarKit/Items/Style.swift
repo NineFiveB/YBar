@@ -169,7 +169,7 @@ public struct FontSpec: Equatable, Hashable, Sendable {
         let parts = text.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
         if parts.count >= 1, !parts[0].isEmpty { family = parts[0] }
         if parts.count >= 2, !parts[1].isEmpty { style = parts[1] }
-        if parts.count >= 3, let value = Float(parts[2]) { size = value }
+        if parts.count >= 3, let value = Float(parts[2]), value.isFinite, value > 0 { size = value }
     }
 
     public var description: String { "\(family):\(style):\(String(format: "%.1f", size))" }

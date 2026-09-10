@@ -117,6 +117,16 @@ import Testing
         #expect(font.size == 14.0)
     }
 
+    @Test func fontSpecKeepsSizeOnUnusableValues() {
+        var font = FontSpec()
+        font.apply("Hack:Bold:14")
+        for spec in ["Hack:Bold:inf", "Hack:Bold:nan", "Hack:Bold:0", "Hack:Bold:-3"] {
+            font.apply(spec)
+            #expect(font.size == 14, "\(spec)")
+        }
+        #expect(font.family == "Hack")
+    }
+
     @Test func positionParsing() {
         #expect(ItemPosition.parse("left") == .left)
         #expect(ItemPosition.parse("q") == .centerLeft)
