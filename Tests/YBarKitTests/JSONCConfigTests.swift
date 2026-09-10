@@ -142,6 +142,15 @@ import Testing
         #expect(commands == [["--add", "item", "x", "left"]])
     }
 
+    @Test func positionRejectsNonString() {
+        for value in ["3", "null", "[\"left\"]"] {
+            #expect(throws: JSONCConfig.ConfigError.badEntry("items[0].position must be a string")) {
+                try JSONCConfig.commands(
+                    from: "{ \"items\": [ { \"name\": \"x\", \"position\": \(value) } ] }")
+            }
+        }
+    }
+
     @Test func rootMustBeObject() {
         #expect(throws: JSONCConfig.ConfigError.rootNotAnObject) {
             try JSONCConfig.commands(from: "[1, 2]")
