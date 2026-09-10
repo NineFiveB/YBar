@@ -55,3 +55,37 @@ import Testing
         #expect(!NetworkProvider.authorizationUnlocksSSID(previous: .authorizedAlways, current: .denied))
     }
 }
+
+@Suite struct GPUStatisticsTests {
+    @Test func appleSiliconKeysReduceToUtilizationAndMemory() {
+        // Verbatim shape of an AGX accelerator's PerformanceStatistics.
+        let agx: [String: Any] = [
+            "Device Utilization %": 47,
+            "Renderer Utilization %": 47,
+            "Tiler Utilization %": 31,
+            "In use system memory": 1_607_532_544,
+            "Alloc system memory": 4_252_401_664,
+        ]
+        let sample = SystemStatsProvider.gpuSample(performance: agx)
+        #expect(sample?.utilization == 0.47)
+        #expect(sample?.memoryUsedBytes == 1_607_532_544)
+    }
+
+    @Test func intelKeyIsTheFallbackAndMemoryIsOptional() {
+        let intel: [String: Any] = ["GPU Activity(%)": 12]
+        let sample = SystemStatsProvider.gpuSample(performance: intel)
+        #expect(sample?.utilization == 0.12)
+        #expect(sample?.memoryUsedBytes == nil)
+    }
+
+    @Test func noUtilizationKeyMeansNoSample() {
+        // Callers omit the GPU_* keys entirely rather than publish zeros.
+        #expect(SystemStatsProvider.gpuSample(performance: [:]) == nil)
+        #expect(SystemStatsProvider.gpuSample(performance: ["In use system memory": 4096]) == nil)
+    }
+
+    @Test func utilizationIsClamped() {
+        #expect(SystemStatsProvider.gpuSample(performance: ["Device Utilization %": 250])?.utilization == 1)
+        #expect(SystemStatsProvider.gpuSample(performance: ["Device Utilization %": -3])?.utilization == 0)
+    }
+}
