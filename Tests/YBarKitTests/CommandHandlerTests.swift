@@ -79,6 +79,18 @@ import Testing
         #expect(stack.barManager.store.item(named: "s") == nil)
     }
 
+    @Test func removeCancelsTheItemsAnimations() throws {
+        let stack = try makeStack()
+        let reply = stack.handler.handle(arguments: [
+            "--add", "item", "x", "left",
+            "--animate", "sin", "60", "--set", "x", "y_offset=10",
+        ])
+        #expect(reply.isEmpty)
+        #expect(stack.scheduler.isAnimating)
+        _ = stack.handler.handle(arguments: ["--remove", "x"])
+        #expect(!stack.scheduler.isAnimating)
+    }
+
     @Test func cloneCarriesPopupStyling() throws {
         let stack = try makeStack()
         let reply = stack.handler.handle(arguments: [

@@ -101,6 +101,24 @@ import Testing
     }
 }
 
+// MARK: - Scheduler
+
+@MainActor
+@Suite struct AnimationSchedulerTests {
+    @Test func cancelPrefixDropsOnlyThatNamespace() {
+        let scheduler = AnimationScheduler()
+        for key in ["item.1.width", "item.1.icon.color", "item.12.width"] {
+            scheduler.animate(key: key, from: .float(0), to: .float(1),
+                              durationFrames: 60, curve: .linear) { _ in }
+        }
+        scheduler.cancel(prefix: "item.1.")
+        // The trailing dot keeps item 12 out of item 1's namespace.
+        #expect(scheduler.isAnimating)
+        scheduler.cancel(prefix: "item.12.")
+        #expect(!scheduler.isAnimating)
+    }
+}
+
 // MARK: - Fonts & positions
 
 @Suite struct StyleParsingTests {
