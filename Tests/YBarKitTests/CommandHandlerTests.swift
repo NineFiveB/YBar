@@ -72,6 +72,13 @@ import Testing
         #expect(background["glass"] as? String == "on")
     }
 
+    @Test func addSliderRejectsNonFiniteWidth() throws {
+        let stack = try makeStack()
+        let reply = stack.handler.handle(arguments: ["--add", "slider", "s", "left", "inf"])
+        #expect(reply.hasPrefix("[!] usage: --add slider"))
+        #expect(stack.barManager.store.item(named: "s") == nil)
+    }
+
     @Test func cloneCarriesPopupStyling() throws {
         let stack = try makeStack()
         let reply = stack.handler.handle(arguments: [
