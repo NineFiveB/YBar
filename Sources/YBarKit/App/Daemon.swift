@@ -148,6 +148,11 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                 self.networkProvider.start()
             case "system_stats":
                 self.statsProvider.start()
+            case "media_change":
+                // Arming seeds via osascript, which is what raises the
+                // Automation (Music/Spotify) prompt — only for configs
+                // that actually show now-playing.
+                self.mediaProvider.start()
             default:
                 break
             }
@@ -178,8 +183,6 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         mediaProvider.onEvent = { [weak self] name, info, env in
             self?.eventBus.trigger(name: name, info: info, extraEnvironment: env)
         }
-        mediaProvider.start()
-
         audioProvider.onEvent = { [weak self] name, info in
             self?.eventBus.trigger(name: name, info: info)
         }
@@ -398,11 +401,13 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                 self?.statsProvider.sample()
             },
             "media_change": { [weak self] in
+                guard let self else { return }
+                self.mediaProvider.start()
                 // Replay the last seen playback state — the provider is
                 // notification-driven, so a bare trigger (or a config reload
                 // mid-song) would otherwise dispatch with no MEDIA_* env and
                 // widgets would read it as "stopped".
-                guard let self, !self.mediaProvider.current.isEmpty else { return }
+                guard !self.mediaProvider.current.isEmpty else { return }
                 let env = self.mediaProvider.current
                 self.eventBus.trigger(
                     name: "media_change",
