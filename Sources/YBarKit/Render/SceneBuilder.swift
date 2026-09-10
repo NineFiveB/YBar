@@ -15,9 +15,6 @@ public final class SceneBuilder {
     private var activeAtlas: GlyphAtlas?
     /// Monotonic clock driving marquee phase (set by the render loop).
     public var clock: CFTimeInterval = 0
-    /// True when the last built scene contained scrolling text (the render
-    /// loop keeps the display link alive while set).
-    public private(set) var sceneHasMarquee = false
 
     public init(fontCache: FontCache) {
         self.fontCache = fontCache
@@ -35,7 +32,6 @@ public final class SceneBuilder {
     ) -> DisplayList {
         var list = DisplayList()
         activeAtlas = atlas
-        sceneHasMarquee = false
 
         // Bar background (drawn over the optional system-blur material).
         let barRadius = Float(settings.cornerRadius) * Float(scale)
@@ -117,6 +113,8 @@ public final class SceneBuilder {
         public var itemFrames: [(itemID: Int, frame: CGRect)] = []
         /// Panel content size in points.
         public var sizePoints: CGSize = .zero
+        /// A member scrolls its text: the panel needs the frame clock too.
+        public var hasMarquee: Bool { list.hasMarquee }
     }
 
     /// Vertical (or horizontal) stack of the host's popup members.
@@ -300,16 +298,21 @@ public final class SceneBuilder {
     }
 
     /// The item background's rect (bar-local, y-down) — shared with the glass
-    /// backdrop sync so blur views land exactly under the painted pill.
+    /// backdrop sync and the bar-background clip hole so both land exactly
+    /// under the painted pill. background.padding_left/right widen the pill
+    /// beyond the content box; the hit frame stays the content width
+    /// (sketchybar behavior).
     static func backgroundRect(item: Item, contentBox: CGRect, contentHeight: CGFloat) -> CGRect {
         let centerY = contentBox.midY - CGFloat(item.yOffset)
         let backgroundHeight = item.background.height > 0
             ? CGFloat(item.background.height)
             : min(contentBox.height, contentHeight + 8)
+        let paddingLeft = CGFloat(item.background.paddingLeft)
+        let paddingRight = CGFloat(item.background.paddingRight)
         return CGRect(
-            x: contentBox.minX + CGFloat(item.background.xOffset),
+            x: contentBox.minX - paddingLeft + CGFloat(item.background.xOffset),
             y: centerY - backgroundHeight / 2 - CGFloat(item.background.yOffset),
-            width: contentBox.width,
+            width: contentBox.width + paddingLeft + paddingRight,
             height: backgroundHeight)
     }
 
@@ -327,11 +330,14 @@ public final class SceneBuilder {
         let height = item.background.height > 0
             ? CGFloat(item.background.height)
             : contentBox.height - 2
+        // A bordered plate frames the graph: inset the box by the border
+        // width so stroke and fill run inside the frame instead of over it.
+        let inset = item.background.drawing ? CGFloat(max(0, item.background.borderWidth)) : 0
         let box = CGRect(
-            x: penX * scale,
-            y: (centerY - height / 2) * scale,
-            width: CGFloat(graph.capacity) * scale,
-            height: height * scale)
+            x: (penX + inset) * scale,
+            y: (centerY - height / 2 + inset) * scale,
+            width: (CGFloat(graph.capacity) - 2 * inset) * scale,
+            height: (height - 2 * inset) * scale)
         let rightToLeft = item.position == .right || item.position == .centerLeft
         let tessellation = ComponentGeometry.tessellateGraph(
             samples: graph.ordered(),
@@ -356,7 +362,8 @@ public final class SceneBuilder {
     ) {
         guard let nsImage = image.resolvedImage() else { return }
         let sizePoints = CGSize(width: CGFloat(image.size), height: CGFloat(image.size))
-        let key = "img:\(image.source)@\(image.size)r\(Int(image.rotation.rounded()))"
+        let key = SceneBuilder.imageCacheKey(
+            source: image.source, size: image.size, rotation: image.rotation)
         guard let entry = atlas.entry(colorImage: nsImage, cacheKey: key,
                                       sizePoints: sizePoints) else { return }
         let rect = CGRect(
@@ -440,8 +447,10 @@ public final class SceneBuilder {
             let knobCenterX = track.minX + track.width * fraction
             let knobX = min(max(knobCenterX - knobSize.width / 2, track.minX),
                             track.maxX - knobSize.width)
+            // The knob is one glyph, so it centres its ink like an icon does;
+            // knob.y_offset remains the override on top.
             emitText(part: slider.knob, penX: knobX, centerY: centerY,
-                     scale: scale, atlas: atlas, clip: clip, into: &list)
+                     scale: scale, atlas: atlas, clip: clip, centerInk: true, into: &list)
         }
     }
 
@@ -558,6 +567,7 @@ public final class SceneBuilder {
         let text = part.displayString
         guard !text.isEmpty else { return }
         let color = part.effectiveColor.simd
+        let shadow = SceneBuilder.textShadow(part.shadow, scale: scale)
         let partCenterY = centerY - CGFloat(part.yOffset)
         var marqueeCycle: CGFloat = 0
 
@@ -576,7 +586,7 @@ public final class SceneBuilder {
             if marquee, slack < 0 {
                 // Overflowing marquee: scroll instead of clipping. The run is
                 // drawn twice, one cycle apart, for a seamless wrap.
-                sceneHasMarquee = true
+                list.hasMarquee = true
                 marqueeCycle = ink + 24
                 let seconds = Double(max(part.scrollDuration, 1)) / 60.0
                 let speed = Double(marqueeCycle) / seconds
@@ -601,15 +611,15 @@ public final class SceneBuilder {
 
         if let symbolName = FontCache.sfSymbolName(in: text) {
             guard let image = fontCache.symbolImage(name: symbolName, pointSize: CGFloat(part.font.size)),
-                  let entry = atlas.entry(symbolImage: image, cacheKey: "sf:\(symbolName)#\(part.font.size)")
+                  let entry = atlas.entry(
+                    symbolImage: image,
+                    cacheKey: SceneBuilder.symbolCacheKey(name: symbolName, size: part.font.size))
             else { return }
             let originX = (penX * scale).rounded()
             let originY = (partCenterY * scale - CGFloat(entry.sizePx.y) / 2).rounded()
-            if let instance = SceneBuilder.glyphInstance(
-                origin: SIMD2(Float(originX), Float(originY)),
-                entry: entry, color: color, clip: clip) {
-                list.glyphs.append(instance)
-            }
+            list.glyphs.append(contentsOf: SceneBuilder.layeredGlyphs(
+                [(entry, SIMD2(Float(originX), Float(originY)))],
+                color: color, shadow: shadow, clip: clip))
             return
         }
 
@@ -623,6 +633,9 @@ public final class SceneBuilder {
         let baselinePx = (baselineY * scale).rounded()
 
         guard let runs = CTLineGetGlyphRuns(shaped.line) as? [CTRun] else { return }
+        // Every glyph of the part is placed first and layered once, so a
+        // shadow never paints over the ink of an earlier run or marquee copy.
+        var placements: [(entry: GlyphAtlas.Entry, origin: SIMD2<Float>)] = []
         for run in runs {
             let count = CTRunGetGlyphCount(run)
             guard count > 0 else { continue }
@@ -649,15 +662,59 @@ public final class SceneBuilder {
                     let glyphPenX = ((penX + passOffset + positions[index].x
                                       - shaped.inkMinX + roundingSlack)
                                      * scale).rounded()
-                    if let instance = SceneBuilder.glyphInstance(
-                        origin: SIMD2(Float(glyphPenX) + entry.bearingPx.x,
-                                      Float(baselinePx) + entry.bearingPx.y),
-                        entry: entry, color: color, clip: clip) {
-                        list.glyphs.append(instance)
-                    }
+                    placements.append((entry, SIMD2(Float(glyphPenX) + entry.bearingPx.x,
+                                                    Float(baselinePx) + entry.bearingPx.y)))
                 }
             }
         }
+        list.glyphs.append(contentsOf: SceneBuilder.layeredGlyphs(
+            placements, color: color, shadow: shadow, clip: clip))
+    }
+
+    /// `icon.shadow` / `label.shadow` resolved to device pixels: the glyphs
+    /// are drawn once more underneath, displaced like the background shadow
+    /// (angle counter-clockwise from +x, y-down here) and rounded to whole
+    /// pixels so the copy samples the atlas as crisply as the ink.
+    struct TextShadow: Equatable {
+        var offsetPx: SIMD2<Float>
+        var color: SIMD4<Float>
+    }
+
+    static func textShadow(_ shadow: ShadowStyle, scale: CGFloat) -> TextShadow? {
+        guard shadow.drawing else { return nil }
+        let offset = shadow.offset
+        return TextShadow(
+            offsetPx: SIMD2(Float((offset.width * scale).rounded()),
+                            Float((-offset.height * scale).rounded())),
+            color: shadow.color.simd)
+    }
+
+    /// Glyph quads for one text part: the shadow copies first so the ink
+    /// paints over them, then the ink. Both layers share the clip.
+    static func layeredGlyphs(
+        _ placements: [(entry: GlyphAtlas.Entry, origin: SIMD2<Float>)],
+        color: SIMD4<Float>,
+        shadow: TextShadow?,
+        clip: CGRect?
+    ) -> [GlyphInstance] {
+        var instances: [GlyphInstance] = []
+        instances.reserveCapacity(placements.count * (shadow == nil ? 1 : 2))
+        if let shadow {
+            for placement in placements {
+                if let instance = glyphInstance(
+                    origin: placement.origin + shadow.offsetPx,
+                    entry: placement.entry, color: shadow.color, clip: clip) {
+                    instances.append(instance)
+                }
+            }
+        }
+        for placement in placements {
+            if let instance = glyphInstance(
+                origin: placement.origin, entry: placement.entry, color: color, clip: clip) {
+                instances.append(instance)
+            }
+        }
+        return instances
     }
 
     /// Build a glyph instance, intersecting the quad with an optional clip rect
@@ -703,6 +760,19 @@ public final class SceneBuilder {
     }
 
     // MARK: - Helpers
+
+    /// Atlas keys for images and SF symbols bucket their size to the quarter
+    /// point exactly as glyph keys do: an animated `image.size` or an `sf:`
+    /// icon's `font.size` would otherwise mint a fresh cell per interpolation
+    /// frame on a packer that never reclaims. Rotation stays per degree --
+    /// spinner.lua steps 12°, and a full per-degree sweep still fits.
+    nonisolated static func imageCacheKey(source: String, size: Float, rotation: Float) -> String {
+        "img:\(source)@\(GlyphAtlas.quarterPoint(CGFloat(size)))r\(Int(rotation.rounded()))"
+    }
+
+    nonisolated static func symbolCacheKey(name: String, size: Float) -> String {
+        "sf:\(name)#\(GlyphAtlas.quarterPoint(CGFloat(size)))"
+    }
 
     static func pixelOrigin(_ rect: CGRect, scale: CGFloat) -> SIMD2<Float> {
         SIMD2(Float((rect.minX * scale).rounded()), Float((rect.minY * scale).rounded()))
