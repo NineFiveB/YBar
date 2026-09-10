@@ -34,7 +34,7 @@ public final class BarManager {
     private var renderScheduled = false
     private var retryScheduled = false
     /// Item id of a slider currently being dragged.
-    private var draggingSliderID: Int?
+    var draggingSliderID: Int?
     private var outsideClickMonitor: Any?
     private var menuBarObserver: NSObjectProtocol?
 
@@ -323,7 +323,7 @@ public final class BarManager {
         updateOutsideClickMonitor()
     }
 
-    private func handlePopupMouse(_ info: MouseEventInfo, on popup: PopupSurface) {
+    func handlePopupMouse(_ info: MouseEventInfo, on popup: PopupSurface) {
         func member(at point: CGPoint) -> Item? {
             guard let itemID = popup.itemFrames.first(where: { $0.frame.contains(point) })?.itemID
             else { return nil }
@@ -349,19 +349,30 @@ public final class BarManager {
                 updateSlider(item: item, localX: info.point.x, frames: popup.itemFrames)
             }
         case .dragged:
-            if let id = draggingSliderID,
-               let item = store.items.first(where: { $0.id == id }) {
-                item.slider?.isDragged = true
-                updateSlider(item: item, localX: info.point.x, frames: popup.itemFrames)
+            if let id = draggingSliderID {
+                if let item = store.items.first(where: { $0.id == id }), item.slider != nil {
+                    item.slider?.isDragged = true
+                    updateSlider(item: item, localX: info.point.x, frames: popup.itemFrames)
+                } else {
+                    // The dragged item ceased to exist mid-drag (reload,
+                    // --remove): drop the stale id, or the global-exit check
+                    // it vetoes stays deferred until the next slider press.
+                    draggingSliderID = nil
+                    scheduleGlobalExitCheck()
+                }
             }
         case .clicked:
-            if let id = draggingSliderID,
-               let item = store.items.first(where: { $0.id == id }),
-               let slider = item.slider {
+            if let id = draggingSliderID {
                 draggingSliderID = nil
-                slider.isDragged = false
-                updateSlider(item: item, localX: info.point.x, frames: popup.itemFrames)
-                onSliderChanged?(item, slider.percentage)
+                // The release ends the drag whether or not the item still
+                // exists — an item removed mid-drag must not turn this
+                // release into a click on whatever sits under the cursor.
+                if let item = store.items.first(where: { $0.id == id }),
+                   let slider = item.slider {
+                    slider.isDragged = false
+                    updateSlider(item: item, localX: info.point.x, frames: popup.itemFrames)
+                    onSliderChanged?(item, slider.percentage)
+                }
                 // A drag can end with the pointer outside every surface (the
                 // press view keeps receiving events); the exit that fired
                 // mid-drag was deferred, so re-check now.
@@ -581,7 +592,7 @@ public final class BarManager {
 
     // MARK: - Mouse
 
-    private func handleMouse(_ info: MouseEventInfo, on surface: BarSurface) {
+    func handleMouse(_ info: MouseEventInfo, on surface: BarSurface) {
         switch info.kind {
         case .down:
             // A press proves the pointer is inside (see the popup handler's
@@ -597,19 +608,28 @@ public final class BarManager {
                 updateSlider(item: item, localX: info.point.x, frames: surface.itemFrames)
             }
         case .dragged:
-            if let id = draggingSliderID,
-               let item = store.items.first(where: { $0.id == id }) {
-                item.slider?.isDragged = true
-                updateSlider(item: item, localX: info.point.x, frames: surface.itemFrames)
+            if let id = draggingSliderID {
+                if let item = store.items.first(where: { $0.id == id }), item.slider != nil {
+                    item.slider?.isDragged = true
+                    updateSlider(item: item, localX: info.point.x, frames: surface.itemFrames)
+                } else {
+                    // Self-heal as in the popup handler: the dragged item was
+                    // removed mid-drag.
+                    draggingSliderID = nil
+                    scheduleGlobalExitCheck()
+                }
             }
         case .clicked:
-            if let id = draggingSliderID,
-               let item = store.items.first(where: { $0.id == id }),
-               let slider = item.slider {
+            if let id = draggingSliderID {
                 draggingSliderID = nil
-                slider.isDragged = false
-                updateSlider(item: item, localX: info.point.x, frames: surface.itemFrames)
-                onSliderChanged?(item, slider.percentage)
+                // A release that began a slider drag is never a click, even
+                // when the item was removed mid-drag (see the popup handler).
+                if let item = store.items.first(where: { $0.id == id }),
+                   let slider = item.slider {
+                    slider.isDragged = false
+                    updateSlider(item: item, localX: info.point.x, frames: surface.itemFrames)
+                    onSliderChanged?(item, slider.percentage)
+                }
                 scheduleGlobalExitCheck()
                 return
             }
