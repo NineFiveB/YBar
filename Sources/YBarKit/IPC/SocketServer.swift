@@ -22,6 +22,8 @@ public final class SocketServer: @unchecked Sendable {
     private let handler: @MainActor ([String]) -> String
     private var listenFD: Int32 = -1
     private var thread: Thread?
+    /// Set once bind+listen succeeded: only then is the node ours to unlink.
+    private var bound = false
 
     public init(path: String, handler: @escaping @MainActor ([String]) -> String) {
         self.path = path
@@ -63,6 +65,7 @@ public final class SocketServer: @unchecked Sendable {
         }
         chmod(path, 0o600)
         listenFD = fd
+        bound = true
 
         let thread = Thread { [weak self] in
             self?.acceptLoop()
@@ -77,7 +80,13 @@ public final class SocketServer: @unchecked Sendable {
             close(listenFD)
             listenFD = -1
         }
-        unlink(path)
+        // A launch that lost the instance race (start() threw before any
+        // bind) still passes through here on its way out; the node it found
+        // belongs to the live daemon and must survive.
+        if bound {
+            unlink(path)
+            bound = false
+        }
     }
 
     private func acceptLoop() {
