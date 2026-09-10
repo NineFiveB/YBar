@@ -129,12 +129,22 @@ public final class AudioProvider {
             return status == noErr ? value : nil
         }
 
-        for element in [kAudioObjectPropertyElementMain, 1] {
+        let channels = [kAudioObjectPropertyElementMain, 1].map { element -> (muted: Bool?, volume: Float32?) in
             var muteAddr = muteAddress(element: element)
-            if let muted = readUInt32(&muteAddr), muted != 0 { return 0 }
-
             var volumeAddr = volumeAddress(element: element)
-            if let volume = readFloat32(&volumeAddr), volume > 0 {
+            return (readUInt32(&muteAddr).map { $0 != 0 }, readFloat32(&volumeAddr))
+        }
+        return percent(channels: channels)
+    }
+
+    /// Pure: the percentage for the ordered channel readings (main element
+    /// first, channel 1 as the fallback AirPods/DisplayPort devices need). A
+    /// muted channel is 0 outright; one with no usable volume defers to the
+    /// next; nothing usable is 0. Split out for testability.
+    nonisolated static func percent(channels: [(muted: Bool?, volume: Float32?)]) -> Int {
+        for channel in channels {
+            if channel.muted == true { return 0 }
+            if let volume = channel.volume, volume > 0 {
                 return Int((volume * 100).rounded())
             }
         }
