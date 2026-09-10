@@ -135,6 +135,47 @@ import Testing
     }
 }
 
+// MARK: - Config discovery
+
+@Suite struct ConfigLocatorTests {
+    private func scratchHome() throws -> URL {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ybar-config-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: home.appendingPathComponent(".config/ybar"), withIntermediateDirectories: true)
+        return home
+    }
+
+    @Test func everyEntryPointIsDiscoveredInPriorityOrder() throws {
+        let home = try scratchHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let directory = home.appendingPathComponent(".config/ybar")
+        // Lowest priority first: each new file must win over the ones before it.
+        for name in ["ybar.jsonc", "ybarrc.jsonc", "ybarrc", "ybarrc.lua"] {
+            FileManager.default.createFile(atPath: directory.appendingPathComponent(name).path, contents: nil)
+            let found = ConfigLocator.locate(
+                explicitPath: nil, instanceName: "ybar", environment: [:], home: home)
+            #expect(found?.lastPathComponent == name, "\(name)")
+        }
+    }
+
+    @Test func xdgDirectoryWinsOverHome() throws {
+        let home = try scratchHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let xdg = home.appendingPathComponent("xdg")
+        try FileManager.default.createDirectory(
+            at: xdg.appendingPathComponent("ybar"), withIntermediateDirectories: true)
+        FileManager.default.createFile(
+            atPath: home.appendingPathComponent(".config/ybar/ybarrc.lua").path, contents: nil)
+        FileManager.default.createFile(
+            atPath: xdg.appendingPathComponent("ybar/ybar.jsonc").path, contents: nil)
+        let found = ConfigLocator.locate(
+            explicitPath: nil, instanceName: "ybar",
+            environment: ["XDG_CONFIG_HOME": xdg.path], home: home)
+        #expect(found?.path == xdg.appendingPathComponent("ybar/ybar.jsonc").path)
+    }
+}
+
 // MARK: - Boolean leaves
 
 @MainActor
