@@ -438,9 +438,20 @@ public enum ComponentGeometry {
         var line: [SIMD2<Float>] = []
         line.reserveCapacity((count - 1) * 6)
         let half = Float(lineWidth) / 2
+        // Line centres stay a half width inside the box: a zero sample sits
+        // ON maxY, which would hang half the stroke below the box and over a
+        // bordered plate's frame. The fill keeps the raw sample so its top
+        // edge and baseline stay exact.
+        let clampPad = min(half, Float(box.height) / 2)
+        let lowY = Float(box.minY) + clampPad
+        let highY = Float(box.maxY) - clampPad
+        func linePoint(_ index: Int) -> SIMD2<Float> {
+            let raw = point(index)
+            return SIMD2(raw.x, min(max(raw.y, lowY), highY))
+        }
         for index in 0..<(count - 1) {
-            let a = point(index)
-            let b = point(index + 1)
+            let a = linePoint(index)
+            let b = linePoint(index + 1)
             let direction = b - a
             let length = max(0.0001, (direction.x * direction.x + direction.y * direction.y).squareRoot())
             let normal = SIMD2(-direction.y / length, direction.x / length) * half

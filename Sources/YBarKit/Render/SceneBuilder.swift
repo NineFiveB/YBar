@@ -325,11 +325,14 @@ public final class SceneBuilder {
         let height = item.background.height > 0
             ? CGFloat(item.background.height)
             : contentBox.height - 2
+        // A bordered plate frames the graph: inset the box by the border
+        // width so stroke and fill run inside the frame instead of over it.
+        let inset = item.background.drawing ? CGFloat(max(0, item.background.borderWidth)) : 0
         let box = CGRect(
-            x: penX * scale,
-            y: (centerY - height / 2) * scale,
-            width: CGFloat(graph.capacity) * scale,
-            height: height * scale)
+            x: (penX + inset) * scale,
+            y: (centerY - height / 2 + inset) * scale,
+            width: (CGFloat(graph.capacity) - 2 * inset) * scale,
+            height: (height - 2 * inset) * scale)
         let rightToLeft = item.position == .right || item.position == .centerLeft
         let tessellation = ComponentGeometry.tessellateGraph(
             samples: graph.ordered(),
