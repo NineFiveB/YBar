@@ -33,6 +33,10 @@ public final class BarManager {
     private var atlases: [CGFloat: GlyphAtlas] = [:]
     private var renderScheduled = false
     private var retryScheduled = false
+    /// Scales / displays whose no-render condition was already reported —
+    /// the retry runs every second, the stderr line must not.
+    private var reportedAtlasScales: Set<CGFloat> = []
+    private var reportedEmptyDisplays: Set<Int> = []
     /// Item id of a slider currently being dragged.
     var draggingSliderID: Int?
     /// Arrangement index of the display each item was last pressed on, so a
@@ -496,10 +500,27 @@ public final class BarManager {
     }
 
     private func render(surface: BarSurface) {
+        // Both guards used to return silently, and a fully static bar (no
+        // clock, no --set) never came back to retry: say so once, and poll
+        // like a lost frame does.
         let barSize = surface.barSize
-        guard barSize.width > 0, barSize.height > 0 else { return }
+        guard barSize.width > 0, barSize.height > 0 else {
+            if reportedEmptyDisplays.insert(surface.arrangementIndex).inserted {
+                FileHandle.standardError.write(Data(
+                    "[!] display \(surface.arrangementIndex): bar frame is empty, nothing to render\n".utf8))
+            }
+            scheduleRetry()
+            return
+        }
         let scale = surface.scale
-        guard let atlas = atlas(for: scale) else { return }
+        guard let atlas = atlas(for: scale) else {
+            if reportedAtlasScales.insert(scale).inserted {
+                FileHandle.standardError.write(Data(
+                    "[!] glyph atlas texture at \(scale)x could not be created, retrying\n".utf8))
+            }
+            scheduleRetry()
+            return
+        }
 
         let items = visibleItems(on: surface)
         // q/e dead zone only where a notch physically exists; notch_width=0
