@@ -15,9 +15,6 @@ public final class SceneBuilder {
     private var activeAtlas: GlyphAtlas?
     /// Monotonic clock driving marquee phase (set by the render loop).
     public var clock: CFTimeInterval = 0
-    /// True when the last built scene contained scrolling text (the render
-    /// loop keeps the display link alive while set).
-    public private(set) var sceneHasMarquee = false
 
     public init(fontCache: FontCache) {
         self.fontCache = fontCache
@@ -35,7 +32,6 @@ public final class SceneBuilder {
     ) -> DisplayList {
         var list = DisplayList()
         activeAtlas = atlas
-        sceneHasMarquee = false
 
         // Bar background (drawn over the optional system-blur material).
         let barRadius = Float(settings.cornerRadius) * Float(scale)
@@ -117,6 +113,8 @@ public final class SceneBuilder {
         public var itemFrames: [(itemID: Int, frame: CGRect)] = []
         /// Panel content size in points.
         public var sizePoints: CGSize = .zero
+        /// A member scrolls its text: the panel needs the frame clock too.
+        public var hasMarquee: Bool { list.hasMarquee }
     }
 
     /// Vertical (or horizontal) stack of the host's popup members.
@@ -577,7 +575,7 @@ public final class SceneBuilder {
             if marquee, slack < 0 {
                 // Overflowing marquee: scroll instead of clipping. The run is
                 // drawn twice, one cycle apart, for a seamless wrap.
-                sceneHasMarquee = true
+                list.hasMarquee = true
                 marqueeCycle = ink + 24
                 let seconds = Double(max(part.scrollDuration, 1)) / 60.0
                 let speed = Double(marqueeCycle) / seconds
