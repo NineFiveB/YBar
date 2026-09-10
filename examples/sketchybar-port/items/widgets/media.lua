@@ -659,23 +659,6 @@ media:subscribe("media_change", function(env)
   play_btn:set({ icon = { string = playing and glyph_pause or glyph_play } })
 end)
 
--- Music/Spotify post no final playback notification when they QUIT — only
--- on playback changes — so without this the pill and popup would linger
--- showing the dead app's last track until the next media_change. INFO is
--- the terminated app's localizedName; on a non-English macOS Music's
--- display name is localized and won't match, which degrades to exactly the
--- old lingering behavior, never a false positive... unless the localized
--- name happens to equal the other player's, which cannot happen for the
--- two whitelisted apps.
-media:subscribe("app_terminated", function(env)
-  if current_app and env.INFO == current_app then
-    current_app, current_key, current_art_path = nil, nil, nil
-    media:set({ drawing = false })
-    media_padding:set({ drawing = false })
-    hide_popup()
-  end
-end)
-
 media:subscribe("mouse.clicked", toggle_popup)
 media:subscribe("mouse.exited.global", hide_popup)
 
