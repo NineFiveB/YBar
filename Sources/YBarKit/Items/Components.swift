@@ -100,11 +100,14 @@ public final class ImageState {
     }
 
     public func resolvedImage() -> NSImage? {
-        if cachedSource == source, cachedRotation == rotation { return cachedImage }
+        // Whole degrees, matching the atlas key: a sub-degree step of an
+        // animated spinner would otherwise re-rasterize for a cell it shares.
+        let degrees = rotation.rounded()
+        if cachedSource == source, cachedRotation == degrees { return cachedImage }
         cachedSource = source
-        cachedRotation = rotation
+        cachedRotation = degrees
         let base = ImageState.load(source: source)
-        let turns = rotation.truncatingRemainder(dividingBy: 360)
+        let turns = degrees.truncatingRemainder(dividingBy: 360)
         cachedImage = turns == 0 ? base : base.map { ImageState.rotated($0, degrees: turns) }
         return cachedImage
     }
