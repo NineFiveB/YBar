@@ -90,6 +90,13 @@ public final class MediaProvider {
             process.standardOutput = pipe
             process.standardError = FileHandle.nullDevice
             guard (try? process.run()) != nil else { continue }
+            // Same watchdog as plugin scripts: an Automation prompt left
+            // pending (or a wedged player) would otherwise park the reader
+            // thread below in readDataToEndOfFile for good.
+            let box = ProcessBox(process: process)
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 60) {
+                box.terminateIfRunning()
+            }
             DispatchQueue.global(qos: .utility).async {
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
                 process.waitUntilExit()
