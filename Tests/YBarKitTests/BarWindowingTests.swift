@@ -230,6 +230,61 @@ private func mouse(_ kind: MouseEventKind, x: CGFloat = 50) -> MouseEventInfo {
     }
 }
 
+@MainActor
+@Suite(.serialized) struct PopupSurfaceChoiceTests {
+    private let slot = CGRect(x: 10, y: 0, width: 60, height: 25)
+
+    /// Two headless bar surfaces (panels never ordered in) that both lay out
+    /// the host, standing in for two displays.
+    private func makeSurfaces(hostID: Int) throws -> [BarSurface] {
+        let screen = try #require(NSScreen.screens.first)
+        return [1, 2].map { index in
+            let surface = BarSurface(screen: screen, arrangementIndex: index)
+            surface.itemFrames = [(hostID, slot)]
+            return surface
+        }
+    }
+
+    @Test func pressedDisplayWinsOverTheFirst() throws {
+        let surfaces = try makeSurfaces(hostID: 7)
+        let chosen = BarManager.surfaceForPopup(
+            hostID: 7, surfaces: surfaces, preferredIndex: 2, activeScreen: nil)
+        #expect(chosen?.arrangementIndex == 2)
+    }
+
+    @Test func stalePressFallsBackToADisplayThatLaysOutTheHost() throws {
+        let surfaces = try makeSurfaces(hostID: 7)
+        // The host is no longer laid out on display 2 (display=1 mask, say).
+        surfaces[1].itemFrames = [(7, .zero)]
+        let chosen = BarManager.surfaceForPopup(
+            hostID: 7, surfaces: surfaces, preferredIndex: 2, activeScreen: nil)
+        #expect(chosen?.arrangementIndex == 1)
+    }
+
+    @Test func noPressPrefersTheFocusedScreenThenTheFirst() throws {
+        let surfaces = try makeSurfaces(hostID: 7)
+        surfaces[0].itemFrames = []
+        let focused = BarManager.surfaceForPopup(
+            hostID: 7, surfaces: surfaces, preferredIndex: nil, activeScreen: surfaces[1].screen)
+        #expect(focused?.arrangementIndex == 2)
+        let first = BarManager.surfaceForPopup(
+            hostID: 7, surfaces: try makeSurfaces(hostID: 7), preferredIndex: nil, activeScreen: nil)
+        #expect(first?.arrangementIndex == 1)
+        #expect(BarManager.surfaceForPopup(
+            hostID: 8, surfaces: surfaces, preferredIndex: 1, activeScreen: nil) == nil)
+    }
+
+    @Test func barPressIsRememberedPerItem() throws {
+        let manager = try makeHeadlessManager()
+        let screen = try #require(NSScreen.screens.first)
+        let host = try #require(manager.store.add(name: "host", position: .right))
+        let second = BarSurface(screen: screen, arrangementIndex: 2)
+        second.itemFrames = [(host.id, slot)]
+        manager.handleMouse(mouse(.down, x: 20), on: second)
+        #expect(manager.lastPressSurfaceIndex[host.id] == 2)
+    }
+}
+
 @Suite struct ScrollStepperTests {
     @Test func wheelNotchesPassThroughUnchanged() {
         var stepper = ScrollStepper()

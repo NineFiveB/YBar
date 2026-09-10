@@ -35,6 +35,11 @@ public final class BarManager {
     private var retryScheduled = false
     /// Item id of a slider currently being dragged.
     var draggingSliderID: Int?
+    /// Arrangement index of the display each item was last pressed on, so a
+    /// host's popup opens where it was clicked rather than on the
+    /// lowest-index bar that lays it out. Keyed by display rather than by
+    /// surface object so a rebuild does not invalidate it.
+    private(set) var lastPressSurfaceIndex: [Int: Int] = [:]
     private var outsideClickMonitor: Any?
     private var menuBarObserver: NSObjectProtocol?
 
@@ -256,6 +261,31 @@ public final class BarManager {
         return inset > 0 ? inset : 7
     }
 
+    /// The bar surface a host's popup hangs off: the display it was last
+    /// pressed on, else the one holding keyboard focus (a popup opened from
+    /// the CLI or a script has no press behind it), else the first that
+    /// lays the host out.
+    private func surfaceForPopup(host: Item) -> BarSurface? {
+        BarManager.surfaceForPopup(
+            hostID: host.id, surfaces: surfaces,
+            preferredIndex: lastPressSurfaceIndex[host.id], activeScreen: NSScreen.main)
+    }
+
+    static func surfaceForPopup(hostID: Int, surfaces: [BarSurface],
+                                preferredIndex: Int?, activeScreen: NSScreen?) -> BarSurface? {
+        let candidates = surfaces.filter { surface in
+            surface.itemFrames.contains { $0.itemID == hostID && $0.frame != .zero }
+        }
+        if let preferredIndex,
+           let pressed = candidates.first(where: { $0.arrangementIndex == preferredIndex }) {
+            return pressed
+        }
+        if let activeScreen, let active = candidates.first(where: { $0.screen == activeScreen }) {
+            return active
+        }
+        return candidates.first
+    }
+
     private func updatePopups() {
         // A host only counts as live once its scene actually rendered; anything
         // else (closed, hostless, empty, zero-size) tears its panel down —
@@ -264,9 +294,7 @@ public final class BarManager {
         for host in store.items where host.popup.isOpen {
             let members = store.items.filter { $0.position == .popup && $0.popupHost == host.name }
             guard !members.isEmpty,
-                  let surface = surfaces.first(where: { surface in
-                      surface.itemFrames.contains { $0.itemID == host.id && $0.frame != .zero }
-                  }),
+                  let surface = surfaceForPopup(host: host),
                   let hostFrame = surface.itemFrames.first(where: { $0.itemID == host.id })?.frame,
                   let atlas = atlas(for: surface.scale)
             else { continue }
@@ -614,6 +642,7 @@ public final class BarManager {
             // note on warped cursors outrunning tracking-area enters).
             noteSurfaceEntered(ObjectIdentifier(surface))
             let hit = hitTest(point: info.point, on: surface)
+            if let hit { lastPressSurfaceIndex[hit.id] = surface.arrangementIndex }
             // A press anywhere that is not an open popup's host dismisses
             // auto-close popups (host presses defer to their toggle scripts).
             closeAutoClosePopups(except: hit?.id)
@@ -649,6 +678,7 @@ public final class BarManager {
                 return
             }
             if let item = hitTest(point: info.point, on: surface) {
+                lastPressSurfaceIndex[item.id] = surface.arrangementIndex
                 onItemClicked?(item, info)
             }
         case .scrolled:
