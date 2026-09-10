@@ -61,6 +61,12 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
     var configURL: URL?
     /// Last reported modifier state (modifier_change dedupe).
     var lastModifier = "none"
+    /// The flagsChanged monitors, kept for the daemon's lifetime.
+    var modifierMonitors: [Any] = []
+    /// The Accessibility warning fires once per process, not once per
+    /// reload (reset() clears the armed set, so the subscription hook
+    /// re-runs on every config save).
+    var warnedAccessibility = false
     var luaRuntime: LuaRuntime?
 
     init(explicitConfigPath: String?) throws {
@@ -153,6 +159,21 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                 // Automation (Music/Spotify) prompt — only for configs
                 // that actually show now-playing.
                 self.mediaProvider.start()
+            case "modifier_change":
+                // The global flagsChanged monitor is key-related, which
+                // macOS gates behind Accessibility — and it fails silently:
+                // no prompt, no error, the event simply never fires outside
+                // our own windows. Say so once, since nothing else will.
+                if !self.warnedAccessibility, !AXIsProcessTrusted() {
+                    self.warnedAccessibility = true
+                    FileHandle.standardError.write(Data("""
+                        [!] modifier_change needs Accessibility: without it modifier keys are \
+                        only seen while the pointer is over the bar. Grant it under \
+                        System Settings > Privacy & Security > Accessibility > + > YBar.app, \
+                        then restart YBar (ybar --exit and relaunch).
+
+                        """.utf8))
+                }
             default:
                 break
             }
@@ -285,12 +306,16 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
             self.eventBus.trigger(name: "modifier_change",
                                   extraEnvironment: ["MODIFIER": name])
         }
-        NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { event in
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: { event in
             MainActor.assumeIsolated { reportFlags(event.modifierFlags) }
+        }) {
+            modifierMonitors.append(global)
         }
-        NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
+        if let local = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged, handler: { event in
             MainActor.assumeIsolated { reportFlags(event.modifierFlags) }
             return event
+        }) {
+            modifierMonitors.append(local)
         }
         barManager.onSliderDragStarted = { [weak self] item in
             // An in-flight percentage animation would fight the drag every frame.
