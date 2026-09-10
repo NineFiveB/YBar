@@ -133,6 +133,9 @@ public struct DisplayList {
     /// Triangles drawn between quads and glyphs (graph fills/lines).
     public var triangles: [ShapeVertex] = []
     public var glyphs: [GlyphInstance] = []
+    /// This scene contains scrolling text: the frame clock must keep running
+    /// while any scene of the frame (bar or popup) carries it.
+    public var hasMarquee = false
 
     public init() {}
 

@@ -229,19 +229,28 @@ public final class BarManager {
     }
 
     public func renderAll() {
+        // Marquee demand belongs to the whole frame: every bar surface and
+        // every popup panel is accumulated and reported once. Reporting per
+        // surface let whichever scene rendered last decide, and popups never
+        // reported at all, so a display link could be torn down under text
+        // that was still scrolling.
+        var marquee = false
         for surface in surfaces {
-            render(surface: surface)
+            if render(surface: surface) { marquee = true }
         }
-        updatePopups()
+        if updatePopups() { marquee = true }
+        onMarqueeDemand?(marquee)
     }
 
     // MARK: - Popups
 
-    private func updatePopups() {
+    /// Returns whether any presented popup scene carries marquee text.
+    private func updatePopups() -> Bool {
         // A host only counts as live once its scene actually rendered; anything
         // else (closed, hostless, empty, zero-size) tears its panel down —
         // stale, still-clickable panels must never linger.
         var liveHostIDs: Set<Int> = []
+        var marquee = false
         for host in store.items where host.popup.isOpen {
             let members = store.items.filter { $0.position == .popup && $0.popupHost == host.name }
             guard !members.isEmpty,
@@ -259,6 +268,7 @@ public final class BarManager {
             let scene = sceneBuilder.buildPopup(
                 host: host, members: members, scale: scale, atlas: atlas)
             guard scene.sizePoints.width > 0, scene.sizePoints.height > 0 else { continue }
+            if scene.hasMarquee { marquee = true }
 
             let popupSurface: PopupSurface
             if let existing = popupSurfaces[host.id] {
@@ -306,6 +316,7 @@ public final class BarManager {
             popupSurfaces.removeValue(forKey: hostID)
         }
         updateOutsideClickMonitor()
+        return marquee
     }
 
     private func handlePopupMouse(_ info: MouseEventInfo, on popup: PopupSurface) {
@@ -426,11 +437,12 @@ public final class BarManager {
         return created
     }
 
-    private func render(surface: BarSurface) {
+    /// Returns whether the surface's scene carries marquee text.
+    private func render(surface: BarSurface) -> Bool {
         let barSize = surface.barSize
-        guard barSize.width > 0, barSize.height > 0 else { return }
+        guard barSize.width > 0, barSize.height > 0 else { return false }
         let scale = surface.scale
-        guard let atlas = atlas(for: scale) else { return }
+        guard let atlas = atlas(for: scale) else { return false }
 
         let items = visibleItems(on: surface)
         // q/e dead zone only where a notch physically exists; notch_width=0
@@ -500,14 +512,14 @@ public final class BarManager {
             barSize: barSize,
             scale: scale,
             atlas: atlas)
-        // Marquee text needs continuous frames; everything else stays
-        // damage-driven.
-        onMarqueeDemand?(sceneBuilder.sceneHasMarquee)
         if !renderer.render(list: list, layer: surface.hostView.metalLayer, atlas: atlas) {
             // Frame lost (display asleep / drawables exhausted): the damage flag
             // was already consumed, so reschedule or the update is never shown.
             scheduleRetry()
         }
+        // Marquee text needs continuous frames; everything else stays
+        // damage-driven.
+        return list.hasMarquee
     }
 
     private func scheduleRetry() {
