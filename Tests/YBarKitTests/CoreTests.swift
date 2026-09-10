@@ -135,6 +135,51 @@ import Testing
     }
 }
 
+// MARK: - Boolean leaves
+
+@MainActor
+@Suite struct BooleanToggleTests {
+    /// Every boolean leaf in the item namespace.
+    private static let leaves = [
+        "drawing", "scroll_texts",
+        "icon.drawing", "icon.highlight", "label.drawing", "label.highlight",
+        "icon.shadow", "icon.shadow.drawing", "label.background.drawing",
+        "background.drawing", "background.glass", "background.image.drawing",
+        "background.shadow.drawing", "image.drawing", "slider.knob.drawing",
+        "popup.drawing", "popup.horizontal", "popup.auto_close", "popup.background.glass",
+    ]
+
+    @Test func toggleFlipsEveryBooleanLeaf() {
+        let item = Item(name: "t", position: .left)
+        item.slider = SliderState(width: 10)
+        let ctx = PropertyContext(scheduler: AnimationScheduler(), invalidate: {})
+        // The leaves that used to reject the word outright, read back directly.
+        let read: [String: () -> Bool] = [
+            "scroll_texts": { item.scrollTexts },
+            "background.glass": { item.background.glass },
+            "background.image.drawing": { item.background.imageDrawing },
+            "image.drawing": { item.image?.drawing ?? false },
+            "slider.knob.drawing": { item.slider?.knob.drawing ?? false },
+            "popup.drawing": { item.popup.isOpen },
+            "popup.horizontal": { item.popup.horizontal },
+            "popup.auto_close": { item.popup.autoClose },
+            "popup.background.glass": { item.popup.background.glass },
+        ]
+        for leaf in Self.leaves {
+            func set(_ value: String) -> String? {
+                PropertySetter.set(item: item, property: leaf, value: value, context: ctx)
+            }
+            #expect(set("off") == nil, "\(leaf)=off")
+            #expect(set("toggle") == nil, "\(leaf)=toggle")
+            if let read = read[leaf] { #expect(read(), "\(leaf) after toggle") }
+            // Case-insensitive like every other boolean spelling.
+            #expect(set("TOGGLE") == nil, "\(leaf)=TOGGLE")
+            if let read = read[leaf] { #expect(!read(), "\(leaf) after TOGGLE") }
+            #expect(set("maybe") != nil, "\(leaf)=maybe")
+        }
+    }
+}
+
 // MARK: - Layout
 
 @MainActor
