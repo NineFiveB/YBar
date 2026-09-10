@@ -259,3 +259,32 @@ struct HeadlessScene {
         #expect(item.frame.width == box.width)
     }
 }
+
+/// Image and SF-symbol atlas keys bucket their size like glyph keys do
+/// (review finding A10): the shelf packer never reclaims, so an animated
+/// size must not mint a cell per interpolation frame.
+@Suite struct AtlasKeyTests {
+    @Test func sizesShareAQuarterPointBucket() {
+        #expect(GlyphAtlas.quarterPoint(18.1) == 18)
+        #expect(GlyphAtlas.quarterPoint(18.13) == 18.25)
+        #expect(GlyphAtlas.quarterPoint(18.4) == 18.5)
+    }
+
+    @Test func imageKeysBucketSizeAndRoundRotation() {
+        let steady = SceneBuilder.imageCacheKey(source: "app.Finder", size: 18.05, rotation: 0)
+        #expect(SceneBuilder.imageCacheKey(source: "app.Finder", size: 18.1, rotation: 0) == steady)
+        #expect(SceneBuilder.imageCacheKey(source: "app.Finder", size: 18.5, rotation: 0) != steady)
+        // Rotation stays per degree.
+        #expect(SceneBuilder.imageCacheKey(source: "sf.arrow", size: 18, rotation: 12.4)
+                == SceneBuilder.imageCacheKey(source: "sf.arrow", size: 18, rotation: 11.6))
+        #expect(SceneBuilder.imageCacheKey(source: "sf.arrow", size: 18, rotation: 12.6)
+                != SceneBuilder.imageCacheKey(source: "sf.arrow", size: 18, rotation: 12.4))
+    }
+
+    @Test func symbolKeysBucketSize() {
+        let steady = SceneBuilder.symbolCacheKey(name: "wifi", size: 14)
+        #expect(SceneBuilder.symbolCacheKey(name: "wifi", size: 14.1) == steady)
+        #expect(SceneBuilder.symbolCacheKey(name: "wifi", size: 14.25) != steady)
+        #expect(SceneBuilder.symbolCacheKey(name: "wifi.slash", size: 14) != steady)
+    }
+}
