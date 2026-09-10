@@ -94,6 +94,31 @@ import Testing
         #expect(fill.first?.y == 10)
         // Peak x of the final segment reaches the box's right edge.
         #expect(fill.contains { $0.x == 20 && $0.y == 0 })
+        // The stroke never leaves the box vertically: centres are clamped a
+        // half width inside (before: the zero sample's quad hung to y=11 and
+        // the peak's rose to y=-1).
+        #expect(line.allSatisfy { $0.y >= 0 && $0.y <= 10 })
+    }
+
+    @Test func graphFlatZeroLineSitsOnTheBaseline() {
+        let (_, line) = ComponentGeometry.tessellateGraph(
+            samples: [0, 0],
+            box: CGRect(x: 0, y: 0, width: 10, height: 10),
+            lineWidth: 2, rightToLeft: false)
+        // Centre at maxY-half: the quad spans [8, 10] and ends ON the box
+        // edge, where a bordered plate's frame begins.
+        #expect(line.allSatisfy { $0.y == 8 || $0.y == 10 })
+    }
+
+    @Test func graphLineThickerThanBoxCollapsesToItsMiddle() {
+        let (_, line) = ComponentGeometry.tessellateGraph(
+            samples: [0, 1],
+            box: CGRect(x: 0, y: 0, width: 10, height: 4),
+            lineWidth: 12, rightToLeft: false)
+        // Clamp pad is min(half, height/2): both centres land on the middle
+        // row, so the segment is flat and its quad is symmetric about it.
+        #expect(line.allSatisfy { $0.y >= -4 && $0.y <= 8 })
+        #expect(line.contains { $0.y == -4 } && line.contains { $0.y == 8 })
     }
 
     @Test func graphTessellationDegenerateInputs() {
