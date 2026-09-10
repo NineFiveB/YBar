@@ -1,3 +1,4 @@
+import CoreLocation
 import Foundation
 import Testing
 @testable import YBarKit
@@ -35,5 +36,22 @@ import Testing
         #expect(MediaProvider.reduce(termination: "com.apple.Safari", current: playing) == nil)
         #expect(MediaProvider.reduce(termination: "com.spotify.client", current: [:]) == nil)
         #expect(MediaProvider.reduce(termination: "", current: playing) == nil)
+    }
+}
+
+@Suite struct LocationAuthorizationTests {
+    @Test func grantLandingTriggersRefresh() {
+        // The user clicked Allow (or flipped the toggle in System Settings).
+        #expect(NetworkProvider.authorizationUnlocksSSID(previous: .notDetermined, current: .authorizedAlways))
+        #expect(NetworkProvider.authorizationUnlocksSSID(previous: .denied, current: .authorizedAlways))
+    }
+
+    @Test func initialCallbackAndNonGrantsDoNot() {
+        // CLLocationManager reports the existing status as soon as a delegate
+        // is set; that SSID (or its absence) is already published.
+        #expect(!NetworkProvider.authorizationUnlocksSSID(previous: nil, current: .authorizedAlways))
+        #expect(!NetworkProvider.authorizationUnlocksSSID(previous: .notDetermined, current: .denied))
+        #expect(!NetworkProvider.authorizationUnlocksSSID(previous: .authorizedAlways, current: .authorizedAlways))
+        #expect(!NetworkProvider.authorizationUnlocksSSID(previous: .authorizedAlways, current: .denied))
     }
 }
