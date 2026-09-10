@@ -166,8 +166,10 @@ public final class BarManager {
     public func shutdown() {
         setIdleInhibit(false)
         displayManager.stop()
+        surfaces.forEach { releaseHover(on: $0) }
         surfaces.forEach { $0.close() }
         surfaces.removeAll()
+        popupSurfaces.values.forEach { releaseHover(in: $0) }
         popupSurfaces.values.forEach { $0.close() }
         popupSurfaces.removeAll()
     }
@@ -180,6 +182,7 @@ public final class BarManager {
         let hadPointer = surfaces.contains { pointerInsideSurfaces.contains(ObjectIdentifier($0)) }
         surfaces.forEach { pointerInsideSurfaces.remove(ObjectIdentifier($0)) }
         if hadPointer { scheduleGlobalExitCheck() }
+        surfaces.forEach { releaseHover(on: $0) }
         surfaces.forEach { $0.close() }
         surfaces.removeAll()
 
@@ -214,6 +217,9 @@ public final class BarManager {
             if let entry = screens.first(where: { $0.index == surface.arrangementIndex }) {
                 surface.apply(settings: settings, screen: entry.screen)
             }
+            // An ordered-out panel stops tracking; the hovered item must not
+            // wait for a mouseExited that never comes.
+            if settings.hidden { releaseHover(on: surface) }
         }
         setNeedsRender()
     }
@@ -317,6 +323,7 @@ public final class BarManager {
             if pointerInsideSurfaces.remove(ObjectIdentifier(popupSurface)) != nil {
                 scheduleGlobalExitCheck()
             }
+            releaseHover(in: popupSurface)
             popupSurface.close()
             popupSurfaces.removeValue(forKey: hostID)
         }
@@ -390,11 +397,7 @@ public final class BarManager {
             noteSurfaceEntered(ObjectIdentifier(popup))
             let hovered = member(at: info.point)
             guard popup.hoveredItemID != hovered?.id else { return }
-            if let previousID = popup.hoveredItemID,
-               let previous = store.items.first(where: { $0.id == previousID }) {
-                previous.mouseOver = false
-                onItemHover?(previous, false)
-            }
+            releaseHover(in: popup)
             popup.hoveredItemID = hovered?.id
             if let hovered {
                 hovered.mouseOver = true
@@ -402,14 +405,26 @@ public final class BarManager {
             }
         case .exited:
             pointerInsideSurfaces.remove(ObjectIdentifier(popup))
-            if let previousID = popup.hoveredItemID,
-               let previous = store.items.first(where: { $0.id == previousID }) {
-                previous.mouseOver = false
-                onItemHover?(previous, false)
-            }
-            popup.hoveredItemID = nil
+            releaseHover(in: popup)
             scheduleGlobalExitCheck()
         }
+    }
+
+    /// Forget the popup's hovered row and fire its targeted mouse.exited.
+    /// Every path that ends a panel's life must come through here: a closed
+    /// panel never delivers mouseExited, so a row hovered at teardown would
+    /// otherwise never learn the pointer left it.
+    func releaseHover(in popup: PopupSurface) {
+        guard let previousID = popup.hoveredItemID else { return }
+        popup.hoveredItemID = nil
+        guard let previous = store.items.first(where: { $0.id == previousID }) else { return }
+        previous.mouseOver = false
+        onItemHover?(previous, false)
+    }
+
+    /// Bar-surface counterpart (also cancels the pending tooltip).
+    func releaseHover(on surface: BarSurface) {
+        updateHover(surface: surface, to: nil)
     }
 
     // MARK: - Popup auto-close
