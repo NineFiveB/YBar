@@ -104,7 +104,7 @@ import Testing
 // MARK: - Scheduler
 
 @MainActor
-@Suite struct AnimationSchedulerTests {
+@Suite struct AnimationCancelPrefixTests {
     @Test func cancelPrefixDropsOnlyThatNamespace() {
         let scheduler = AnimationScheduler()
         for key in ["item.1.width", "item.1.icon.color", "item.12.width"] {
