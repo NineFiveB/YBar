@@ -86,6 +86,19 @@ private func scratchSocketPath() -> String {
         #expect(FileManager.default.fileExists(atPath: path))
     }
 
+    @Test func nodeIsOwnerOnlyAndUmaskIsRestored() throws {
+        let path = scratchSocketPath()
+        let before = umask(0o022)
+        defer { umask(before) }
+        let server = SocketServer(path: path) { _ in "" }
+        try server.start()
+        defer { server.stop() }
+        var info = stat()
+        #expect(stat(path, &info) == 0)
+        #expect(info.st_mode & 0o777 == 0o600)
+        #expect(umask(0o022) == 0o022)
+    }
+
     @Test func boundNodeIsRemovedOnStop() throws {
         let path = scratchSocketPath()
         let server = SocketServer(path: path) { _ in "" }
