@@ -65,13 +65,24 @@ extension ScriptRunner {
     /// Homebrew/local bins for daemons launched outside a login shell
     /// (aerospace, blueutil, battery ... live there).
     static func augmentedPATH(_ current: String?) -> String {
+        // Symlinks resolved so a brew-symlinked launch pins the real keg or
+        // bundle directory, which holds only this build's `ybar`.
+        let executable = (Bundle.main.executablePath as NSString?)?.resolvingSymlinksInPath
+        return augmentedPATH(current, selfDir: (executable as NSString?)?.deletingLastPathComponent)
+    }
+
+    static func augmentedPATH(_ current: String?, selfDir: String?) -> String {
         var path = current ?? "/usr/bin:/bin:/usr/sbin:/sbin"
-        // The daemon's own directory first: config scripts call `ybar` and
-        // the binary may live in an app bundle or brew keg, not on PATH.
-        let selfDir = (Bundle.main.executablePath as NSString?)?.deletingLastPathComponent
-        var extras = ["/opt/homebrew/bin", "/usr/local/bin"]
-        if let selfDir { extras.insert(selfDir, at: 0) }
-        for extra in extras where !path.split(separator: ":").contains(Substring(extra)) {
+        // The daemon's own directory FIRST: plugins call `ybar` back and must
+        // reach the running build, not whichever `ybar` the inherited PATH
+        // lists earlier (a LaunchAgent that puts /opt/homebrew/bin up front
+        // routed every callback to a different install). The inherited order
+        // itself is never reshuffled — only a missing entry is added.
+        if let selfDir, !path.split(separator: ":").contains(Substring(selfDir)) {
+            path = selfDir + ":" + path
+        }
+        for extra in ["/opt/homebrew/bin", "/usr/local/bin"]
+        where !path.split(separator: ":").contains(Substring(extra)) {
             path += ":" + extra
         }
         return path
