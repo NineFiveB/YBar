@@ -95,10 +95,7 @@ public enum PropertySetter {
         case "blur_radius":
             return setFloat(item, \Item.blurRadius, "blur_radius", value, ctx)
         case "scroll_texts":
-            guard let flag = parseBool(value) else { return "[!] invalid boolean: \(value)" }
-            item.scrollTexts = flag
-            ctx.invalidate()
-            return nil
+            return setBool(item, \Item.scrollTexts, value, ctx)
         case "tooltip":
             item.tooltip = value
             return nil
@@ -165,9 +162,7 @@ public enum PropertySetter {
             image.source = value
             return nil
         case "drawing":
-            guard let flag = parseBool(value) else { return "[!] invalid image.drawing: \(value)" }
-            image.drawing = flag
-            return nil
+            return setBoolValue(current: image.drawing, value: value, ctx: ctx) { image.drawing = $0 }
         case "size":
             return setFloatValue(key: "item.\(item.id).image.size", current: image.size,
                                  value: value, ctx: ctx) { image.size = max(1, $0) }
@@ -244,10 +239,9 @@ public enum PropertySetter {
                 ctx.invalidate()
                 return nil
             case "drawing":
-                guard let flag = parseBool(value) else { return "[!] invalid boolean: \(value)" }
-                slider.knob.drawing = flag
-                ctx.invalidate()
-                return nil
+                return setBoolValue(current: slider.knob.drawing, value: value, ctx: ctx) {
+                    slider.knob.drawing = $0
+                }
             case "color":
                 return setColorValue(key: "item.\(item.id).slider.knob.color",
                                      current: slider.knob.color,
@@ -290,30 +284,16 @@ public enum PropertySetter {
         let rest = path.dropFirst()
         switch path.first {
         case "drawing":
-            if value == "toggle" {
-                item.popup.isOpen.toggle()
-            } else if let flag = parseBool(value) {
-                item.popup.isOpen = flag
-            } else {
-                return "[!] invalid boolean: \(value)"
-            }
-            ctx.invalidate()
-            return nil
+            return setBool(item, \Item.popup.isOpen, value, ctx)
         case "horizontal":
-            guard let flag = parseBool(value) else { return "[!] invalid boolean: \(value)" }
-            item.popup.horizontal = flag
-            ctx.invalidate()
-            return nil
+            return setBool(item, \Item.popup.horizontal, value, ctx)
         case "wrap_width":
             guard let width = Float(value), width.isFinite else { return "[!] invalid wrap_width: \(value)" }
             item.popup.wrapWidth = max(0, width)
             ctx.invalidate()
             return nil
         case "auto_close":
-            guard let flag = parseBool(value) else { return "[!] invalid boolean: \(value)" }
-            item.popup.autoClose = flag
-            ctx.invalidate()
-            return nil
+            return setBool(item, \Item.popup.autoClose, value, ctx)
         case "align":
             guard let first = value.first, "lcr".contains(first) else { return "[!] invalid align: \(value)" }
             item.popup.align = first
@@ -350,10 +330,7 @@ public enum PropertySetter {
                                      current: item.popup.background.borderWidth,
                                      value: value, ctx: ctx) { [weak item] in item?.popup.background.borderWidth = $0 }
             case "glass":
-                guard let flag = parseBool(value) else { return "[!] invalid boolean: \(value)" }
-                item.popup.background.glass = flag
-                ctx.invalidate()
-                return nil
+                return setBool(item, \Item.popup.background.glass, value, ctx)
             case "shadow", "image":
                 // Panel shadow comes from the window; images unsupported. Ignore.
                 return nil
@@ -534,8 +511,7 @@ public enum PropertySetter {
                 guard let scale = Float(value), scale.isFinite, scale > 0 else { return "[!] invalid image.scale: \(value)" }
                 item[keyPath: base.appending(path: \BackgroundStyle.imageScale)] = scale
             case "drawing":
-                guard let flag = parseBool(value) else { return "[!] invalid boolean: \(value)" }
-                item[keyPath: base.appending(path: \BackgroundStyle.imageDrawing)] = flag
+                return setBool(item, base.appending(path: \BackgroundStyle.imageDrawing), value, ctx)
             default:
                 return nil  // corner_radius/border sub-keys accepted (no-op v1)
             }
@@ -572,10 +548,7 @@ public enum PropertySetter {
         case "y_offset":
             return setFloat(item, base.appending(path: \BackgroundStyle.yOffset), "\(prefix).y_offset", value, ctx)
         case "glass":
-            guard let flag = parseBool(value) else { return "[!] invalid boolean: \(value)" }
-            item[keyPath: base.appending(path: \BackgroundStyle.glass)] = flag
-            ctx.invalidate()
-            return nil
+            return setBool(item, base.appending(path: \BackgroundStyle.glass), value, ctx)
         case "gradient_color":
             guard let color = YColor.parse(value) else { return "[!] invalid color: \(value)" }
             item[keyPath: base.appending(path: \BackgroundStyle.gradientColor)] = color
@@ -792,19 +765,31 @@ public enum PropertySetter {
         return nil
     }
 
+    /// Every boolean leaf goes through here so `toggle` works on all of them
+    /// (ARCHITECTURE.md's promise; the Windows port accepts it everywhere).
     private static func setBool(
         _ item: Item,
         _ keyPath: ReferenceWritableKeyPath<Item, Bool>,
         _ value: String,
         _ ctx: PropertyContext
     ) -> String? {
-        if value == "toggle" {
-            item[keyPath: keyPath].toggle()
-            ctx.invalidate()
-            return nil
+        setBoolValue(current: item[keyPath: keyPath], value: value, ctx: ctx) {
+            item[keyPath: keyPath] = $0
         }
-        guard let flag = parseBool(value) else { return "[!] invalid boolean: \(value)" }
-        item[keyPath: keyPath] = flag
+    }
+
+    /// Boolean leaf for state not reachable by key path (component classes).
+    static func setBoolValue(current: Bool, value: String, ctx: PropertyContext,
+                             assign: (Bool) -> Void) -> String? {
+        let flag: Bool
+        if value.lowercased() == "toggle" {
+            flag = !current
+        } else if let parsed = parseBool(value) {
+            flag = parsed
+        } else {
+            return "[!] invalid boolean: \(value)"
+        }
+        assign(flag)
         ctx.invalidate()
         return nil
     }
