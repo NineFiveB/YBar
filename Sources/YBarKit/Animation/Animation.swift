@@ -183,15 +183,19 @@ public final class AnimationScheduler {
     }
 
     @objc private func step(_ link: CADisplayLink) {
-        let now = link.targetTimestamp
-        var finishedKeys: [String] = []
-        for (key, animation) in animations {
-            if !animation.tick(now: now) {
-                animation.onComplete?()
-                finishedKeys.append(key)
-            }
+        tick(now: link.targetTimestamp)
+    }
+
+    /// One frame at `now`. Finished keys are removed BEFORE their completions
+    /// run: a completion that animates the same key again would otherwise be
+    /// swept away together with the animation it replaced.
+    func tick(now: TimeInterval) {
+        var finished: [(key: String, onComplete: (() -> Void)?)] = []
+        for (key, animation) in animations where !animation.tick(now: now) {
+            finished.append((key, animation.onComplete))
         }
-        finishedKeys.forEach { animations.removeValue(forKey: $0) }
+        for entry in finished { animations.removeValue(forKey: entry.key) }
+        for entry in finished { entry.onComplete?() }
         onFrame?()
         stopLinkIfIdle()
     }
