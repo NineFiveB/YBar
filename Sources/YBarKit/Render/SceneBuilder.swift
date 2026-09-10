@@ -558,6 +558,7 @@ public final class SceneBuilder {
         let text = part.displayString
         guard !text.isEmpty else { return }
         let color = part.effectiveColor.simd
+        let shadow = SceneBuilder.textShadow(part.shadow, scale: scale)
         let partCenterY = centerY - CGFloat(part.yOffset)
         var marqueeCycle: CGFloat = 0
 
@@ -605,11 +606,9 @@ public final class SceneBuilder {
             else { return }
             let originX = (penX * scale).rounded()
             let originY = (partCenterY * scale - CGFloat(entry.sizePx.y) / 2).rounded()
-            if let instance = SceneBuilder.glyphInstance(
-                origin: SIMD2(Float(originX), Float(originY)),
-                entry: entry, color: color, clip: clip) {
-                list.glyphs.append(instance)
-            }
+            list.glyphs.append(contentsOf: SceneBuilder.layeredGlyphs(
+                [(entry, SIMD2(Float(originX), Float(originY)))],
+                color: color, shadow: shadow, clip: clip))
             return
         }
 
@@ -623,6 +622,9 @@ public final class SceneBuilder {
         let baselinePx = (baselineY * scale).rounded()
 
         guard let runs = CTLineGetGlyphRuns(shaped.line) as? [CTRun] else { return }
+        // Every glyph of the part is placed first and layered once, so a
+        // shadow never paints over the ink of an earlier run or marquee copy.
+        var placements: [(entry: GlyphAtlas.Entry, origin: SIMD2<Float>)] = []
         for run in runs {
             let count = CTRunGetGlyphCount(run)
             guard count > 0 else { continue }
@@ -649,15 +651,59 @@ public final class SceneBuilder {
                     let glyphPenX = ((penX + passOffset + positions[index].x
                                       - shaped.inkMinX + roundingSlack)
                                      * scale).rounded()
-                    if let instance = SceneBuilder.glyphInstance(
-                        origin: SIMD2(Float(glyphPenX) + entry.bearingPx.x,
-                                      Float(baselinePx) + entry.bearingPx.y),
-                        entry: entry, color: color, clip: clip) {
-                        list.glyphs.append(instance)
-                    }
+                    placements.append((entry, SIMD2(Float(glyphPenX) + entry.bearingPx.x,
+                                                    Float(baselinePx) + entry.bearingPx.y)))
                 }
             }
         }
+        list.glyphs.append(contentsOf: SceneBuilder.layeredGlyphs(
+            placements, color: color, shadow: shadow, clip: clip))
+    }
+
+    /// `icon.shadow` / `label.shadow` resolved to device pixels: the glyphs
+    /// are drawn once more underneath, displaced like the background shadow
+    /// (angle counter-clockwise from +x, y-down here) and rounded to whole
+    /// pixels so the copy samples the atlas as crisply as the ink.
+    struct TextShadow: Equatable {
+        var offsetPx: SIMD2<Float>
+        var color: SIMD4<Float>
+    }
+
+    static func textShadow(_ shadow: ShadowStyle, scale: CGFloat) -> TextShadow? {
+        guard shadow.drawing else { return nil }
+        let offset = shadow.offset
+        return TextShadow(
+            offsetPx: SIMD2(Float((offset.width * scale).rounded()),
+                            Float((-offset.height * scale).rounded())),
+            color: shadow.color.simd)
+    }
+
+    /// Glyph quads for one text part: the shadow copies first so the ink
+    /// paints over them, then the ink. Both layers share the clip.
+    static func layeredGlyphs(
+        _ placements: [(entry: GlyphAtlas.Entry, origin: SIMD2<Float>)],
+        color: SIMD4<Float>,
+        shadow: TextShadow?,
+        clip: CGRect?
+    ) -> [GlyphInstance] {
+        var instances: [GlyphInstance] = []
+        instances.reserveCapacity(placements.count * (shadow == nil ? 1 : 2))
+        if let shadow {
+            for placement in placements {
+                if let instance = glyphInstance(
+                    origin: placement.origin + shadow.offsetPx,
+                    entry: placement.entry, color: shadow.color, clip: clip) {
+                    instances.append(instance)
+                }
+            }
+        }
+        for placement in placements {
+            if let instance = glyphInstance(
+                origin: placement.origin, entry: placement.entry, color: color, clip: clip) {
+                instances.append(instance)
+            }
+        }
+        return instances
     }
 
     /// Build a glyph instance, intersecting the quad with an optional clip rect
