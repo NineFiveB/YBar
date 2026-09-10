@@ -35,8 +35,9 @@ public final class GlyphAtlas {
     }
 
     public let scale: CGFloat
-    public private(set) var maskTexture: MTLTexture
-    public private(set) var colorTexture: MTLTexture
+    /// nil on a textureless atlas (see `init(scale:)`).
+    public private(set) var maskTexture: MTLTexture?
+    public private(set) var colorTexture: MTLTexture?
 
     private var glyphEntries: [GlyphKey: Entry?] = [:]
     private var symbolEntries: [String: Entry?] = [:]
@@ -66,6 +67,15 @@ public final class GlyphAtlas {
         else { return nil }
         maskTexture = mask
         colorTexture = color
+        maskPacker = ShelfPacker(width: GlyphAtlas.maskPageSize, height: GlyphAtlas.maskPageSize)
+        colorPacker = ShelfPacker(width: GlyphAtlas.colorPageSize, height: GlyphAtlas.colorPageSize)
+    }
+
+    /// Textureless atlas: rasterizes, packs and hands out entries exactly like
+    /// the GPU-backed one but uploads nothing — so a whole scene can be built
+    /// and inspected without a Metal device (tests).
+    init(scale: CGFloat) {
+        self.scale = scale
         maskPacker = ShelfPacker(width: GlyphAtlas.maskPageSize, height: GlyphAtlas.maskPageSize)
         colorPacker = ShelfPacker(width: GlyphAtlas.colorPageSize, height: GlyphAtlas.colorPageSize)
     }
@@ -173,8 +183,8 @@ public final class GlyphAtlas {
             let region = MTLRegion(
                 origin: MTLOrigin(x: rect.x, y: rect.y, z: 0),
                 size: MTLSize(width: width, height: height, depth: 1))
-            colorTexture.replace(region: region, mipmapLevel: 0, withBytes: data,
-                                 bytesPerRow: context.bytesPerRow)
+            colorTexture?.replace(region: region, mipmapLevel: 0, withBytes: data,
+                                  bytesPerRow: context.bytesPerRow)
             let page = Float(GlyphAtlas.colorPageSize)
             return Entry(
                 uvOrigin: SIMD2(Float(rect.x) / page, Float(rect.y) / page),
@@ -190,8 +200,8 @@ public final class GlyphAtlas {
         let region = MTLRegion(
             origin: MTLOrigin(x: origin.x, y: origin.y, z: 0),
             size: MTLSize(width: width, height: height, depth: 1))
-        colorTexture.replace(region: region, mipmapLevel: 0, withBytes: data,
-                             bytesPerRow: context.bytesPerRow)
+        colorTexture?.replace(region: region, mipmapLevel: 0, withBytes: data,
+                              bytesPerRow: context.bytesPerRow)
         let page = Float(GlyphAtlas.colorPageSize)
         return Entry(
             uvOrigin: SIMD2(Float(origin.x) / page, Float(origin.y) / page),
@@ -254,8 +264,8 @@ public final class GlyphAtlas {
         let region = MTLRegion(
             origin: MTLOrigin(x: origin.x, y: origin.y, z: 0),
             size: MTLSize(width: width, height: height, depth: 1))
-        texture.replace(region: region, mipmapLevel: 0, withBytes: data,
-                        bytesPerRow: context.bytesPerRow)
+        texture?.replace(region: region, mipmapLevel: 0, withBytes: data,
+                         bytesPerRow: context.bytesPerRow)
 
         let pageSize = Float(isColor ? GlyphAtlas.colorPageSize : GlyphAtlas.maskPageSize)
         return Entry(
