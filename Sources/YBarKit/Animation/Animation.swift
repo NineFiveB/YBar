@@ -157,6 +157,13 @@ public final class AnimationScheduler {
         stopLinkIfIdle()
     }
 
+    /// Cancel every animation under a key namespace — `item.<id>.` when an
+    /// item is removed, so its closures stop steering freed component state.
+    func cancel(prefix: String) {
+        animations = animations.filter { !$0.key.hasPrefix(prefix) }
+        stopLinkIfIdle()
+    }
+
     public func cancelAll() {
         animations.removeAll()
         stopLinkIfIdle()

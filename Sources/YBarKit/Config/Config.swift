@@ -2,27 +2,35 @@ import Foundation
 
 /// Config discovery, sketchybar-compatible search order with a Lua twist:
 /// `-c <path>` → per directory, `<name>rc.lua` (embedded YbarLua) is preferred
-/// over the executable `<name>rc` shell script:
+/// over the executable `<name>rc` shell script, then the declarative
+/// `<name>rc.jsonc` / `<name>.jsonc`:
 /// `$XDG_CONFIG_HOME/<name>/` → `~/.config/<name>/` → `~/.{<name>rc.lua,<name>rc}`.
 public enum ConfigLocator {
-    public static func locate(explicitPath: String?, instanceName: String) -> URL? {
+    public static func locate(
+        explicitPath: String?, instanceName: String,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL? {
         let fileManager = FileManager.default
         if let explicitPath {
             let url = URL(fileURLWithPath: (explicitPath as NSString).expandingTildeInPath)
             return fileManager.fileExists(atPath: url.path) ? url : nil
         }
         var candidates: [URL] = []
-        let environment = ProcessInfo.processInfo.environment
 
         func addDirectory(_ directory: URL) {
             candidates.append(directory.appendingPathComponent("\(instanceName)rc.lua"))
             candidates.append(directory.appendingPathComponent("\(instanceName)rc"))
+            // JSONC configs are first-class (THEMES.md, ybar-theme) and the
+            // daemon dispatches them by extension; the Windows port lists the
+            // same two names in the same order.
+            candidates.append(directory.appendingPathComponent("\(instanceName)rc.jsonc"))
+            candidates.append(directory.appendingPathComponent("\(instanceName).jsonc"))
         }
 
         if let xdg = environment["XDG_CONFIG_HOME"], !xdg.isEmpty {
             addDirectory(URL(fileURLWithPath: xdg).appendingPathComponent(instanceName))
         }
-        let home = fileManager.homeDirectoryForCurrentUser
         addDirectory(home.appendingPathComponent(".config/\(instanceName)"))
         candidates.append(home.appendingPathComponent(".\(instanceName)rc.lua"))
         candidates.append(home.appendingPathComponent(".\(instanceName)rc"))
