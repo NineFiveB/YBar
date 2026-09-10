@@ -16,6 +16,8 @@ public final class NetworkProvider {
     private var lastInfo: String?
     /// Retained: authorization callbacks die with a released manager.
     private var locationManager: CLLocationManager?
+    /// Retained: CLLocationManager holds its delegate weakly.
+    private var authorizationRelay: LocationAuthorizationRelay?
 
     public init() {}
 
@@ -23,11 +25,30 @@ public final class NetworkProvider {
     /// dialog's nested run loop starves the daemon's socket while pending,
     /// so it must never fire unattended at boot.
     public func requestLocationAuthorization() {
-        if locationManager == nil { locationManager = CLLocationManager() }
+        if locationManager == nil {
+            let manager = CLLocationManager()
+            let relay = LocationAuthorizationRelay(provider: self)
+            manager.delegate = relay
+            authorizationRelay = relay
+            locationManager = manager
+        }
         guard let locationManager else { return }
         if locationManager.authorizationStatus == .notDetermined {
             locationManager.requestWhenInUseAuthorization()
         }
+    }
+
+    /// Pure: whether an authorization callback is the grant landing. The
+    /// first callback after the delegate is set merely reports the status
+    /// the process already had (`previous == nil`), and the SSID for that
+    /// state is already published; only a transition INTO authorized makes
+    /// a readable SSID appear where "connected" was.
+    nonisolated static func authorizationUnlocksSSID(
+        previous: CLAuthorizationStatus?, current: CLAuthorizationStatus
+    ) -> Bool {
+        // macOS reports a when-in-use grant as authorizedAlways.
+        guard let previous, current == .authorizedAlways else { return false }
+        return previous != .authorizedAlways
     }
 
     public func start() {
@@ -80,6 +101,31 @@ public final class NetworkProvider {
     /// Requires Location authorization on macOS 14+; returns nil without it.
     public static func currentSSID() -> String? {
         CWWiFiClient.shared().interface()?.ssid()
+    }
+}
+
+/// Re-publishes the SSID once the user answers the Location prompt. The grant
+/// changes nothing NWPathMonitor watches and the dedupe holds "connected", so
+/// without this the network name only appeared on the next path change or a
+/// manual `ybar --trigger wifi_change`.
+private final class LocationAuthorizationRelay: NSObject, CLLocationManagerDelegate {
+    private weak var provider: NetworkProvider?
+    private var lastStatus: CLAuthorizationStatus?
+
+    init(provider: NetworkProvider) {
+        self.provider = provider
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        let status = manager.authorizationStatus
+        let unlocks = NetworkProvider.authorizationUnlocksSSID(previous: lastStatus, current: status)
+        lastStatus = status
+        guard unlocks else { return }
+        // Delivered on the run loop of the thread that created the manager — main.
+        let provider = self.provider
+        MainActor.assumeIsolated {
+            provider?.refresh()
+        }
     }
 }
 
