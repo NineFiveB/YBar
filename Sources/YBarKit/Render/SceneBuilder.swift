@@ -447,8 +447,10 @@ public final class SceneBuilder {
             let knobCenterX = track.minX + track.width * fraction
             let knobX = min(max(knobCenterX - knobSize.width / 2, track.minX),
                             track.maxX - knobSize.width)
+            // The knob is one glyph, so it centres its ink like an icon does;
+            // knob.y_offset remains the override on top.
             emitText(part: slider.knob, penX: knobX, centerY: centerY,
-                     scale: scale, atlas: atlas, clip: clip, into: &list)
+                     scale: scale, atlas: atlas, clip: clip, centerInk: true, into: &list)
         }
     }
 
