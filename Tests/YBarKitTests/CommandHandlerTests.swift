@@ -135,4 +135,36 @@ import Testing
         #expect(stack.handler.handle(arguments: ["--volume", "10"])
             == "[!] the output device refused the volume change")
     }
+
+    // MARK: - --query apps / --app
+
+    /// `apps` is a reserved query target like bar/defaults/events/displays:
+    /// it shadows an item of that name, sketchybar-style, instead of being
+    /// matched after item lookup. One rule, pinned here.
+    @Test func queryAppsIsReservedAndShadowsAnItemOfThatName() throws {
+        let stack = try makeStack()
+        #expect(stack.handler.handle(arguments: ["--add", "item", "apps", "left"]).isEmpty)
+        let text = stack.handler.handle(arguments: ["--query", "apps"])
+        let rows = try #require(
+            try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]])
+        for row in rows {
+            #expect(Set(row.keys) == ["name", "bundle_id", "pid", "active", "hidden"])
+        }
+        // The item itself is untouched and still reachable by every other domain.
+        #expect(stack.barManager.store.item(named: "apps") != nil)
+        #expect(stack.handler.handle(arguments: ["--set", "apps", "label=x"]).isEmpty)
+    }
+
+    /// The action is validated before the target is resolved and an unknown
+    /// target is reported, so nothing here can reach a real application.
+    @Test func appValidatesActionThenTargetWithoutSideEffects() throws {
+        let stack = try makeStack()
+        #expect(stack.handler.handle(arguments: ["--app"]).hasPrefix("[!] usage: --app"))
+        #expect(stack.handler.handle(arguments: ["--app", "com.example.nothing"]).hasPrefix("[!] usage: --app"))
+        #expect(stack.handler.handle(arguments: ["--app", "com.example.nothing", "dance"])
+            == "[!] unknown --app action: dance (activate|hide|quit|kill)")
+        #expect(stack.handler.handle(arguments: ["--app", "com.example.nothing", "activate"])
+            == "[!] no running app matching com.example.nothing")
+        #expect(CommandHandler.AppControl.resolve("com.example.nothing").isEmpty)
+    }
 }

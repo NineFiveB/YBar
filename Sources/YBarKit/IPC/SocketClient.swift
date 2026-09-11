@@ -178,6 +178,8 @@ public enum CLIClient {
       ybar --animate tanh 30 --set clock label.color=0xffff0000
       ybar --query bar
       ybar --volume 40                (or +4 / -4 to step the output volume)
+      ybar --query apps               running apps: name, bundle_id, pid, active, hidden
+      ybar --app com.apple.Safari activate      (or hide | quit | kill; a pid works too)
 
     See docs/ARCHITECTURE.md for the full command grammar.
     """
