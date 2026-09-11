@@ -596,6 +596,8 @@ public enum PropertySetter {
             return setFloat(item, base.appending(path: \ShadowStyle.distance), "\(prefix).distance", value, ctx)
         case "angle":
             return setFloat(item, base.appending(path: \ShadowStyle.angle), "\(prefix).angle", value, ctx)
+        case "blur":
+            return setFloat(item, base.appending(path: \ShadowStyle.blur), "\(prefix).blur", value, ctx)
         default:
             return "[?] unknown property: \(prefix).\(path.joined(separator: "."))"
         }

@@ -413,6 +413,81 @@ struct HeadlessScene {
     }
 }
 
+/// `background.shadow.blur` (review finding A5): above 0 the shadow quad is
+/// grown by the blur on every side, the true half size rides in fill2.xy,
+/// the blur in gradientDir.x and flag bit 4 selects the shader's squared
+/// smoothstep falloff — the Windows port's instance ABI, bit for bit. Zero
+/// keeps sketchybar's hard offset copy.
+@MainActor
+@Suite struct SoftShadowTests {
+    private func shadowed(_ item: Item, blur: Float, distance: Float) {
+        item.label.string = "Hi"
+        item.background.drawing = true
+        item.background.color = YColor(argb: 0xFF22_2222)
+        item.background.shadow.drawing = true
+        item.background.shadow.color = YColor(argb: 0x8000_0000)
+        item.background.shadow.distance = distance
+        item.background.shadow.angle = 0
+        item.background.shadow.blur = blur
+    }
+
+    @Test func blurGrowsTheQuadAndStashesTheTrueHalfSize() throws {
+        let scene = HeadlessScene(scale: 2)
+        let item = Item(name: "t", position: .left)
+        shadowed(item, blur: 3, distance: 0)
+        let (list, _) = scene.build([item])
+        // Bar background, shadow, then the plate.
+        #expect(list.quads.count == 3)
+        let shadow = try #require(list.quads.dropFirst().first)
+        let plate = try #require(list.quads.last)
+        #expect(shadow.flags & QuadInstance.flagShadow != 0)
+        #expect(shadow.fill == YColor(argb: 0x8000_0000).simd)
+        // 3pt at 2x = 6px of growth per side; fill2 holds the ungrown half size.
+        #expect(shadow.fill2 == SIMD4(plate.size.x / 2, plate.size.y / 2, 0, 0))
+        #expect(shadow.origin == plate.origin - SIMD2(6, 6))
+        #expect(shadow.size == plate.size + SIMD2(12, 12))
+        #expect(shadow.gradientDir == SIMD2(6, 0))
+        #expect(shadow.radii == plate.radii)
+    }
+
+    @Test func zeroBlurKeepsTheHardOffsetCopy() throws {
+        let scene = HeadlessScene(scale: 2)
+        let item = Item(name: "t", position: .left)
+        shadowed(item, blur: 0, distance: 4)
+        let (list, _) = scene.build([item])
+        let shadow = try #require(list.quads.dropFirst().first)
+        let plate = try #require(list.quads.last)
+        #expect(shadow.flags & QuadInstance.flagShadow == 0)
+        #expect(shadow.origin == plate.origin + SIMD2(8, 0))
+        #expect(shadow.size == plate.size)
+        #expect(shadow.fill2 == .zero)
+    }
+
+    @Test func bracketsGetTheSoftShadowToo() throws {
+        let scene = HeadlessScene(scale: 2)
+        let member = Item(name: "a", position: .left)
+        member.label.string = "Hi"
+        let bracket = Item(name: "b", position: .left)
+        bracket.kind = .bracket
+        bracket.members = ["a"]
+        shadowed(bracket, blur: 2, distance: 0)
+        bracket.label.string = ""
+        let (list, _) = scene.build([member, bracket])
+        // Bar background, bracket shadow, bracket plate; the member has none.
+        #expect(list.quads.count == 3)
+        let shadow = try #require(list.quads.dropFirst().first)
+        let plate = try #require(list.quads.last)
+        #expect(shadow.flags & QuadInstance.flagShadow != 0)
+        #expect(shadow.size == plate.size + SIMD2(8, 8))
+    }
+
+    @Test func queryReportsTheBlur() {
+        var shadow = ShadowStyle()
+        shadow.blur = 2.5
+        #expect(Serialize.shadowDictionary(shadow)["blur"] as? Float == 2.5)
+    }
+}
+
 /// icon.background.* / label.background.* were parsed, published by --query
 /// and never drawn (review finding A4). Each drawing part now emits one
 /// plate around its ink — natural measure plus the plate's own paddings,

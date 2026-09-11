@@ -48,6 +48,7 @@ constant uint kQuadFlagGradient   = 1u << 0;
 constant uint kQuadFlagGlass      = 1u << 1;
 constant uint kQuadFlagArc        = 1u << 2;
 constant uint kQuadFlagHoles      = 1u << 3;
+constant uint kQuadFlagShadow     = 1u << 4;
 constant uint kGlyphFlagColor     = 1u << 0;
 
 // Vertex-pulled unit quad: vid 0..3 as a triangle strip.
@@ -130,6 +131,21 @@ fragment float4 quad_fragment(
                                       float4(hole.radius));
             holeMask = min(holeMask, smoothstep(-aa, aa, hd));
         }
+    }
+
+    // Soft falloff (drop shadow, or a glow when fill is light). The quad was
+    // grown by the blur radius on the CPU side, so the SDF here must use the
+    // TRUE shape half size from fill2.xy rather than the grown in.halfSize.
+    // `aa` is reused deliberately: it is computed before any branch, and the
+    // screen-space derivative of the two distances differs only by a constant
+    // shape offset, so taking fwidth() inside this branch would risk divergent
+    // derivatives for no accuracy gained.
+    if (in.flags & kQuadFlagShadow) {
+        float sd = sd_rounded_box(in.local, in.fill2.xy, in.radii);
+        float blur = max(in.gradientDir.x, aa);
+        float cov = clamp(1.0 - smoothstep(-blur, blur, sd), 0.0, 1.0);
+        cov *= cov; // a squared ramp sits much closer to a gaussian than linear
+        return float4(in.fill.rgb * in.fill.a * cov, in.fill.a * cov) * holeMask;
     }
 
     if (in.flags & kQuadFlagArc) {

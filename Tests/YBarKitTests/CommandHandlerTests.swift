@@ -102,6 +102,27 @@ import Testing
         #expect(reply.hasPrefix("[!] invalid boolean"))
     }
 
+    /// `background.shadow.blur` is an animatable float leaf, published by
+    /// --query next to distance and angle.
+    @Test func shadowBlurIsSetAnimatedAndQueried() throws {
+        let stack = try makeStack()
+        var reply = stack.handler.handle(arguments: [
+            "--add", "item", "x", "left",
+            "--set", "x", "background.shadow.drawing=on", "background.shadow.blur=4",
+        ])
+        #expect(reply.isEmpty)
+        let geometry = try #require(try query(stack, "x")["geometry"] as? [String: Any])
+        let background = try #require(geometry["background"] as? [String: Any])
+        let shadow = try #require(background["shadow"] as? [String: Any])
+        #expect((shadow["blur"] as? NSNumber)?.floatValue == 4)
+
+        reply = stack.handler.handle(arguments: [
+            "--animate", "sin", "30", "--set", "x", "background.shadow.blur=12",
+        ])
+        #expect(reply.isEmpty)
+        #expect(stack.scheduler.isAnimating)
+    }
+
     @Test func removeCancelsTheItemsAnimations() throws {
         let stack = try makeStack()
         let reply = stack.handler.handle(arguments: [
