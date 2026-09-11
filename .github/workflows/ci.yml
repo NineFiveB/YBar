@@ -1,0 +1,103 @@
+name: CI
+
+# Every push and pull request to main builds, tests, and assembles the app
+# bundle on two macOS generations: macos-26 (what macos-latest resolves to)
+# compiles the real glass path behind `#if compiler(>=6.2)`, macos-15 the
+# blur fallback. The spec-copy diff against the windows branch runs as its
+# own advisory job: the windows branch edits docs/WINDOWS-PORT.md before
+# every routine `spec: sync` commit, and that must never turn main red.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # bash here means -eo pipefail: `make build | tee` still fails the step.
+    shell: bash
+
+jobs:
+  build-test:
+    name: build + test (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, macos-15]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+
+      # No actions/cache: Package.swift declares no external dependencies
+      # (Lua is vendored) and a key hashed over Sources/ would miss on every
+      # code change anyway. A clean build is minutes at most.
+      - name: Build
+        run: make build 2>&1 | tee build.log
+
+      # docs/BUILDING.md: a Command Line Tools-only toolchain needs two
+      # symlinks so the test bundle finds Swift Testing's runtime. The runner
+      # images ship Xcode, where none of this applies, so the step is a
+      # guarded no-op there; it exists so the workflow also documents the
+      # CLT path a contributor's machine takes.
+      - name: Swift Testing symlinks (Command Line Tools only)
+        run: |
+          clt=/Library/Developer/CommandLineTools
+          if [[ "$(xcode-select -p)" == "$clt" && -d "$clt/Library/Developer/Frameworks/Testing.framework" ]]; then
+            products=$HOME/.cache/ybar-build/debug
+            mkdir -p "$products/YBarKitTests.xctest/Contents/Frameworks"
+            ln -sfn "$clt/Library/Developer/Frameworks/Testing.framework" \
+                    "$products/YBarKitTests.xctest/Contents/Frameworks/Testing.framework"
+            ln -sfn "$clt/Library/Developer/usr/lib/lib_TestingInterop.dylib" \
+                    "$products/lib_TestingInterop.dylib"
+            echo "linked Testing.framework into $products"
+          else
+            echo "full Xcode toolchain: no symlinks needed"
+          fi
+
+      - name: Test
+        run: make test 2>&1 | tee test.log
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ matrix.runner }}
+          path: |
+            build.log
+            test.log
+          if-no-files-found: ignore
+
+      # Bundle assembly plus the ad-hoc codesign every install path takes.
+      - name: Assemble the app bundle
+        run: make app
+
+      # Advisory: `brew audit` on a bare formula path is not reliable across
+      # Homebrew versions, but when it works it catches the style and
+      # licence slips that would fail the tap.
+      - name: Formula audit (advisory)
+        run: brew audit --formula packaging/homebrew/ybar.rb || true
+
+  # docs/WINDOWS-PORT.md is kept byte-identical on both branches by hand
+  # (`spec: sync` commits). This job reports drift without gating: the
+  # windows branch edits its copy first, so a red result here is routine
+  # until the next sync lands on main.
+  spec-sync:
+    name: spec copy matches the windows branch (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Diff docs/WINDOWS-PORT.md against origin/windows
+        run: |
+          git fetch --no-tags --depth=1 origin windows
+          git diff --stat --exit-code HEAD origin/windows -- docs/WINDOWS-PORT.md
