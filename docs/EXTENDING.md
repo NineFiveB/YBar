@@ -47,7 +47,8 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
   (`gauge.*`)
 - **Images** — `image.string` renders real app icons (`app.<Name>`), SF symbols
   by name (`sf.<symbol>`, immune to PUA codepoint drift), or image files, through
-  the atlas color page
+  the atlas color page; `image.desaturate=on` greys one out in the shader and
+  `image.y_offset` (animatable) nudges it vertically
 - **Popup flow layout** — `popup.wrap_width` wraps members into grids (calendar
   month grids, tile dashboards); blank rows collapse into slim separators
 
