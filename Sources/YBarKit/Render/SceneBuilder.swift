@@ -482,7 +482,8 @@ public final class SceneBuilder {
         }
     }
 
-    /// Shared rounded-rect background + hard shadow emission.
+    /// Shared rounded-rect background + shadow emission (items, brackets,
+    /// slider tracks, popup panels, tooltips all come through here).
     private func emitBackground(
         _ background: BackgroundStyle,
         rect: CGRect,
@@ -497,11 +498,29 @@ public final class SceneBuilder {
         if background.shadow.drawing {
             let offset = background.shadow.offset
             let shadowRect = rect.offsetBy(dx: offset.width, dy: -offset.height)
-            list.quads.append(QuadInstance(
+            var shadow = QuadInstance(
                 origin: SceneBuilder.pixelOrigin(shadowRect, scale: scale),
                 size: SceneBuilder.pixelSize(shadowRect, scale: scale),
                 radii: radii,
-                fill: background.shadow.color.simd))
+                fill: background.shadow.color.simd)
+            // shadow.blur > 0 turns the hard offset copy into a falloff. The
+            // blur has to live OUTSIDE the shape, but a quad's rect IS its
+            // shape's bounding box, so a falloff drawn within it would be
+            // clipped at exactly the edge it exists to soften. Grow the drawn
+            // rect by the blur on every side and carry the true half size
+            // across in fill2.xy — free on a shadow quad, whose gradient
+            // fields are otherwise unused. Instance ABI identical to the
+            // Windows port's pushShadow: the 112-byte layout is untouched.
+            let blurPx = Float(CGFloat(background.shadow.blur) * scale)
+            if blurPx > 0 {
+                // Order matters: fill2 records the half size BEFORE the grow.
+                shadow.fill2 = SIMD4(shadow.size.x * 0.5, shadow.size.y * 0.5, 0, 0)
+                shadow.origin -= SIMD2(repeating: blurPx)
+                shadow.size += SIMD2(repeating: blurPx * 2)
+                shadow.gradientDir = SIMD2(blurPx, 0)
+                shadow.flags |= QuadInstance.flagShadow
+            }
+            list.quads.append(shadow)
         }
 
         list.quads.append(SceneBuilder.backgroundQuad(background, rect: rect, scale: scale))

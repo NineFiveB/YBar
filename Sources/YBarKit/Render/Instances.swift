@@ -31,6 +31,13 @@ public struct QuadInstance {
     public static let flagArc: UInt32 = 1 << 2
     /// Bar background only: punch the DisplayList's hole rects out of this quad.
     public static let flagHoles: UInt32 = 1 << 3
+    /// Soft falloff quad (drop shadow, or a glow when the colour is light).
+    /// The quad is drawn EXPANDED by the blur radius so the falloff has
+    /// somewhere to live; the true shape's halfSize rides in fill2.xy and the
+    /// blur radius in gradientDir.x, both of which a shadow quad otherwise
+    /// leaves unused. Nothing about the 112-byte layout changes — the same
+    /// bit and fields as the Windows port's kQuadFlagShadow.
+    public static let flagShadow: UInt32 = 1 << 4
 
     public init(
         origin: SIMD2<Float>, size: SIMD2<Float>, radii: SIMD4<Float>,
