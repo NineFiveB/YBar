@@ -49,6 +49,8 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
   the atlas color page
 - **Popup flow layout** — `popup.wrap_width` wraps members into grids (calendar
   month grids, tile dashboards); blank rows collapse into slim separators
+- **Popup fades** — `popup.fade_in` / `popup.fade_out` (frames at 60 Hz, 0 = hard
+  cut) ramp the panel's opacity on open and close, same keys as the Windows port
 
 ## Scripting & events
 
