@@ -23,6 +23,9 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
 - SDF rounded rects (per-corner radii, borders, gradients, shadows), glyph atlas
   with font fallback, color emoji, tinted SF Symbols (`icon=sf:wifi`), ink-precise
   text metrics matching sketchybar's pixel behavior
+- `background.shadow.blur` (points, animatable) softens a plate's shadow into a
+  falloff; a light shadow colour at distance 0 with a blur is a glow (brackets
+  and slider tracks included)
 - Five-cursor item layout (`left right center q e`, notch-aware), fixed widths
   with align slack and clipping, `--default` prototypes
 - Per-setup notch handling: the `q`/`e` dead zone exists only on physically
@@ -33,7 +36,9 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
 ## Components
 
 - Brackets, anchored popups (auto-close, alignment), graphs, draggable sliders —
-  interactive on the bar and inside popups (click + drag deliver `PERCENTAGE`)
+  interactive on the bar and inside popups (click + drag deliver `PERCENTAGE`);
+  `slider.interactive=off` makes a slider a read-only fill meter (a press is an
+  ordinary click; sets still apply)
 - **Alias items** — live ScreenCaptureKit captures of other apps' menu bar items
   (`--add alias "App[,Window]"`)
 - **Marquee text** (`scroll_texts`), **hover tooltips**, `background.image` +
@@ -42,7 +47,8 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
   (`gauge.*`)
 - **Images** — `image.string` renders real app icons (`app.<Name>`), SF symbols
   by name (`sf.<symbol>`, immune to PUA codepoint drift), or image files, through
-  the atlas color page
+  the atlas color page; `image.desaturate=on` greys one out in the shader and
+  `image.y_offset` (animatable) nudges it vertically
 - **Popup flow layout** — `popup.wrap_width` wraps members into grids (calendar
   month grids, tile dashboards); blank rows collapse into slim separators
 

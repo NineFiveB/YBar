@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import simd
 import Testing
@@ -312,5 +313,371 @@ struct HeadlessScene {
         }
         let knobCenterY = knob.origin.y + knob.size.y / 2
         #expect(abs(knobCenterY - Float(box.midY * scene.scale)) <= 2)
+    }
+}
+
+/// The drag hit-mapping and the renderer once computed a slider's track
+/// origin separately and disagreed (review finding A8): the hit side clamped
+/// the alignment slack, skipped the paddings of an empty icon and knew
+/// nothing of a leading image. SceneBuilder.sliderTrackX now serves both;
+/// these pin the painted track to it and a press at its midpoint to 50%.
+@MainActor
+@Suite(.serialized) struct SliderTrackTests {
+    private let trackWidth: Float = 80
+
+    private func headlessManager() throws -> BarManager {
+        let manager = try BarManager()
+        manager.settings.displayPolicy = .list([])
+        return manager
+    }
+
+    private func press(x: CGFloat) -> MouseEventInfo {
+        MouseEventInfo(kind: .down, point: CGPoint(x: x, y: 10), button: "left",
+                       modifier: "none", scrollDelta: 0)
+    }
+
+    /// The slider lives in the manager's store (the press path resolves it
+    /// there) and is laid out by the headless scene, which writes the frame
+    /// the surfaces snapshot. Returns the helper's track x, the painted
+    /// track's device x (the one quad exactly trackWidth wide) and the
+    /// content box.
+    private func addSlider(to manager: BarManager, scene: HeadlessScene,
+                           configure: (Item) -> Void)
+        throws -> (item: Item, trackX: CGFloat, paintedX: Float?, box: CGRect) {
+        let item = try #require(manager.store.add(name: "seek", position: .left))
+        item.kind = .slider
+        item.slider = SliderState(width: trackWidth)
+        configure(item)
+        let (list, boxes) = scene.build([item])
+        let box = try #require(boxes[item.id])
+        let trackX = SceneBuilder.sliderTrackX(item: item, contentBox: box, measured: scene.measure(item))
+        let painted = list.quads.first { $0.size.x == trackWidth * Float(scene.scale) }?.origin.x
+        return (item, trackX, painted, box)
+    }
+
+    @Test func centredOverflowUsesTheUnclampedSlack() throws {
+        let scene = HeadlessScene()
+        let manager = try headlessManager()
+        let (item, trackX, painted, box) = try addSlider(to: manager, scene: scene) { item in
+            item.icon.paddingLeft = 8
+            item.icon.paddingRight = 8
+            item.customWidth = 60      // natural is 16 + 80 = 96: overflow
+            item.align = "c"
+        }
+        // -36 of slack split evenly, then the empty icon's 16pt of paddings.
+        #expect(trackX == box.minX - 2)
+        #expect(painted == Float((trackX * scene.scale).rounded()))
+
+        let popup = PopupSurface(hostItemID: -1, device: manager.device)
+        popup.itemFrames = [(item.id, item.frame)]
+        manager.handlePopupMouse(press(x: trackX + CGFloat(trackWidth) / 2), on: popup)
+        #expect(abs((item.slider?.percentage ?? 0) - 50) < 0.01)
+    }
+
+    @Test func emptyIconPaddingsAdvanceTheTrack() throws {
+        let scene = HeadlessScene()
+        let manager = try headlessManager()
+        let (item, trackX, painted, box) = try addSlider(to: manager, scene: scene) { item in
+            item.icon.paddingLeft = 8
+            item.icon.paddingRight = 8
+        }
+        #expect(trackX == box.minX + 16)
+        #expect(painted == Float((trackX * scene.scale).rounded()))
+
+        // The bar surface takes the same path as the popup one.
+        let screen = try #require(NSScreen.screens.first)
+        let surface = BarSurface(screen: screen, arrangementIndex: 1)
+        surface.itemFrames = [(item.id, item.frame)]
+        manager.handleMouse(press(x: trackX + CGFloat(trackWidth) / 2), on: surface)
+        #expect(abs((item.slider?.percentage ?? 0) - 50) < 0.01)
+    }
+
+    @Test func leadingImageAdvancesTheTrack() throws {
+        let scene = HeadlessScene()
+        let manager = try headlessManager()
+        let (item, trackX, painted, box) = try addSlider(to: manager, scene: scene) { item in
+            let image = ImageState()
+            image.source = "sf.circle"
+            image.size = 18
+            image.paddingLeft = 2
+            image.paddingRight = 2
+            item.image = image
+        }
+        #expect(trackX == box.minX + 22)
+        #expect(painted == Float((trackX * scene.scale).rounded()))
+
+        let popup = PopupSurface(hostItemID: -1, device: manager.device)
+        popup.itemFrames = [(item.id, item.frame)]
+        manager.handlePopupMouse(press(x: trackX + CGFloat(trackWidth) / 2), on: popup)
+        #expect(abs((item.slider?.percentage ?? 0) - 50) < 0.01)
+    }
+}
+
+/// `image.desaturate` and `image.y_offset` (review finding A11): the grey
+/// path is a glyph flag the shader honours on the colour page (no atlas-key
+/// dimension), and the offset moves the image up like every other y_offset.
+@MainActor
+@Suite struct ImageStyleTests {
+    private func imageItem(name: String, yOffset: Float, desaturate: Bool) -> Item {
+        let item = Item(name: name, position: .left)
+        let image = ImageState()
+        image.source = "sf.circle"
+        image.size = 18
+        image.yOffset = yOffset
+        image.desaturate = desaturate
+        item.image = image
+        return item
+    }
+
+    @Test func desaturateSetsTheGreyFlagAndYOffsetLiftsTheImage() throws {
+        let scene = HeadlessScene(scale: 2)
+        let plain = imageItem(name: "a", yOffset: 0, desaturate: false)
+        let styled = imageItem(name: "b", yOffset: 3, desaturate: true)
+        let (list, _) = scene.build([plain, styled])
+        #expect(list.glyphs.count == 2)
+        let first = try #require(list.glyphs.first)
+        let second = try #require(list.glyphs.last)
+        #expect(first.flags == GlyphInstance.flagColorGlyph)
+        #expect(second.flags == GlyphInstance.flagColorGlyph | GlyphInstance.flagDesaturate)
+        // 3pt up at 2x: 6px less y (y-down).
+        #expect(second.origin.y == first.origin.y - 6)
+        #expect(second.size == first.size)
+    }
+
+    @Test func queryReportsBoth() {
+        let item = Item(name: "t", position: .left)
+        let image = ImageState()
+        image.source = "sf.circle"
+        image.yOffset = 2
+        image.desaturate = true
+        item.image = image
+        let dictionary = Serialize.itemDictionary(item)["image"] as? [String: Any]
+        #expect(dictionary?["y_offset"] as? Float == 2)
+        #expect(dictionary?["desaturate"] as? String == "on")
+    }
+}
+
+/// `background.shadow.blur` (review finding A5): above 0 the shadow quad is
+/// grown by the blur on every side, the true half size rides in fill2.xy,
+/// the blur in gradientDir.x and flag bit 4 selects the shader's squared
+/// smoothstep falloff — the Windows port's instance ABI, bit for bit. Zero
+/// keeps sketchybar's hard offset copy.
+@MainActor
+@Suite struct SoftShadowTests {
+    private func shadowed(_ item: Item, blur: Float, distance: Float) {
+        item.label.string = "Hi"
+        item.background.drawing = true
+        item.background.color = YColor(argb: 0xFF22_2222)
+        item.background.shadow.drawing = true
+        item.background.shadow.color = YColor(argb: 0x8000_0000)
+        item.background.shadow.distance = distance
+        item.background.shadow.angle = 0
+        item.background.shadow.blur = blur
+    }
+
+    @Test func blurGrowsTheQuadAndStashesTheTrueHalfSize() throws {
+        let scene = HeadlessScene(scale: 2)
+        let item = Item(name: "t", position: .left)
+        shadowed(item, blur: 3, distance: 0)
+        let (list, _) = scene.build([item])
+        // Bar background, shadow, then the plate.
+        #expect(list.quads.count == 3)
+        let shadow = try #require(list.quads.dropFirst().first)
+        let plate = try #require(list.quads.last)
+        #expect(shadow.flags & QuadInstance.flagShadow != 0)
+        #expect(shadow.fill == YColor(argb: 0x8000_0000).simd)
+        // 3pt at 2x = 6px of growth per side; fill2 holds the ungrown half size.
+        #expect(shadow.fill2 == SIMD4(plate.size.x / 2, plate.size.y / 2, 0, 0))
+        #expect(shadow.origin == plate.origin - SIMD2(6, 6))
+        #expect(shadow.size == plate.size + SIMD2(12, 12))
+        #expect(shadow.gradientDir == SIMD2(6, 0))
+        #expect(shadow.radii == plate.radii)
+    }
+
+    @Test func zeroBlurKeepsTheHardOffsetCopy() throws {
+        let scene = HeadlessScene(scale: 2)
+        let item = Item(name: "t", position: .left)
+        shadowed(item, blur: 0, distance: 4)
+        let (list, _) = scene.build([item])
+        let shadow = try #require(list.quads.dropFirst().first)
+        let plate = try #require(list.quads.last)
+        #expect(shadow.flags & QuadInstance.flagShadow == 0)
+        #expect(shadow.origin == plate.origin + SIMD2(8, 0))
+        #expect(shadow.size == plate.size)
+        #expect(shadow.fill2 == .zero)
+    }
+
+    @Test func bracketsGetTheSoftShadowToo() throws {
+        let scene = HeadlessScene(scale: 2)
+        let member = Item(name: "a", position: .left)
+        member.label.string = "Hi"
+        let bracket = Item(name: "b", position: .left)
+        bracket.kind = .bracket
+        bracket.members = ["a"]
+        shadowed(bracket, blur: 2, distance: 0)
+        bracket.label.string = ""
+        let (list, _) = scene.build([member, bracket])
+        // Bar background, bracket shadow, bracket plate; the member has none.
+        #expect(list.quads.count == 3)
+        let shadow = try #require(list.quads.dropFirst().first)
+        let plate = try #require(list.quads.last)
+        #expect(shadow.flags & QuadInstance.flagShadow != 0)
+        #expect(shadow.size == plate.size + SIMD2(8, 8))
+    }
+
+    @Test func queryReportsTheBlur() {
+        var shadow = ShadowStyle()
+        shadow.blur = 2.5
+        #expect(Serialize.shadowDictionary(shadow)["blur"] as? Float == 2.5)
+    }
+}
+
+/// icon.background.* / label.background.* were parsed, published by --query
+/// and never drawn (review finding A4). Each drawing part now emits one
+/// plate around its ink — natural measure plus the plate's own paddings,
+/// centred on the item's centre line — without widening the layout.
+@MainActor
+@Suite struct PartBackgroundTests {
+    private func plated(_ part: inout TextPart) {
+        part.background.drawing = true
+        part.background.color = YColor(argb: 0xFF11_2233)
+        part.background.paddingLeft = 3
+        part.background.paddingRight = 5
+    }
+
+    @Test func labelPlateIsOneQuadAroundTheInk() throws {
+        let scene = HeadlessScene(scale: 1)
+        let item = Item(name: "t", position: .left)
+        item.label.string = "Hi"
+        item.label.paddingLeft = 4
+        plated(&item.label)
+        let (list, boxes) = scene.build([item])
+        let box = try #require(boxes[item.id])
+        let ink = scene.fontCache.naturalMeasure(part: item.label)
+        // The layout is untouched: the plate paddings live outside it.
+        #expect(box.width == 4 + ink.width)
+        // Bar background, then exactly one plate; the ink still draws.
+        #expect(list.quads.count == 2)
+        #expect(list.glyphs.count == 2)
+        let plate = try #require(list.quads.last)
+        #expect(plate.fill == YColor(argb: 0xFF11_2233).simd)
+        #expect(plate.origin.x == Float((box.minX + 4 - 3).rounded()))
+        #expect(plate.size.x == Float((ink.width + 3 + 5).rounded()))
+        #expect(plate.size.y == Float((ink.height + 4).rounded()))
+        #expect(plate.origin.y == Float((box.midY - (ink.height + 4) / 2).rounded()))
+    }
+
+    @Test func symbolIconGetsAPlateToo() throws {
+        let scene = HeadlessScene(scale: 1)
+        let item = Item(name: "t", position: .left)
+        item.icon.string = "sf:wifi"
+        plated(&item.icon)
+        item.icon.background.height = 20
+        let (list, boxes) = scene.build([item])
+        let box = try #require(boxes[item.id])
+        let ink = scene.fontCache.naturalMeasure(part: item.icon)
+        #expect(list.quads.count == 2)
+        let plate = try #require(list.quads.last)
+        #expect(plate.origin.x == Float((box.minX - 3).rounded()))
+        #expect(plate.size.x == Float((ink.width + 8).rounded()))
+        #expect(plate.size.y == 20)
+    }
+
+    @Test func fixedWidthPartPlateFollowsTheSlotAlignment() throws {
+        let scene = HeadlessScene(scale: 1)
+        let item = Item(name: "t", position: .left)
+        item.label.string = "Hi"
+        item.label.customWidth = 100
+        item.label.align = "r"
+        plated(&item.label)
+        let (list, boxes) = scene.build([item])
+        let box = try #require(boxes[item.id])
+        let ink = scene.fontCache.naturalMeasure(part: item.label)
+        #expect(box.width == 100)
+        let plate = try #require(list.quads.last)
+        // Right-aligned in the slot: the ink starts at slot end minus ink.
+        #expect(plate.origin.x == Float((box.minX + 100 - ink.width - 3).rounded()))
+    }
+
+    @Test func nothingIsDrawnWhenTheStyleIsOff() {
+        let scene = HeadlessScene(scale: 1)
+        let item = Item(name: "t", position: .left)
+        item.label.string = "Hi"
+        item.label.background.color = YColor(argb: 0xFF11_2233)
+        item.label.background.drawing = false
+        let (list, _) = scene.build([item])
+        #expect(list.quads.count == 1)
+    }
+}
+
+/// `slider.interactive=off` turns a slider into a read-only meter (review
+/// finding B1): a press must not enter the drag machinery or rewrite the
+/// percentage from the pointer, and the release is an ordinary click — on
+/// the bar and inside a popup alike.
+@MainActor
+@Suite(.serialized) struct ReadOnlySliderTests {
+    private let slot = CGRect(x: 0, y: 0, width: 100, height: 25)
+
+    private func headlessManager() throws -> BarManager {
+        let manager = try BarManager()
+        manager.settings.displayPolicy = .list([])
+        return manager
+    }
+
+    private func mouse(_ kind: MouseEventKind, x: CGFloat = 50) -> MouseEventInfo {
+        MouseEventInfo(kind: kind, point: CGPoint(x: x, y: 10), button: "left",
+                       modifier: "none", scrollDelta: 0)
+    }
+
+    private func addMeter(to manager: BarManager) throws -> Item {
+        let item = try #require(manager.store.add(name: "battery", position: .left))
+        item.kind = .slider
+        let slider = SliderState(width: 80)
+        slider.percentage = 30
+        slider.interactive = false
+        item.slider = slider
+        return item
+    }
+
+    @Test func barPressOnAReadOnlySliderIsAClick() throws {
+        let manager = try headlessManager()
+        let item = try addMeter(to: manager)
+        let screen = try #require(NSScreen.screens.first)
+        let surface = BarSurface(screen: screen, arrangementIndex: 1)
+        surface.itemFrames = [(item.id, slot)]
+        var clicked: [String] = []
+        var dragStarted = 0
+        manager.onItemClicked = { item, _ in clicked.append(item.name) }
+        manager.onSliderDragStarted = { _ in dragStarted += 1 }
+
+        manager.handleMouse(mouse(.down), on: surface)
+        #expect(manager.draggingSliderID == nil)
+        #expect(dragStarted == 0)
+        #expect(item.slider?.percentage == 30)
+        manager.handleMouse(mouse(.dragged, x: 70), on: surface)
+        #expect(item.slider?.percentage == 30)
+        manager.handleMouse(mouse(.clicked), on: surface)
+        #expect(clicked == ["battery"])
+
+        // Back to interactive: the same press scrubs again.
+        item.slider?.interactive = true
+        manager.handleMouse(mouse(.down, x: 40), on: surface)
+        #expect(manager.draggingSliderID == item.id)
+        #expect(item.slider?.percentage == 50)
+    }
+
+    @Test func popupPressOnAReadOnlySliderIsAClick() throws {
+        let manager = try headlessManager()
+        let item = try addMeter(to: manager)
+        let popup = PopupSurface(hostItemID: -1, device: manager.device)
+        popup.itemFrames = [(item.id, slot)]
+        var clicked: [String] = []
+        manager.onItemClicked = { item, _ in clicked.append(item.name) }
+
+        manager.handlePopupMouse(mouse(.down), on: popup)
+        #expect(manager.draggingSliderID == nil)
+        #expect(item.slider?.percentage == 30)
+        manager.handlePopupMouse(mouse(.clicked), on: popup)
+        #expect(clicked == ["battery"])
     }
 }
