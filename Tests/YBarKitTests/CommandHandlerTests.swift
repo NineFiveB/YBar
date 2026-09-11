@@ -171,4 +171,67 @@ import Testing
         #expect(popup["align"] as? String == "c")
         #expect(popup["drawing"] as? String == "off")
     }
+
+    // MARK: - --volume
+
+    /// Headless the hook is nil, so none of these can reach the real output
+    /// device; every reply is a validation result.
+    @Test func volumeValidatesBeforeTouchingTheDevice() throws {
+        let stack = try makeStack()
+        #expect(stack.handler.handle(arguments: ["--volume"]).hasPrefix("[!] usage: --volume"))
+        #expect(stack.handler.handle(arguments: ["--volume", "101"]) == "[!] invalid volume: 101")
+        #expect(stack.handler.handle(arguments: ["--volume", "abc"]) == "[!] invalid volume: abc")
+        #expect(stack.handler.handle(arguments: ["--volume", "+x"]) == "[!] invalid volume: +x")
+        #expect(stack.handler.handle(arguments: ["--volume", "50", "Music"])
+            == "[!] per-app volume is not available on macOS")
+        // Well-formed but unwired: the parser accepted it, the hook is missing.
+        #expect(stack.handler.handle(arguments: ["--volume", "50"]) == "[!] volume control is not available")
+        #expect(stack.handler.handle(arguments: ["--volume", "-4"]) == "[!] volume control is not available")
+    }
+
+    @Test func volumeParsesAbsoluteLevelsAndSignedSteps() throws {
+        let stack = try makeStack()
+        var requests: [CommandHandler.VolumeRequest] = []
+        stack.handler.onVolume = { requests.append($0); return true }
+        let reply = stack.handler.handle(arguments: [
+            "--volume", "50", "--volume", "+4", "--volume", "-3", "--volume", "50.6", "--volume", "0",
+        ])
+        #expect(reply.isEmpty)
+        #expect(requests == [.absolute(50), .step(4), .step(-3), .absolute(51), .absolute(0)])
+        stack.handler.onVolume = { _ in false }
+        #expect(stack.handler.handle(arguments: ["--volume", "10"])
+            == "[!] the output device refused the volume change")
+    }
+
+    // MARK: - --query apps / --app
+
+    /// `apps` is a reserved query target like bar/defaults/events/displays:
+    /// it shadows an item of that name, sketchybar-style, instead of being
+    /// matched after item lookup. One rule, pinned here.
+    @Test func queryAppsIsReservedAndShadowsAnItemOfThatName() throws {
+        let stack = try makeStack()
+        #expect(stack.handler.handle(arguments: ["--add", "item", "apps", "left"]).isEmpty)
+        let text = stack.handler.handle(arguments: ["--query", "apps"])
+        let rows = try #require(
+            try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]])
+        for row in rows {
+            #expect(Set(row.keys) == ["name", "bundle_id", "pid", "active", "hidden"])
+        }
+        // The item itself is untouched and still reachable by every other domain.
+        #expect(stack.barManager.store.item(named: "apps") != nil)
+        #expect(stack.handler.handle(arguments: ["--set", "apps", "label=x"]).isEmpty)
+    }
+
+    /// The action is validated before the target is resolved and an unknown
+    /// target is reported, so nothing here can reach a real application.
+    @Test func appValidatesActionThenTargetWithoutSideEffects() throws {
+        let stack = try makeStack()
+        #expect(stack.handler.handle(arguments: ["--app"]).hasPrefix("[!] usage: --app"))
+        #expect(stack.handler.handle(arguments: ["--app", "com.example.nothing"]).hasPrefix("[!] usage: --app"))
+        #expect(stack.handler.handle(arguments: ["--app", "com.example.nothing", "dance"])
+            == "[!] unknown --app action: dance (activate|hide|quit|kill)")
+        #expect(stack.handler.handle(arguments: ["--app", "com.example.nothing", "activate"])
+            == "[!] no running app matching com.example.nothing")
+        #expect(CommandHandler.AppControl.resolve("com.example.nothing").isEmpty)
+    }
 }

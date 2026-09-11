@@ -6,11 +6,26 @@ import Foundation
 @MainActor
 public enum Serialize {
     public static func query(target: String, manager: BarManager, eventBus: EventBus) -> String {
+        if let reserved = reserved(target: target, manager: manager, eventBus: eventBus) {
+            return json(reserved)
+        }
+        guard let item = manager.store.item(named: target) else {
+            return "[!] no item named \(target)"
+        }
+        return json(itemDictionary(item, boundingRects: manager.boundingRects(for: item)))
+    }
+
+    /// The reserved query targets. They shadow an item of the same name,
+    /// sketchybar-style (`--query bar` is the bar even if an item is called
+    /// "bar"), and `apps` joins the list under that same rule rather than
+    /// being matched after item lookup — one rule for the CLI and for Lua's
+    /// `query_table`. Nil for anything else (an item name).
+    public static func reserved(target: String, manager: BarManager, eventBus: EventBus) -> Any? {
         switch target {
         case "bar":
-            return json(barDictionary(manager: manager))
+            return barDictionary(manager: manager)
         case "defaults":
-            return json(itemDictionary(manager.store.defaults))
+            return itemDictionary(manager.store.defaults)
         case "events":
             var events: [String: Any] = [:]
             for definition in eventBus.definitions {
@@ -19,15 +34,32 @@ public enum Serialize {
                     "notification": definition.notificationName ?? "(null)",
                 ]
             }
-            return json(events)
+            return events
         case "displays":
-            return json(displaysArray())
+            return displaysArray()
+        case "apps":
+            return appsArray()
         default:
-            guard let item = manager.store.item(named: target) else {
-                return "[!] no item named \(target)"
-            }
-            return json(itemDictionary(item, boundingRects: manager.boundingRects(for: item)))
+            return nil
         }
+    }
+
+    /// The permission-free app level: every Dock-visible app, in launch order
+    /// (the order a taskbar widget wants to keep stable). No window titles —
+    /// those need Screen Recording — and no CGWindowList; `--app` acts on the
+    /// same pid / bundle id these rows carry.
+    static func appsArray() -> [[String: Any]] {
+        NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular }
+            .map { app in
+                [
+                    "name": app.localizedName ?? "",
+                    "bundle_id": app.bundleIdentifier ?? "",
+                    "pid": Int(app.processIdentifier),
+                    "active": app.isActive,
+                    "hidden": app.isHidden,
+                ]
+            }
     }
 
     static func barDictionary(manager: BarManager) -> [String: Any] {

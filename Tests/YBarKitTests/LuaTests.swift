@@ -174,6 +174,59 @@ import Testing
         #expect(stack.barManager.store.item(named: "anim")?.label.color.argb == 0xFF00_0000)
     }
 
+    /// `ybar.volume` is the Windows port's trampoline token for token: numbers
+    /// are absolute levels (slider arithmetic that goes negative must be
+    /// rejected, not turned into a step), strings keep their sign, and the
+    /// reply is nil on success or the handler's `[!]` line.
+    @Test func volumeForwardsToTheCommandHandler() throws {
+        let stack = try makeStack()
+        defer { stack.runtime.shutdown() }
+        var forwarded: [[String]] = []
+        stack.runtime.handleCommand = { tokens in
+            forwarded.append(tokens)
+            return tokens.last == "-4" ? "[!] invalid volume: -4" : ""
+        }
+        let error = run("""
+        assert(ybar.volume(50) == nil)
+        assert(ybar.volume("+4") == nil)
+        assert(ybar.volume(37.6) == nil)
+        assert(ybar.volume(-4) == "[!] invalid volume: -4")
+        assert(ybar.volume({}) == "[!] volume(percent) expects a number")
+        assert(ybar.volume(50, {}) == "[!] volume(percent, app) expects a string app")
+        """, stack.runtime)
+        #expect(error == nil)
+        #expect(forwarded == [
+            ["--volume", "50"], ["--volume", "+4"], ["--volume", "38"], ["--volume", "-4"],
+        ])
+        // Headless (no daemon): the verb reports instead of raising.
+        stack.runtime.handleCommand = nil
+        #expect(run("""
+        assert(ybar.volume(50) == "[!] volume control is not available")
+        """, stack.runtime) == nil)
+    }
+
+    /// `query_table` applies the CLI's shadowing rule: reserved targets win
+    /// over an item of the same name, and `apps` arrives as a table (a widget
+    /// cannot decode the JSON string `ybar.query` returns).
+    @Test func queryTableServesReservedTargetsAsTables() throws {
+        let stack = try makeStack()
+        defer { stack.runtime.shutdown() }
+        let error = run("""
+        ybar.bar({ height = 40 })
+        ybar.add("item", "bar", "left")
+        ybar.add("item", "apps", "left")
+        assert(ybar.query_table("bar").height == 40, "bar shadows the item")
+        local apps = ybar.query_table("apps")
+        assert(type(apps) == "table" and apps.name == nil, "apps is the list, not the item")
+        for _, app in ipairs(apps) do
+          assert(type(app.name) == "string" and type(app.pid) == "number")
+          assert(type(app.active) == "boolean" and type(app.hidden) == "boolean")
+        end
+        assert(ybar.query_table("no-such-item") == nil)
+        """, stack.runtime)
+        #expect(error == nil)
+    }
+
     @Test func configErrorsAreReportedNotFatal() throws {
         let stack = try makeStack()
         defer { stack.runtime.shutdown() }
