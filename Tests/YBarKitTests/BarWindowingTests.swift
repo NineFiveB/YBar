@@ -387,3 +387,100 @@ private func mouse(_ kind: MouseEventKind, x: CGFloat = 50) -> MouseEventInfo {
         #expect(handler.handle(arguments: ["--bar", "fullscreen_hide=maybe"]) == "[!] invalid boolean: maybe")
     }
 }
+
+/// popup.fade_in / fade_out (review finding A6): Windows-port parity keys in
+/// frames at 60 Hz. The close ramp keeps the panel alive and deaf until it
+/// ends; a reopen mid-fade resets the edge instead of stacking a new panel.
+@MainActor
+@Suite(.serialized) struct PopupFadeTests {
+    @Test func fadeKeysRoundTripAndClampAtZero() throws {
+        let manager = try makeHeadlessManager()
+        let handler = CommandHandler(
+            barManager: manager, eventBus: EventBus(),
+            scriptRunner: ScriptRunner(), scheduler: AnimationScheduler())
+        #expect(handler.handle(arguments: [
+            "--add", "item", "host", "left",
+            "--set", "host", "popup.fade_in=8", "popup.fade_out=5",
+        ]).isEmpty)
+        let host = try #require(manager.store.item(named: "host"))
+        #expect(host.popup.fadeInFrames == 8)
+        #expect(host.popup.fadeOutFrames == 5)
+        let text = handler.handle(arguments: ["--query", "host"])
+        let item = try #require(try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+        let popup = try #require(item["popup"] as? [String: Any])
+        #expect((popup["fade_in"] as? NSNumber)?.floatValue == 8)
+        #expect((popup["fade_out"] as? NSNumber)?.floatValue == 5)
+        // Negative durations clamp to the hard cut; non-numbers are refused.
+        #expect(handler.handle(arguments: ["--set", "host", "popup.fade_out=-3"]).isEmpty)
+        #expect(host.popup.fadeOutFrames == 0)
+        #expect(handler.handle(arguments: ["--set", "host", "popup.fade_in=soon"]) == "[!] invalid number: soon")
+    }
+
+    /// Presented far below every screen: on screen as far as AppKit is
+    /// concerned, never in the user's view.
+    private func presentOffscreen(_ popup: PopupSurface, fadeInFrames: CGFloat = 0) throws {
+        let screen = try #require(NSScreen.screens.first)
+        popup.present(anchor: CGRect(x: 0, y: -100_000, width: 40, height: 25),
+                      size: CGSize(width: 10, height: 10), barPosition: .top, yOffset: 0,
+                      align: "l", screen: screen, edgeMargin: 0, fadeInFrames: fadeInFrames)
+    }
+
+    /// The close timer lands on the main queue, which a test body — itself a
+    /// main-queue job — can only let through by suspending; a nested run
+    /// loop never re-enters the drain.
+    private func pause(milliseconds: UInt64) async throws {
+        try await Task.sleep(nanoseconds: milliseconds * 1_000_000)
+    }
+
+    @Test func closeRampHoldsThePanelDeafAndReopenResets() async throws {
+        let manager = try makeHeadlessManager()
+        let popup = PopupSurface(hostItemID: -1, device: manager.device)
+        try presentOffscreen(popup)
+        #expect(popup.isVisible)
+        #expect(!popup.isClosing)
+
+        var completed = 0
+        popup.fadeOut(frames: 6) { completed += 1 }
+        #expect(popup.isClosing)
+        #expect(popup.isVisible)
+        #expect(popup.panel.ignoresMouseEvents)
+
+        // Reopen mid-fade: the same panel comes back answering the mouse,
+        // and the abandoned ramp's timer never runs its completion.
+        try presentOffscreen(popup, fadeInFrames: 3)
+        #expect(!popup.isClosing)
+        #expect(!popup.panel.ignoresMouseEvents)
+        try await pause(milliseconds: 300)
+        #expect(completed == 0)
+        #expect(popup.isVisible)
+
+        // A ramp left alone orders the panel out and completes exactly once.
+        popup.fadeOut(frames: 3) { completed += 1 }
+        let deadline = Date(timeIntervalSinceNow: 3)
+        while completed == 0, Date() < deadline { try await pause(milliseconds: 50) }
+        #expect(completed == 1)
+        #expect(!popup.isVisible)
+        #expect(!popup.isClosing)
+        #expect(!popup.panel.ignoresMouseEvents)
+    }
+
+    @Test func zeroFramesSnapsAndCloseRetiresTheRamp() async throws {
+        let manager = try makeHeadlessManager()
+        let popup = PopupSurface(hostItemID: -1, device: manager.device)
+        try presentOffscreen(popup)
+        var completed = 0
+        popup.fadeOut(frames: 0) { completed += 1 }
+        #expect(completed == 1)
+        #expect(!popup.isVisible)
+
+        // The rebuild / shutdown path closes at once and the ramp's timer
+        // must not tear the owner down a second time.
+        try presentOffscreen(popup)
+        popup.fadeOut(frames: 6) { completed += 1 }
+        popup.close()
+        #expect(!popup.isClosing)
+        #expect(!popup.isVisible)
+        try await pause(milliseconds: 300)
+        #expect(completed == 1)
+    }
+}

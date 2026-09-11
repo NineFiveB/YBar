@@ -127,6 +127,8 @@ public enum Serialize {
             "align": String(item.popup.align),
             "y_offset": item.popup.yOffset,
             "blur_radius": item.popup.blurRadius,
+            "fade_in": item.popup.fadeInFrames,
+            "fade_out": item.popup.fadeOutFrames,
             "background": backgroundDictionary(item.popup.background),
         ] as [String: Any]
         if item.position == .popup {
