@@ -223,6 +223,12 @@ public enum PropertySetter {
         case "width":
             return setFloatValue(key: "item.\(item.id).slider.width", current: slider.width,
                                  value: value, ctx: ctx) { slider.width = max(1, $0) }
+        case "interactive":
+            // interactive=off: a read-only meter (battery/level gauge). Drops
+            // the press/drag machinery so a click cannot rewrite the value.
+            return setBoolValue(current: slider.interactive, value: value, ctx: ctx) {
+                slider.interactive = $0
+            }
         case "highlight_color":
             return setColorValue(key: "item.\(item.id).slider.highlight_color",
                                  current: slider.highlightColor,

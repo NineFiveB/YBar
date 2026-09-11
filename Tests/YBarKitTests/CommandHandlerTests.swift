@@ -79,6 +79,29 @@ import Testing
         #expect(stack.barManager.store.item(named: "s") == nil)
     }
 
+    /// `slider.interactive` is a boolean leaf like any other (on/off/toggle),
+    /// is published by --query, and never blocks a percentage set: a
+    /// read-only meter is still driven by its script.
+    @Test func sliderInteractiveIsSetToggledAndQueried() throws {
+        let stack = try makeStack()
+        var reply = stack.handler.handle(arguments: [
+            "--add", "slider", "s", "left", "80",
+            "--set", "s", "slider.interactive=off", "slider.percentage=42",
+        ])
+        #expect(reply.isEmpty)
+        var slider = try #require(try query(stack, "s")["slider"] as? [String: Any])
+        #expect(slider["interactive"] as? String == "off")
+        #expect((slider["percentage"] as? NSNumber)?.floatValue == 42)
+
+        reply = stack.handler.handle(arguments: ["--set", "s", "slider.interactive=toggle"])
+        #expect(reply.isEmpty)
+        slider = try #require(try query(stack, "s")["slider"] as? [String: Any])
+        #expect(slider["interactive"] as? String == "on")
+
+        reply = stack.handler.handle(arguments: ["--set", "s", "slider.interactive=maybe"])
+        #expect(reply.hasPrefix("[!] invalid boolean"))
+    }
+
     @Test func removeCancelsTheItemsAnimations() throws {
         let stack = try makeStack()
         let reply = stack.handler.handle(arguments: [
