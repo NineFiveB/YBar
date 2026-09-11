@@ -99,11 +99,15 @@ script it spawns. Only the features you actually configure ask for anything:
 - **Bluetooth** — used by widgets that list/control devices. macOS prompts on
   first use; click Allow.
 - **Calendar** — used by the calendar popup. Prompts on first use.
-- **Accessibility** — needed for `modifier_change` events (live ⌥-held UX) and
-  closing popups when you click outside them. macOS does not prompt for this:
-  grant it manually under System Settings → Privacy & Security →
-  Accessibility → **+** → select YBar.app, then restart YBar (`ybar --exit`
-  and relaunch).
+- **Accessibility** — needed for `modifier_change` events (live ⌥-held UX;
+  without the grant modifier keys are only seen while the pointer is over the
+  bar, and the daemon logs a one-time warning to stderr when a config
+  subscribes to the event) and for `alias` items to forward clicks to the menu
+  bar item they mirror. macOS does not prompt for the event monitor and may
+  prompt on the first forwarded click; otherwise grant it manually under
+  System Settings → Privacy & Security → Accessibility → **+** → select
+  YBar.app, then restart YBar (`ybar --exit` and relaunch). Closing popups by
+  clicking outside them needs no permission.
 - **Location (Wi-Fi network name)** — macOS gates the SSID behind Location
   Services. Opt in once with `ybar --bar wifi_ssid_prompt=on` and click
   Allow; without it, wifi widgets show a generic connected state.

@@ -5,6 +5,9 @@ import ScreenCaptureKit
 /// app's menu bar item) and screenshots it via ScreenCaptureKit on the item's
 /// update_freq cadence (default 2s). Requires Screen Recording permission —
 /// captures fail silently (and the alias renders nothing) until granted.
+/// Clicking an alias that has no click_script and no Lua handler forwards the
+/// click to the captured item as synthetic HID events (Daemon.onItemClicked),
+/// which needs Accessibility; macOS may raise that prompt on the first click.
 @MainActor
 public final class AliasProvider {
     /// All current alias items.
