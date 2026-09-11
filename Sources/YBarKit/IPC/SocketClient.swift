@@ -170,10 +170,31 @@ public enum CLIClient {
     ybar — a Metal-rendered, scriptable status bar for macOS.
 
     Usage:
-      ybar                          start the daemon
-      ybar -c <path>                start the daemon with an explicit config script
-      ybar <domain>...              send commands to the running daemon, e.g.:
+      ybar                          start the daemon; the config is discovered: the
+                                    selected theme, then ~/.config/ybar/ybarrc.lua,
+                                    ybarrc, ybarrc.jsonc, ybar.jsonc, ~/.ybarrc.lua, ~/.ybarrc
+      ybar -c <path>                start the daemon with an explicit config
+      ybar <domain>...              send commands to the running daemon (below)
+      ybar --help | -h              this text
+      ybar --version | -v           version, plus the build's commit from an app bundle
 
+    Daemon verbs (sketchybar's grammar; several --domains batch in one message):
+      --bar <prop>=<val>...                 --default <prop>=<val>... | reset
+      --add item <name> <position>          --add event <name> [notification]
+      --add graph|slider <name> <position> <width>
+      --add bracket <name> <member>...      --add alias "Owner[,Window]" <position>
+      --set <name> <prop>=<val>...          --remove <name>
+      --subscribe <name> <event>...         --trigger <event> [KEY=VAL...]
+      --animate <curve> <frames>            --update
+      --push <graph> <value>...             --query bar|defaults|events|displays|apps|<item>
+      --move <name> before|after <anchor>   --reorder <name>...
+      --rename <old> <new>                  --clone <new> <source> [before|after]
+      --reload [path]                       --hotload on|off
+      --volume <0-100|+N|-N>                --app <pid|bundle-id> activate|hide|quit|kill
+      --ping                                --exit
+      (<name> in --set and --remove may be a /regex/ matching several items)
+
+    Examples:
       ybar --bar height=32 color=0xcc1e1e2e
       ybar --add item clock right
       ybar --set clock label="12:00" icon=sf:clock label.color=0xffffffff
@@ -192,7 +213,8 @@ public enum CLIClient {
                                     manage the com.ybar.YBar LaunchAgent (KeepAlive,
                                     config discovered at each start unless pinned)
 
-    See docs/ARCHITECTURE.md for the full command grammar.
+    Property keys, events and the Lua API: docs/EXTENDING.md. Install, config and
+    themes: README.md. The engine design and the full grammar: docs/ARCHITECTURE.md.
     """
 }
 
