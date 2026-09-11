@@ -59,6 +59,10 @@ public final class LuaRuntime {
     /// daemon's forced provider re-queries (wired by the daemon; returns true
     /// when the name was handled).
     public var forcedTrigger: ((String) -> Bool)?
+    /// The daemon's command handler, for the verbs that have no object-model
+    /// path of their own (`ybar.volume` → `--volume`, the Windows port's
+    /// handleTokens). Wired by the daemon; nil headless.
+    public var handleCommand: (([String]) -> String)?
     /// Registry refs are small integers scoped to ONE lua_State; a completion
     /// crossing a reload would index the NEW state's registry and invoke an
     /// unrelated callback. Bumped on every state teardown; async completions
@@ -463,6 +467,41 @@ public final class LuaRuntime {
                 return 1
             }
         }
+        // ybar.volume(pct[, app]) — the daemon already holds the output device,
+        // so a slider drag becomes one function call instead of a shell round
+        // trip (the Windows port's Trampolines::volume, token for token: the
+        // reply is nil on success, the `[!]` line otherwise). A Lua number is
+        // an absolute level — `-4` from arithmetic must not turn into a step —
+        // while a string keeps its sign for the `"+4"` / `"-4"` form.
+        register("volume") { L in
+            MainActor.assumeIsolated {
+                guard let runtime = LuaRuntime.current else { return 0 }
+                var tokens = ["--volume"]
+                if lua_type(L, 1) == luaTypeNumber {
+                    let level = lua_tonumberx(L, 1, nil)
+                    guard level.isFinite else {
+                        lua_pushstring(L, "[!] volume(percent) expects a number")
+                        return 1
+                    }
+                    tokens.append(String(Int(level.rounded())))
+                } else if let pct = argString(L, 1) {
+                    tokens.append(pct)
+                } else {
+                    lua_pushstring(L, "[!] volume(percent) expects a number")
+                    return 1
+                }
+                if lua_type(L, 2) > 0 { // LUA_TNIL = 0, none = -1
+                    guard let app = argString(L, 2) else {
+                        lua_pushstring(L, "[!] volume(percent, app) expects a string app")
+                        return 1
+                    }
+                    tokens.append(app)
+                }
+                let reply = runtime.handleCommand?(tokens) ?? "[!] volume control is not available"
+                pushOptionalError(L, reply.isEmpty ? nil : reply)
+                return 1
+            }
+        }
         register("remove") { L in
             MainActor.assumeIsolated {
                 guard let runtime = LuaRuntime.current else { return 0 }
@@ -719,6 +758,7 @@ public final class LuaRuntime {
     function ybar.exec(cmd, fn) raw.exec(cmd, fn) end
     function ybar.add_event(name, notification) local e = raw.add_event(name, notification) if e then print(e) end end
     function ybar.query(target) return raw.query(target) end
+    function ybar.volume(pct, app) return raw.volume(pct, app) end
     function ybar.remove(name) raw.remove(name) end
 
     function ybar.animate(curve, frames, fn)

@@ -418,6 +418,16 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         commandHandler.onHotloadToggle = { [weak self] enabled in
             self?.hotload.enabled = enabled
         }
+        commandHandler.onVolume = { [weak self] request in
+            guard let self else { return false }
+            switch request {
+            case .absolute(let percent):
+                return self.audioProvider.setVolume(percent: percent)
+            case .step(let delta):
+                return self.audioProvider.setVolume(
+                    percent: AudioProvider.currentVolumePercent() + delta)
+            }
+        }
         commandHandler.forcedQueries = [
             "volume_change": { [weak self] in
                 self?.audioProvider.start()
@@ -551,6 +561,9 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                     guard let forced = self?.commandHandler.forcedQueries[name] else { return false }
                     forced()
                     return true
+                }
+                runtime.handleCommand = { [weak self] arguments in
+                    self?.commandHandler.handle(arguments: arguments) ?? ""
                 }
                 luaRuntime = runtime
             }
