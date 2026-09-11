@@ -1,6 +1,7 @@
 local colors = require("colors")
 local icons = require("icons")
 local settings = require("settings")
+local hover = require("helpers.hover")
 
 -- YBAR PORT: Bartender-style collapsible menu for background apps'
 -- native menu bar items (Proton, OneDrive, Creative Cloud, …). The
@@ -37,6 +38,8 @@ local bracket = sbar.add("bracket", "widgets.menubar.bracket", { chevron.name },
   background = { color = colors.bg1 },
   popup = { align = "center", height = 30 },
 })
+
+hover.pill(bracket, chevron)
 
 sbar.add("item", "widgets.menubar.padding", {
   position = "right",
@@ -82,6 +85,7 @@ local access_row = sbar.add("item", {
     padding_right = inset,
   },
 })
+hover.row(access_row)
 
 local rows = {}
 for i = 1, max_rows do
@@ -105,6 +109,7 @@ for i = 1, max_rows do
       align = "left",
     },
   })
+  hover.row(rows[i])
 end
 
 sbar.add("item", {
