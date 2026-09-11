@@ -98,6 +98,7 @@ public enum Serialize {
                 "percentage": slider.percentage,
                 "width": slider.width,
                 "highlight_color": hex(slider.highlightColor),
+                "interactive": slider.interactive ? "on" : "off",
             ] as [String: Any]
         }
         if let image = item.image {

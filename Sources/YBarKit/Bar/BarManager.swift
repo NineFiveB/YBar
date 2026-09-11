@@ -392,8 +392,9 @@ public final class BarManager {
             // Popup members are laid out by the same emit path as bar items,
             // so the shared slider drag machinery works verbatim — only the
             // frame source differs. No closeAutoClosePopups here: a press
-            // inside a popup must never dismiss it.
-            if let item = member(at: info.point), item.slider != nil {
+            // inside a popup must never dismiss it. Same read-only rule as
+            // the bar: interactive=off never enters the drag machinery.
+            if let item = member(at: info.point), let slider = item.slider, slider.interactive {
                 draggingSliderID = item.id
                 onSliderDragStarted?(item)
                 updateSlider(item: item, localX: info.point.x, frames: popup.itemFrames)
@@ -679,7 +680,9 @@ public final class BarManager {
             // A press anywhere that is not an open popup's host dismisses
             // auto-close popups (host presses defer to their toggle scripts).
             closeAutoClosePopups(except: hit?.id)
-            if let item = hit, item.slider != nil {
+            // interactive=off is a read-only meter: no drag and no
+            // pointer-derived percentage; the release is an ordinary click.
+            if let item = hit, let slider = item.slider, slider.interactive {
                 draggingSliderID = item.id
                 onSliderDragStarted?(item)
                 updateSlider(item: item, localX: info.point.x, frames: surface.itemFrames)

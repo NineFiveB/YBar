@@ -33,7 +33,9 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
 ## Components
 
 - Brackets, anchored popups (auto-close, alignment), graphs, draggable sliders —
-  interactive on the bar and inside popups (click + drag deliver `PERCENTAGE`)
+  interactive on the bar and inside popups (click + drag deliver `PERCENTAGE`);
+  `slider.interactive=off` makes a slider a read-only fill meter (a press is an
+  ordinary click; sets still apply)
 - **Alias items** — live ScreenCaptureKit captures of other apps' menu bar items
   (`--add alias "App[,Window]"`)
 - **Marquee text** (`scroll_texts`), **hover tooltips**, `background.image` +
