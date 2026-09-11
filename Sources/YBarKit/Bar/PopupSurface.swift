@@ -16,6 +16,16 @@ public final class PopupSurface {
     public var hoveredItemID: Int?
     public var onMouse: ((MouseEventInfo, PopupSurface) -> Void)?
 
+    /// Bumped on every visibility edge (present, fadeOut, close). A fade's
+    /// completion compares its own generation and stands down when a later
+    /// edge — a reopen mid-fade, a rebuild's close() — has superseded it.
+    private var fadeGeneration = 0
+    /// A fade-out is in flight: the panel is still on screen at falling
+    /// alpha and deaf to the mouse. Cleared by the next present() (a reopen
+    /// mid-fade ramps back up) or by the ramp's own close().
+    public private(set) var isClosing = false
+    public var isVisible: Bool { panel.isVisible }
+
     public init(hostItemID: Int, device: MTLDevice) {
         self.hostItemID = hostItemID
         panel = BarPanel(
@@ -31,7 +41,7 @@ public final class PopupSurface {
         panel.isReleasedWhenClosed = false
         panel.animationBehavior = .none
         panel.level = .popUpMenu
-        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        panel.collectionBehavior = BarSurface.collectionBehavior(sticky: true, policy: .carry)
 
         var madeGlass: NSView?
         #if compiler(>=6.2)
@@ -76,6 +86,18 @@ public final class PopupSurface {
 
     public var scale: CGFloat { max(panel.backingScaleFactor, 1) }
 
+    /// fullscreen_hide: a popup or tooltip stays off fullscreen Spaces with
+    /// its bar. Carried there on its own it would float over the fullscreen
+    /// window at menu level with no bar to hang from (scripts can open a
+    /// popup without a click).
+    var hidesInFullscreen = false {
+        didSet {
+            guard hidesInFullscreen != oldValue else { return }
+            panel.collectionBehavior = BarSurface.collectionBehavior(
+                sticky: true, policy: hidesInFullscreen ? .hide : .carry)
+        }
+    }
+
     /// Place and show the panel. `anchor` is the host item's frame in global
     /// AppKit coordinates (bottom-left origin, y-up); the popup hangs below it
     /// for a top bar and sits above it for a bottom bar. `align` anchors the
@@ -83,7 +105,8 @@ public final class PopupSurface {
     /// inside `screen` horizontally, `edgeMargin` short of its edges.
     public func present(anchor: CGRect, size: CGSize, barPosition: BarPosition,
                         yOffset: CGFloat, align: Character,
-                        screen: NSScreen, edgeMargin: CGFloat) {
+                        screen: NSScreen, edgeMargin: CGFloat,
+                        fadeInFrames: CGFloat = 0) {
         let frame = PopupSurface.frame(
             anchor: anchor, size: size, barPosition: barPosition, yOffset: yOffset,
             align: align, screenFrame: screen.frame, edgeMargin: edgeMargin)
@@ -91,7 +114,33 @@ public final class PopupSurface {
         backdropView.frame = panel.contentView?.bounds ?? .zero
         hostView.frame = panel.contentView?.bounds ?? .zero
         hostView.updateDrawableSize()
+        // Fade only on the hidden→shown edge: present() runs on every render
+        // pass while the popup is open, and restarting the ramp each time
+        // would keep the panel from ever finishing appearing. A reopen
+        // mid-fade-out is an edge too (the Windows port re-arms it through
+        // hide()): the ramp restarts from 0 — the intended pop — and the
+        // abandoned fade-out's completion is retired by the generation bump.
+        guard !panel.isVisible || isClosing else {
+            panel.orderFrontRegardless()
+            return
+        }
+        fadeGeneration += 1
+        isClosing = false
+        panel.ignoresMouseEvents = false
+        guard fadeInFrames > 0 else {
+            panel.alphaValue = 1
+            panel.orderFrontRegardless()
+            return
+        }
+        // On screen at alpha 0, so the frame ordered in before the scene has
+        // rendered into it is never seen.
+        panel.alphaValue = 0
         panel.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = TimeInterval(fadeInFrames / 60)
+            context.timingFunction = CAMediaTimingFunction(name: .linear)
+            panel.animator().alphaValue = 1
+        }
     }
 
     /// Panel frame for `present`. A borderless non-activating panel keeps
@@ -140,7 +189,51 @@ public final class PopupSurface {
         }
     }
 
+    /// Start the close ramp (popup.fade_out). The panel stays on screen, deaf
+    /// to the mouse, until the ramp ends; then it orders out and `completion`
+    /// runs on the main actor. The owner keeps the surface alive until then.
+    /// A present() in the meantime reopens it and the completion never fires.
+    public func fadeOut(frames: CGFloat, completion: @escaping @MainActor () -> Void) {
+        guard !isClosing else { return }
+        guard frames > 0, panel.isVisible else {
+            close()
+            completion()
+            return
+        }
+        fadeGeneration += 1
+        let generation = fadeGeneration
+        isClosing = true
+        // Deaf at once, or the dismissing click lands in a ghost.
+        panel.ignoresMouseEvents = true
+        let duration = TimeInterval(frames / 60)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = duration
+            context.timingFunction = CAMediaTimingFunction(name: .linear)
+            panel.animator().alphaValue = 0
+        }
+        // The hide is a one-shot timer a frame past the ramp's end, as in the
+        // Windows port (its 109687f): the ramp runs on the window server with
+        // this process rendering nothing, so nothing else would come back to
+        // order the panel out until the next render — a clock tick, a hover,
+        // seconds later — and a shown panel at zero alpha still casts its
+        // shadow. A timer, not the animation group's completion: that is
+        // delivered with the transaction's own completion and never arrives
+        // in a process whose run loop is not serving Core Animation (the
+        // headless tests), while the main queue always drains.
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration + 1 / 60) { [weak self] in
+            guard let self, self.fadeGeneration == generation else { return }
+            self.close()
+            completion()
+        }
+    }
+
     public func close() {
+        // Retire an in-flight fade: its completion must neither order out a
+        // panel that was reopened nor run the owner's teardown twice.
+        fadeGeneration += 1
+        isClosing = false
+        panel.ignoresMouseEvents = false
+        panel.alphaValue = 1
         panel.orderOut(nil)
         panel.close()
     }
