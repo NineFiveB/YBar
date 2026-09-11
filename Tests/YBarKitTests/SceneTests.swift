@@ -412,3 +412,75 @@ struct HeadlessScene {
         #expect(abs((item.slider?.percentage ?? 0) - 50) < 0.01)
     }
 }
+
+/// `slider.interactive=off` turns a slider into a read-only meter (review
+/// finding B1): a press must not enter the drag machinery or rewrite the
+/// percentage from the pointer, and the release is an ordinary click — on
+/// the bar and inside a popup alike.
+@MainActor
+@Suite(.serialized) struct ReadOnlySliderTests {
+    private let slot = CGRect(x: 0, y: 0, width: 100, height: 25)
+
+    private func headlessManager() throws -> BarManager {
+        let manager = try BarManager()
+        manager.settings.displayPolicy = .list([])
+        return manager
+    }
+
+    private func mouse(_ kind: MouseEventKind, x: CGFloat = 50) -> MouseEventInfo {
+        MouseEventInfo(kind: kind, point: CGPoint(x: x, y: 10), button: "left",
+                       modifier: "none", scrollDelta: 0)
+    }
+
+    private func addMeter(to manager: BarManager) throws -> Item {
+        let item = try #require(manager.store.add(name: "battery", position: .left))
+        item.kind = .slider
+        let slider = SliderState(width: 80)
+        slider.percentage = 30
+        slider.interactive = false
+        item.slider = slider
+        return item
+    }
+
+    @Test func barPressOnAReadOnlySliderIsAClick() throws {
+        let manager = try headlessManager()
+        let item = try addMeter(to: manager)
+        let screen = try #require(NSScreen.screens.first)
+        let surface = BarSurface(screen: screen, arrangementIndex: 1)
+        surface.itemFrames = [(item.id, slot)]
+        var clicked: [String] = []
+        var dragStarted = 0
+        manager.onItemClicked = { item, _ in clicked.append(item.name) }
+        manager.onSliderDragStarted = { _ in dragStarted += 1 }
+
+        manager.handleMouse(mouse(.down), on: surface)
+        #expect(manager.draggingSliderID == nil)
+        #expect(dragStarted == 0)
+        #expect(item.slider?.percentage == 30)
+        manager.handleMouse(mouse(.dragged, x: 70), on: surface)
+        #expect(item.slider?.percentage == 30)
+        manager.handleMouse(mouse(.clicked), on: surface)
+        #expect(clicked == ["battery"])
+
+        // Back to interactive: the same press scrubs again.
+        item.slider?.interactive = true
+        manager.handleMouse(mouse(.down, x: 40), on: surface)
+        #expect(manager.draggingSliderID == item.id)
+        #expect(item.slider?.percentage == 50)
+    }
+
+    @Test func popupPressOnAReadOnlySliderIsAClick() throws {
+        let manager = try headlessManager()
+        let item = try addMeter(to: manager)
+        let popup = PopupSurface(hostItemID: -1, device: manager.device)
+        popup.itemFrames = [(item.id, slot)]
+        var clicked: [String] = []
+        manager.onItemClicked = { item, _ in clicked.append(item.name) }
+
+        manager.handlePopupMouse(mouse(.down), on: popup)
+        #expect(manager.draggingSliderID == nil)
+        #expect(item.slider?.percentage == 30)
+        manager.handlePopupMouse(mouse(.clicked), on: popup)
+        #expect(clicked == ["battery"])
+    }
+}

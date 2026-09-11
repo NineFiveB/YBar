@@ -58,6 +58,13 @@ public final class SliderState {
     public var knob = TextPart()
     public var background = BackgroundStyle()
     public var isDragged = false
+    /// A slider used as a READ-ONLY meter (a battery/level gauge) must not
+    /// be scrubbable: without this every mouse-down rewrote `percentage`
+    /// from the pointer x, so a click showed a fabricated value until
+    /// something re-applied the real one. interactive=off keeps the visual
+    /// and drops the drag machinery (no press/drag/PERCENTAGE; a press falls
+    /// through to an ordinary click, and sets always apply).
+    public var interactive = true
 
     public init(width: Float) {
         self.width = max(1, width)
