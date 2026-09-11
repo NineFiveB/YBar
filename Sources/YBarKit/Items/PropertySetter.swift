@@ -175,6 +175,13 @@ public enum PropertySetter {
         case "rotation":
             return setFloatValue(key: "item.\(item.id).image.rotation", current: image.rotation,
                                  value: value, ctx: ctx) { image.rotation = $0 }
+        case "y_offset":
+            return setFloatValue(key: "item.\(item.id).image.y_offset", current: image.yOffset,
+                                 value: value, ctx: ctx) { image.yOffset = $0 }
+        case "desaturate":
+            return setBoolValue(current: image.desaturate, value: value, ctx: ctx) {
+                image.desaturate = $0
+            }
         case "align":
             image.align = value.hasPrefix("r") ? "r" : "l"
             ctx.invalidate()
@@ -223,6 +230,12 @@ public enum PropertySetter {
         case "width":
             return setFloatValue(key: "item.\(item.id).slider.width", current: slider.width,
                                  value: value, ctx: ctx) { slider.width = max(1, $0) }
+        case "interactive":
+            // interactive=off: a read-only meter (battery/level gauge). Drops
+            // the press/drag machinery so a click cannot rewrite the value.
+            return setBoolValue(current: slider.interactive, value: value, ctx: ctx) {
+                slider.interactive = $0
+            }
         case "highlight_color":
             return setColorValue(key: "item.\(item.id).slider.highlight_color",
                                  current: slider.highlightColor,
@@ -590,6 +603,8 @@ public enum PropertySetter {
             return setFloat(item, base.appending(path: \ShadowStyle.distance), "\(prefix).distance", value, ctx)
         case "angle":
             return setFloat(item, base.appending(path: \ShadowStyle.angle), "\(prefix).angle", value, ctx)
+        case "blur":
+            return setFloat(item, base.appending(path: \ShadowStyle.blur), "\(prefix).blur", value, ctx)
         default:
             return "[?] unknown property: \(prefix).\(path.joined(separator: "."))"
         }

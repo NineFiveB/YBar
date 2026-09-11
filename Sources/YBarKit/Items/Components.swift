@@ -58,6 +58,13 @@ public final class SliderState {
     public var knob = TextPart()
     public var background = BackgroundStyle()
     public var isDragged = false
+    /// A slider used as a READ-ONLY meter (a battery/level gauge) must not
+    /// be scrubbable: without this every mouse-down rewrote `percentage`
+    /// from the pointer x, so a click showed a fabricated value until
+    /// something re-applied the real one. interactive=off keeps the visual
+    /// and drops the drag machinery (no press/drag/PERCENTAGE; a press falls
+    /// through to an ordinary click, and sets always apply).
+    public var interactive = true
 
     public init(width: Float) {
         self.width = max(1, width)
@@ -87,6 +94,14 @@ public final class ImageState {
     public var rotation: Float = 0
     /// "l" (default): image leads the content; "r": image trails the label.
     public var align: String = "l"
+    /// Vertical nudge in points, positive-up like every other y_offset: an
+    /// app icon's optical centre rarely matches the text's, and the text's
+    /// own y_offset cannot close that gap without moving the text.
+    public var yOffset: Float = 0
+    /// Render at luminance (greyed-out icon for a not-running app or a
+    /// disabled row). Done in the shader: no atlas-key dimension, no
+    /// re-rasterization, and the coloured cell stays shared.
+    public var desaturate = false
 
     private var cachedSource: String?
     private var cachedRotation: Float = 0

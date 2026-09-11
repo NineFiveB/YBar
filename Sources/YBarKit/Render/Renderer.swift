@@ -11,6 +11,9 @@ public final class Renderer {
         case noDevice
         case libraryLoadFailed
         case pipelineFailed
+        /// A Swift instance struct no longer matches its Metal twin
+        /// (Instances.swift vs Shaders/YBar.metal).
+        case instanceLayoutMismatch
     }
 
     public let device: MTLDevice
@@ -27,7 +30,15 @@ public final class Renderer {
     private var frameIndex = 0
 
     public init(device: MTLDevice) throws {
-        InstanceLayout.validate()
+        // A layout that drifted from the shader's would garble every quad.
+        // Thrown, not asserted: the assert was elided by the release build
+        // brew ships, and a trap would put the daemon into launchd's
+        // KeepAlive crash loop instead of a logged startup failure.
+        if let mismatch = InstanceLayout.mismatch() {
+            FileHandle.standardError.write(
+                Data("[ybar] GPU instance layout mismatch: \(mismatch)\n".utf8))
+            throw RendererError.instanceLayoutMismatch
+        }
         self.device = device
         guard let queue = device.makeCommandQueue() else { throw RendererError.noDevice }
         commandQueue = queue
