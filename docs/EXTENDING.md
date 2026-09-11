@@ -20,6 +20,10 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
 - `fullscreen_show=on` keeps the bar visible over **native-fullscreen Spaces** —
   auto-raises above the fullscreen window, restores on regular Spaces (public
   APIs; no SkyLight needed)
+- `fullscreen_hide=on` (opt-in) keeps the bar, popups and tooltips **off**
+  native-fullscreen Spaces entirely — the WindowServer hides them there, no
+  polling; wins over `fullscreen_show`, and without it `topmost=on` still draws
+  over fullscreen
 - SDF rounded rects (per-corner radii, borders, gradients, shadows), glyph atlas
   with font fallback, color emoji, tinted SF Symbols (`icon=sf:wifi`), ink-precise
   text metrics matching sketchybar's pixel behavior
@@ -51,6 +55,8 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
   `image.y_offset` (animatable) nudges it vertically
 - **Popup flow layout** — `popup.wrap_width` wraps members into grids (calendar
   month grids, tile dashboards); blank rows collapse into slim separators
+- **Popup fades** — `popup.fade_in` / `popup.fade_out` (frames at 60 Hz, 0 = hard
+  cut) ramp the panel's opacity on open and close, same keys as the Windows port
 
 ## Scripting & events
 

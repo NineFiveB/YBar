@@ -79,6 +79,8 @@ public enum Serialize {
             "hidden": settings.hidden,
             "topmost": settings.level.rawValue,
             "sticky": settings.sticky,
+            "fullscreen_show": settings.fullscreenShow,
+            "fullscreen_hide": settings.fullscreenHide,
             "idle_inhibit": settings.idleInhibit,
             "notch_width": settings.notchWidth,
             "notch_offset": settings.notchOffset,
@@ -160,6 +162,8 @@ public enum Serialize {
             "align": String(item.popup.align),
             "y_offset": item.popup.yOffset,
             "blur_radius": item.popup.blurRadius,
+            "fade_in": item.popup.fadeInFrames,
+            "fade_out": item.popup.fadeOutFrames,
             "background": backgroundDictionary(item.popup.background),
         ] as [String: Any]
         if item.position == .popup {

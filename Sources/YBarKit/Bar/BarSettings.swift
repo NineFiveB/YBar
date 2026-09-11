@@ -31,6 +31,17 @@ public enum DisplayPolicy: Equatable, Sendable {
     case list([Int])
 }
 
+/// Bar behavior on a fullscreen Space (`fullscreen_show` / `fullscreen_hide`).
+public enum FullscreenPolicy: Equatable, Sendable {
+    /// Carried onto the Space at the configured level: covered by the
+    /// fullscreen window unless `topmost=on` already clears it. The default.
+    case carry
+    /// Carried and raised to status level over the fullscreen window.
+    case raise
+    /// Not carried onto fullscreen Spaces at all.
+    case hide
+}
+
 /// Global bar configuration (`--bar` domain).
 public struct BarSettings: Sendable {
     public var position: BarPosition = .top
@@ -55,6 +66,13 @@ public struct BarSettings: Sendable {
     /// (fullScreenAuxiliary already carries the panel onto them; only the
     /// window level needs to clear the fullscreen window's).
     public var fullscreenShow: Bool = false
+    /// Opt-in native hide-in-fullscreen: keep the bar, popup and tooltip
+    /// panels off fullscreen Spaces altogether (no fullScreenAuxiliary), so
+    /// the WindowServer hides them there with no polling. Wins over
+    /// `fullscreenShow` — a panel that is not on the Space cannot be raised
+    /// over it. Off by default so `topmost=on` keeps drawing over fullscreen
+    /// as documented.
+    public var fullscreenHide: Bool = false
     public var hidden: Bool = false
     public var level: BarLevel = .behindWindows
     public var sticky: Bool = true
@@ -76,6 +94,15 @@ public struct BarSettings: Sendable {
     public var notchDisplayHeight: Float = 0
 
     public init() {}
+
+    /// What the panels do while the active Space hosts a fullscreen window.
+    /// Pure so the policy can be pinned headlessly: `hide` is the only state
+    /// that changes a panel's collection behavior, and the only one the
+    /// three shipped keyless configs must never land in by default.
+    public var fullscreenPolicy: FullscreenPolicy {
+        if fullscreenHide { return .hide }
+        return fullscreenShow ? .raise : .carry
+    }
 
     /// Should a bar exist on the display with this 1-based arrangement index?
     public func includesDisplay(arrangementIndex: Int, isMain: Bool) -> Bool {
