@@ -2,6 +2,7 @@ local colors = require("colors")
 local icons = require("icons")
 local settings = require("settings")
 local shell = require("helpers.shell")
+local hover = require("helpers.hover")
 
 -- YBAR PORT: Bluetooth popup mimicking macOS Settings > Bluetooth:
 -- header with a working power toggle, My Devices as two-line cells
@@ -59,6 +60,8 @@ local bt_bracket = sbar.add("bracket", "widgets.bluetooth.bracket", { bt_icon.na
   popup = { align = "center", height = 30 },
 })
 
+hover.pill(bt_bracket, bt_icon)
+
 sbar.add("item", "widgets.bluetooth.padding", {
   position = "right",
   width = settings.group_paddings,
@@ -110,6 +113,7 @@ local access_row = sbar.add("item", "widgets.bluetooth.access", {
     padding_right = inset,
   },
 })
+hover.row(access_row)
 
 local function add_section_header(title)
   return sbar.add("item", {
@@ -179,6 +183,14 @@ for i = 1, max_devices do
     },
     label = { drawing = false },
   })
+  -- A two-line cell is one click target, so both lines light together:
+  -- each row is its own plate, and each also watches its sibling.
+  hover.row(paired_name_rows[i])
+  hover.row(paired_status_rows[i])
+  hover.attachColor(paired_name_rows[i], { paired_status_rows[i] },
+    colors.transparent, colors.row_hover)
+  hover.attachColor(paired_status_rows[i], { paired_name_rows[i] },
+    colors.transparent, colors.row_hover)
 end
 
 -- Nearby Devices: auto-scan on open, spinner beside the header.
@@ -207,6 +219,7 @@ for i = 1, max_devices do
       align = "left",
     },
   })
+  hover.row(nearby_rows[i])
 end
 
 sbar.add("item", "widgets.bluetooth.sep2", {
@@ -462,6 +475,8 @@ for i, row in ipairs(nearby_rows) do
       end)
   end)
 end
+
+hover.row(settings_row)
 
 settings_row:subscribe("mouse.clicked", function()
   sbar.exec("open 'x-apple.systempreferences:com.apple.BluetoothSettings'")

@@ -67,6 +67,8 @@ local media_bracket = sbar.add("bracket", "widgets.media.bracket", { media.name 
   popup = { align = "center", wrap_width = popup_width, auto_close = false },
 })
 
+require("helpers.hover").pill(media_bracket, media)
+
 local popup_pos = "popup." .. media_bracket.name
 
 local media_padding = sbar.add("item", "widgets.media.padding", {
@@ -754,6 +756,8 @@ repeat_btn:subscribe("mouse.clicked", function()
   sbar.exec(app_cmd(app, body))
   sbar.delay(0.3, status_once)
 end)
+
+require("helpers.hover").row(source_row)
 
 source_row:subscribe("mouse.clicked", function()
   local app = current_app
