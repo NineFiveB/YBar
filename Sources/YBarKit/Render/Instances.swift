@@ -1,7 +1,8 @@
 import simd
 
 // GPU instance layouts. These must match the structs in Shaders/YBar.metal exactly
-// (verified by the stride assertions below, called from Renderer.init).
+// (checked by InstanceLayout.mismatch at Renderer.init, which throws on drift,
+// and pinned stride by stride and offset by offset in InstancesTests).
 
 /// One SDF quad: rounded/squircle rect with fill, optional 2-stop gradient, border.
 /// All coordinates are in device pixels, top-left origin.
@@ -154,17 +155,28 @@ public struct DisplayList {
 }
 
 enum InstanceLayout {
-    /// Strides expected by the Metal-side structs; asserted at renderer init.
+    /// Strides expected by the Metal-side structs; checked at renderer init.
     static let quadStride = 112
     static let glyphStride = 64
     static let shapeStride = 32
+    /// 48, not the Windows port's 32: the Metal Hole pads with a float3,
+    /// which is 16-byte aligned on both sides of the buffer.
+    static let holeStride = 48
 
-    static func validate() {
-        assert(MemoryLayout<QuadInstance>.stride == quadStride,
-               "QuadInstance stride \(MemoryLayout<QuadInstance>.stride) != Metal \(quadStride)")
-        assert(MemoryLayout<GlyphInstance>.stride == glyphStride,
-               "GlyphInstance stride \(MemoryLayout<GlyphInstance>.stride) != Metal \(glyphStride)")
-        assert(MemoryLayout<ShapeVertex>.stride == shapeStride,
-               "ShapeVertex stride \(MemoryLayout<ShapeVertex>.stride) != Metal \(shapeStride)")
+    /// The first Swift struct whose stride no longer matches its Metal twin,
+    /// or nil while the ABI holds. A value rather than an assert: `-c release`
+    /// (what brew and `make release` ship) elides asserts, and a trap would
+    /// put the daemon into launchd's KeepAlive crash loop, so Renderer.init
+    /// throws with this text instead.
+    static func mismatch() -> String? {
+        let checks: [(name: String, expected: Int, actual: Int)] = [
+            ("QuadInstance", quadStride, MemoryLayout<QuadInstance>.stride),
+            ("GlyphInstance", glyphStride, MemoryLayout<GlyphInstance>.stride),
+            ("ShapeVertex", shapeStride, MemoryLayout<ShapeVertex>.stride),
+            ("HoleInstance", holeStride, MemoryLayout<HoleInstance>.stride),
+        ]
+        return checks.first { $0.expected != $0.actual }.map {
+            "\($0.name) stride \($0.actual) != Metal \($0.expected)"
+        }
     }
 }
