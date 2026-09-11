@@ -25,18 +25,11 @@ local cpu = sbar.add("graph", "widgets.cpu", 42, {
     drawing = true,
   },
   icon = { string = icons.cpu },
-  label = {
-    string = "cpu ??%",
-    font = {
-      family = settings.font.numbers,
-      style = settings.font.style_map["Bold"],
-      size = 9.0,
-    },
-    align = "right",
-    padding_right = 0,
-    width = 0,
-    y_offset = 4
-  },
+  -- No percentage on the pill: the original overlaid a "cpu n%" label on
+  -- the graph through sketchybar's unclipped zero-width idiom, which YBar
+  -- clips to the slot (a 0 pt slot draws nothing). The figure lives in the
+  -- popup's gauge instead.
+  label = { drawing = false },
   padding_right = settings.paddings + 6
 })
 
@@ -213,10 +206,7 @@ cpu:subscribe("system_stats", function(env)  -- YBAR PORT: built-in provider
 
   local color = cpu_color_for(load)
 
-  cpu:set({
-    graph = { color = color },
-    label = "cpu " .. load .. "%",
-  })
+  cpu:set({ graph = { color = color } })
 
   if cpu_bracket:query().popup.drawing == "on" then
     cpu_gauge:set({
