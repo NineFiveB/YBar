@@ -771,28 +771,23 @@ public final class BarManager {
     /// surface's own frame snapshot (the shared Item.frame holds whichever
     /// surface rendered last — wrong on multi-display), bar or popup: both
     /// record frames as content minus paddingLeft from the same emit path,
-    /// so one trackX computation mirrors the emit-side fixed-width slack for
-    /// either surface kind.
+    /// and the track origin is the renderer's own SceneBuilder.sliderTrackX,
+    /// so a press lands on exactly the fraction the frame painted.
     private func updateSlider(item: Item, localX: CGFloat,
                               frames: [(itemID: Int, frame: CGRect)]) {
         guard let slider = item.slider,
               let frame = frames.first(where: { $0.itemID == item.id })?.frame,
               frame != .zero
         else { return }
-        var trackX = frame.minX + CGFloat(item.paddingLeft)
-        if item.customWidth >= 0 {
-            let slack = max(0, CGFloat(item.customWidth) - CGFloat(naturalWidth(of: item)))
-            switch item.align {
-            case "c": trackX += slack / 2
-            case "r": trackX += slack
-            default: break
-            }
-        }
-        if item.icon.drawing, !item.icon.string.isEmpty {
-            trackX += CGFloat(item.icon.paddingLeft)
-                + fontCache.measure(part: item.icon).width
-                + CGFloat(item.icon.paddingRight)
-        }
+        let contentBox = CGRect(
+            x: frame.minX + CGFloat(item.paddingLeft),
+            y: frame.minY,
+            width: frame.width - CGFloat(item.paddingLeft) - CGFloat(item.paddingRight),
+            height: frame.height)
+        let measured = MeasuredContent(
+            iconSize: fontCache.measure(part: item.icon),
+            labelSize: fontCache.measure(part: item.label))
+        let trackX = SceneBuilder.sliderTrackX(item: item, contentBox: contentBox, measured: measured)
         slider.percentage = slider.percentage(forLocalX: localX - trackX)
         setNeedsRender()
     }

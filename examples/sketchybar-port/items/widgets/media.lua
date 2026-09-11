@@ -135,9 +135,7 @@ local subtitle_row = sbar.add("item", "widgets.media.subtitle", {
 })
 
 -- 4. Progress: elapsed | track | total. The time labels ride the slider item
---    itself (icon leads the track, label trails it). The icon keeps its
---    natural width — the engine's slider hit-test assumes padding + measured
---    ink for a leading icon, so a fixed icon width would skew seek clicks.
+--    itself (icon leads the track, label trails it).
 local seek_track_w = 200
 local seek = sbar.add("slider", "widgets.media.seek", seek_track_w, {
   position = popup_pos,
