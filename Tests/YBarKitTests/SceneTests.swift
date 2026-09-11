@@ -413,6 +413,84 @@ struct HeadlessScene {
     }
 }
 
+/// icon.background.* / label.background.* were parsed, published by --query
+/// and never drawn (review finding A4). Each drawing part now emits one
+/// plate around its ink — natural measure plus the plate's own paddings,
+/// centred on the item's centre line — without widening the layout.
+@MainActor
+@Suite struct PartBackgroundTests {
+    private func plated(_ part: inout TextPart) {
+        part.background.drawing = true
+        part.background.color = YColor(argb: 0xFF11_2233)
+        part.background.paddingLeft = 3
+        part.background.paddingRight = 5
+    }
+
+    @Test func labelPlateIsOneQuadAroundTheInk() throws {
+        let scene = HeadlessScene(scale: 1)
+        let item = Item(name: "t", position: .left)
+        item.label.string = "Hi"
+        item.label.paddingLeft = 4
+        plated(&item.label)
+        let (list, boxes) = scene.build([item])
+        let box = try #require(boxes[item.id])
+        let ink = scene.fontCache.naturalMeasure(part: item.label)
+        // The layout is untouched: the plate paddings live outside it.
+        #expect(box.width == 4 + ink.width)
+        // Bar background, then exactly one plate; the ink still draws.
+        #expect(list.quads.count == 2)
+        #expect(list.glyphs.count == 2)
+        let plate = try #require(list.quads.last)
+        #expect(plate.fill == YColor(argb: 0xFF11_2233).simd)
+        #expect(plate.origin.x == Float((box.minX + 4 - 3).rounded()))
+        #expect(plate.size.x == Float((ink.width + 3 + 5).rounded()))
+        #expect(plate.size.y == Float((ink.height + 4).rounded()))
+        #expect(plate.origin.y == Float((box.midY - (ink.height + 4) / 2).rounded()))
+    }
+
+    @Test func symbolIconGetsAPlateToo() throws {
+        let scene = HeadlessScene(scale: 1)
+        let item = Item(name: "t", position: .left)
+        item.icon.string = "sf:wifi"
+        plated(&item.icon)
+        item.icon.background.height = 20
+        let (list, boxes) = scene.build([item])
+        let box = try #require(boxes[item.id])
+        let ink = scene.fontCache.naturalMeasure(part: item.icon)
+        #expect(list.quads.count == 2)
+        let plate = try #require(list.quads.last)
+        #expect(plate.origin.x == Float((box.minX - 3).rounded()))
+        #expect(plate.size.x == Float((ink.width + 8).rounded()))
+        #expect(plate.size.y == 20)
+    }
+
+    @Test func fixedWidthPartPlateFollowsTheSlotAlignment() throws {
+        let scene = HeadlessScene(scale: 1)
+        let item = Item(name: "t", position: .left)
+        item.label.string = "Hi"
+        item.label.customWidth = 100
+        item.label.align = "r"
+        plated(&item.label)
+        let (list, boxes) = scene.build([item])
+        let box = try #require(boxes[item.id])
+        let ink = scene.fontCache.naturalMeasure(part: item.label)
+        #expect(box.width == 100)
+        let plate = try #require(list.quads.last)
+        // Right-aligned in the slot: the ink starts at slot end minus ink.
+        #expect(plate.origin.x == Float((box.minX + 100 - ink.width - 3).rounded()))
+    }
+
+    @Test func nothingIsDrawnWhenTheStyleIsOff() {
+        let scene = HeadlessScene(scale: 1)
+        let item = Item(name: "t", position: .left)
+        item.label.string = "Hi"
+        item.label.background.color = YColor(argb: 0xFF11_2233)
+        item.label.background.drawing = false
+        let (list, _) = scene.build([item])
+        #expect(list.quads.count == 1)
+    }
+}
+
 /// `slider.interactive=off` turns a slider into a read-only meter (review
 /// finding B1): a press must not enter the drag machinery or rewrite the
 /// percentage from the pointer, and the release is an ordinary click — on

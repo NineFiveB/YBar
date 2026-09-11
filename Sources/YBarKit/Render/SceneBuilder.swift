@@ -287,7 +287,6 @@ public final class SceneBuilder {
             emitImage(image, penX: penX, centerY: centerY, scale: scale,
                       atlas: atlas, into: &list)
         }
-        // TODO(v1.5): per-part backgrounds (icon.background.* / label.background.*).
     }
 
     /// The item background's rect (bar-local, y-down) — shared with the glass
@@ -505,23 +504,7 @@ public final class SceneBuilder {
                 fill: background.shadow.color.simd))
         }
 
-        var quad = QuadInstance(
-            origin: SceneBuilder.pixelOrigin(rect, scale: scale),
-            size: SceneBuilder.pixelSize(rect, scale: scale),
-            radii: radii,
-            fill: background.color.simd,
-            borderWidth: background.borderWidth * Float(scale),
-            cornerExponent: background.cornerExponent,
-            borderColor: background.borderColor.simd)
-        if let gradient = background.gradientColor {
-            quad.fill2 = gradient.simd
-            quad.gradientDir = SceneBuilder.gradientDirection(angleDegrees: background.gradientAngle)
-            quad.flags |= QuadInstance.flagGradient
-        }
-        if background.glass && !SceneBuilder.nativeGlassBackdrops {
-            quad.flags |= QuadInstance.flagGlass
-        }
-        list.quads.append(quad)
+        list.quads.append(SceneBuilder.backgroundQuad(background, rect: rect, scale: scale))
 
         // background.image: aspect-fit inside the background rect, scaled.
         if background.imageDrawing, !background.imageSource.isEmpty,
@@ -545,6 +528,28 @@ public final class SceneBuilder {
                     flags: GlyphInstance.flagColorGlyph))
             }
         }
+    }
+
+    /// The plate quad of a background style (fill, border, gradient, glass),
+    /// shared by emitBackground and the per-part plates emitText draws.
+    static func backgroundQuad(_ background: BackgroundStyle, rect: CGRect, scale: CGFloat) -> QuadInstance {
+        var quad = QuadInstance(
+            origin: pixelOrigin(rect, scale: scale),
+            size: pixelSize(rect, scale: scale),
+            radii: SIMD4(repeating: background.cornerRadius * Float(scale)),
+            fill: background.color.simd,
+            borderWidth: background.borderWidth * Float(scale),
+            cornerExponent: background.cornerExponent,
+            borderColor: background.borderColor.simd)
+        if let gradient = background.gradientColor {
+            quad.fill2 = gradient.simd
+            quad.gradientDir = gradientDirection(angleDegrees: background.gradientAngle)
+            quad.flags |= QuadInstance.flagGradient
+        }
+        if background.glass && !nativeGlassBackdrops {
+            quad.flags |= QuadInstance.flagGlass
+        }
+        return quad
     }
 
     /// Real Liquid Glass (NSGlassEffectView) exists on macOS 26+: the backdrop
@@ -606,6 +611,7 @@ public final class SceneBuilder {
         // far side), and everything clips to the slot box.
         var penX = penX
         var clip = clip
+        var marqueeOffset: CGFloat = 0
         if part.customWidth >= 0 {
             let ink = fontCache.naturalMeasure(part: part).width
             let slack = CGFloat(part.customWidth)
@@ -619,9 +625,8 @@ public final class SceneBuilder {
                 marqueeCycle = ink + 24
                 let seconds = Double(max(part.scrollDuration, 1)) / 60.0
                 let speed = Double(marqueeCycle) / seconds
-                let offset = CGFloat(clock * speed).truncatingRemainder(
+                marqueeOffset = CGFloat(clock * speed).truncatingRemainder(
                     dividingBy: marqueeCycle)
-                penX -= offset
             } else {
                 switch part.align {
                 case "c": penX += slack / 2
@@ -637,6 +642,26 @@ public final class SceneBuilder {
             clip = clip.map { $0.intersection(partBox) } ?? partBox
             if clip?.isEmpty == true { return }
         }
+
+        // icon.background / label.background: one plate behind the part's
+        // ink, sized from the natural measure plus the plate's own paddings
+        // (layout never widens for them — sketchybar parity) and centred on
+        // the item's centre line, as the Windows port draws it. Emitted
+        // before the marquee offset applies: the ink scrolls under a plate
+        // that stays put. Quads paint before glyphs, so no ordering work.
+        if part.background.drawing {
+            let ink = fontCache.naturalMeasure(part: part)
+            let height = part.background.height > 0
+                ? CGFloat(part.background.height) : ink.height + 4
+            let plate = CGRect(
+                x: penX - CGFloat(part.background.paddingLeft) + CGFloat(part.background.xOffset),
+                y: centerY - height / 2 - CGFloat(part.background.yOffset),
+                width: ink.width + CGFloat(part.background.paddingLeft)
+                    + CGFloat(part.background.paddingRight),
+                height: height)
+            list.quads.append(SceneBuilder.backgroundQuad(part.background, rect: plate, scale: scale))
+        }
+        penX -= marqueeOffset
 
         if let symbolName = FontCache.sfSymbolName(in: text) {
             guard let image = fontCache.symbolImage(name: symbolName, pointSize: CGFloat(part.font.size)),
