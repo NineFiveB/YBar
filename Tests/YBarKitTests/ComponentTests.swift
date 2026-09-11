@@ -40,6 +40,12 @@ import Testing
         #expect(slider.percentage(forLocalX: -50) == 0)
         #expect(slider.percentage(forLocalX: 500) == 100)
     }
+
+    /// Scrubbable by default; `slider.interactive=off` is the opt-in for a
+    /// read-only meter (review finding B1).
+    @Test func slidersAreInteractiveByDefault() {
+        #expect(SliderState(width: 10).interactive)
+    }
 }
 
 @Suite struct ComponentGeometryTests {

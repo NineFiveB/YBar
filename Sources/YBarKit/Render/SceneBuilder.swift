@@ -198,19 +198,8 @@ public final class SceneBuilder {
             emitBackground(item.background, rect: backgroundRect, scale: scale, into: &list)
         }
 
-        // Fixed-width alignment slack (unclamped: overflow anchors per align
-        // and the clip below trims the far side — sketchybar behavior).
-        var penX = contentBox.minX
-        if item.customWidth >= 0 {
-            let natural = Layout.naturalLength(
-                item: item, measured: MeasuredContent(iconSize: iconSize, labelSize: labelSize))
-            let slack = CGFloat(item.customWidth) - natural
-            switch item.align {
-            case "c": penX += slack / 2
-            case "r": penX += slack
-            default: break
-            }
-        }
+        let measured = MeasuredContent(iconSize: iconSize, labelSize: labelSize)
+        var penX = contentBox.minX + SceneBuilder.alignmentOffset(item: item, measured: measured)
 
         // Fixed-width items clip their content to the content box: width
         // animations must be a clipped reveal, never overprint neighbors.
@@ -249,6 +238,10 @@ public final class SceneBuilder {
             penX += CGFloat(graph.capacity)
         }
         if let slider = item.slider {
+            // The track origin comes from the shared helper -- the same
+            // computation BarManager.updateSlider maps presses through -- so
+            // a press can never land on a fraction the frame did not paint.
+            penX = SceneBuilder.sliderTrackX(item: item, contentBox: contentBox, measured: measured)
             emitSlider(slider, penX: penX, centerY: centerY,
                        scale: scale, atlas: atlas, clip: clip, into: &list)
             penX += CGFloat(slider.width)
@@ -294,7 +287,6 @@ public final class SceneBuilder {
             emitImage(image, penX: penX, centerY: centerY, scale: scale,
                       atlas: atlas, into: &list)
         }
-        // TODO(v1.5): per-part backgrounds (icon.background.* / label.background.*).
     }
 
     /// The item background's rect (bar-local, y-down) — shared with the glass
@@ -314,6 +306,42 @@ public final class SceneBuilder {
             y: centerY - backgroundHeight / 2 - CGFloat(item.background.yOffset),
             width: contentBox.width + paddingLeft + paddingRight,
             height: backgroundHeight)
+    }
+
+    /// Fixed-width alignment slack (unclamped: overflow anchors per align and
+    /// the item clip trims the far side — sketchybar behavior). Zero for a
+    /// dynamic-width item.
+    static func alignmentOffset(item: Item, measured: MeasuredContent) -> CGFloat {
+        guard item.customWidth >= 0 else { return 0 }
+        let slack = CGFloat(item.customWidth) - Layout.naturalLength(item: item, measured: measured)
+        switch item.align {
+        case "c": return slack / 2
+        case "r": return slack
+        default: return 0
+        }
+    }
+
+    /// Bar-local x of a slider's track: the pen position `emit` reaches after
+    /// the alignment slack, a leading image, the icon (its paddings advance
+    /// even for an empty string; a fixed icon width replaces them) and a
+    /// graph. BarManager.updateSlider maps presses through this same
+    /// function, so the hit side cannot drift from the painted track — its
+    /// own copy once clamped the slack and skipped the paddings of an empty
+    /// icon, and the media widget kept its icon at natural width to dodge
+    /// that. (The Windows port clamps the slack deliberately and should drop
+    /// the clamp.)
+    static func sliderTrackX(item: Item, contentBox: CGRect, measured: MeasuredContent) -> CGFloat {
+        var penX = contentBox.minX + alignmentOffset(item: item, measured: measured)
+        if let image = item.image, image.align != "r" {
+            penX += image.advance
+        }
+        if item.icon.drawing {
+            penX += Layout.partAdvance(item.icon, inkWidth: measured.iconSize.width)
+        }
+        if let graph = item.graph {
+            penX += CGFloat(graph.capacity)
+        }
+        return penX
     }
 
     // MARK: - Components
@@ -366,18 +394,21 @@ public final class SceneBuilder {
             source: image.source, size: image.size, rotation: image.rotation)
         guard let entry = atlas.entry(colorImage: nsImage, cacheKey: key,
                                       sizePoints: sizePoints) else { return }
+        // image.y_offset is positive-up like the text offsets; y-down here.
         let rect = CGRect(
             x: penX,
-            y: centerY - sizePoints.height / 2,
+            y: centerY - sizePoints.height / 2 - CGFloat(image.yOffset),
             width: sizePoints.width,
             height: sizePoints.height)
+        var flags = GlyphInstance.flagColorGlyph
+        if image.desaturate { flags |= GlyphInstance.flagDesaturate }
         list.glyphs.append(GlyphInstance(
             origin: SIMD2(Float(rect.minX * scale), Float(rect.minY * scale)),
             size: SIMD2(Float(rect.width * scale), Float(rect.height * scale)),
             uvOrigin: entry.uvOrigin,
             uvSize: entry.uvSize,
             color: SIMD4(1, 1, 1, 1),
-            flags: GlyphInstance.flagColorGlyph))
+            flags: flags))
     }
 
     /// Speedometer arc (flagArc quad) with the item's label centered in the
@@ -454,7 +485,8 @@ public final class SceneBuilder {
         }
     }
 
-    /// Shared rounded-rect background + hard shadow emission.
+    /// Shared rounded-rect background + shadow emission (items, brackets,
+    /// slider tracks, popup panels, tooltips all come through here).
     private func emitBackground(
         _ background: BackgroundStyle,
         rect: CGRect,
@@ -469,30 +501,32 @@ public final class SceneBuilder {
         if background.shadow.drawing {
             let offset = background.shadow.offset
             let shadowRect = rect.offsetBy(dx: offset.width, dy: -offset.height)
-            list.quads.append(QuadInstance(
+            var shadow = QuadInstance(
                 origin: SceneBuilder.pixelOrigin(shadowRect, scale: scale),
                 size: SceneBuilder.pixelSize(shadowRect, scale: scale),
                 radii: radii,
-                fill: background.shadow.color.simd))
+                fill: background.shadow.color.simd)
+            // shadow.blur > 0 turns the hard offset copy into a falloff. The
+            // blur has to live OUTSIDE the shape, but a quad's rect IS its
+            // shape's bounding box, so a falloff drawn within it would be
+            // clipped at exactly the edge it exists to soften. Grow the drawn
+            // rect by the blur on every side and carry the true half size
+            // across in fill2.xy — free on a shadow quad, whose gradient
+            // fields are otherwise unused. Instance ABI identical to the
+            // Windows port's pushShadow: the 112-byte layout is untouched.
+            let blurPx = Float(CGFloat(background.shadow.blur) * scale)
+            if blurPx > 0 {
+                // Order matters: fill2 records the half size BEFORE the grow.
+                shadow.fill2 = SIMD4(shadow.size.x * 0.5, shadow.size.y * 0.5, 0, 0)
+                shadow.origin -= SIMD2(repeating: blurPx)
+                shadow.size += SIMD2(repeating: blurPx * 2)
+                shadow.gradientDir = SIMD2(blurPx, 0)
+                shadow.flags |= QuadInstance.flagShadow
+            }
+            list.quads.append(shadow)
         }
 
-        var quad = QuadInstance(
-            origin: SceneBuilder.pixelOrigin(rect, scale: scale),
-            size: SceneBuilder.pixelSize(rect, scale: scale),
-            radii: radii,
-            fill: background.color.simd,
-            borderWidth: background.borderWidth * Float(scale),
-            cornerExponent: background.cornerExponent,
-            borderColor: background.borderColor.simd)
-        if let gradient = background.gradientColor {
-            quad.fill2 = gradient.simd
-            quad.gradientDir = SceneBuilder.gradientDirection(angleDegrees: background.gradientAngle)
-            quad.flags |= QuadInstance.flagGradient
-        }
-        if background.glass && !SceneBuilder.nativeGlassBackdrops {
-            quad.flags |= QuadInstance.flagGlass
-        }
-        list.quads.append(quad)
+        list.quads.append(SceneBuilder.backgroundQuad(background, rect: rect, scale: scale))
 
         // background.image: aspect-fit inside the background rect, scaled.
         if background.imageDrawing, !background.imageSource.isEmpty,
@@ -516,6 +550,28 @@ public final class SceneBuilder {
                     flags: GlyphInstance.flagColorGlyph))
             }
         }
+    }
+
+    /// The plate quad of a background style (fill, border, gradient, glass),
+    /// shared by emitBackground and the per-part plates emitText draws.
+    static func backgroundQuad(_ background: BackgroundStyle, rect: CGRect, scale: CGFloat) -> QuadInstance {
+        var quad = QuadInstance(
+            origin: pixelOrigin(rect, scale: scale),
+            size: pixelSize(rect, scale: scale),
+            radii: SIMD4(repeating: background.cornerRadius * Float(scale)),
+            fill: background.color.simd,
+            borderWidth: background.borderWidth * Float(scale),
+            cornerExponent: background.cornerExponent,
+            borderColor: background.borderColor.simd)
+        if let gradient = background.gradientColor {
+            quad.fill2 = gradient.simd
+            quad.gradientDir = gradientDirection(angleDegrees: background.gradientAngle)
+            quad.flags |= QuadInstance.flagGradient
+        }
+        if background.glass && !nativeGlassBackdrops {
+            quad.flags |= QuadInstance.flagGlass
+        }
+        return quad
     }
 
     /// Real Liquid Glass (NSGlassEffectView) exists on macOS 26+: the backdrop
@@ -577,6 +633,7 @@ public final class SceneBuilder {
         // far side), and everything clips to the slot box.
         var penX = penX
         var clip = clip
+        var marqueeOffset: CGFloat = 0
         if part.customWidth >= 0 {
             let ink = fontCache.naturalMeasure(part: part).width
             let slack = CGFloat(part.customWidth)
@@ -590,9 +647,8 @@ public final class SceneBuilder {
                 marqueeCycle = ink + 24
                 let seconds = Double(max(part.scrollDuration, 1)) / 60.0
                 let speed = Double(marqueeCycle) / seconds
-                let offset = CGFloat(clock * speed).truncatingRemainder(
+                marqueeOffset = CGFloat(clock * speed).truncatingRemainder(
                     dividingBy: marqueeCycle)
-                penX -= offset
             } else {
                 switch part.align {
                 case "c": penX += slack / 2
@@ -608,6 +664,26 @@ public final class SceneBuilder {
             clip = clip.map { $0.intersection(partBox) } ?? partBox
             if clip?.isEmpty == true { return }
         }
+
+        // icon.background / label.background: one plate behind the part's
+        // ink, sized from the natural measure plus the plate's own paddings
+        // (layout never widens for them — sketchybar parity) and centred on
+        // the item's centre line, as the Windows port draws it. Emitted
+        // before the marquee offset applies: the ink scrolls under a plate
+        // that stays put. Quads paint before glyphs, so no ordering work.
+        if part.background.drawing {
+            let ink = fontCache.naturalMeasure(part: part)
+            let height = part.background.height > 0
+                ? CGFloat(part.background.height) : ink.height + 4
+            let plate = CGRect(
+                x: penX - CGFloat(part.background.paddingLeft) + CGFloat(part.background.xOffset),
+                y: centerY - height / 2 - CGFloat(part.background.yOffset),
+                width: ink.width + CGFloat(part.background.paddingLeft)
+                    + CGFloat(part.background.paddingRight),
+                height: height)
+            list.quads.append(SceneBuilder.backgroundQuad(part.background, rect: plate, scale: scale))
+        }
+        penX -= marqueeOffset
 
         if let symbolName = FontCache.sfSymbolName(in: text) {
             guard let image = fontCache.symbolImage(name: symbolName, pointSize: CGFloat(part.font.size)),

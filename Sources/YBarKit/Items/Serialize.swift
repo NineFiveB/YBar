@@ -98,6 +98,7 @@ public enum Serialize {
                 "percentage": slider.percentage,
                 "width": slider.width,
                 "highlight_color": hex(slider.highlightColor),
+                "interactive": slider.interactive ? "on" : "off",
             ] as [String: Any]
         }
         if let image = item.image {
@@ -105,6 +106,8 @@ public enum Serialize {
                 "string": image.source,
                 "size": image.size,
                 "drawing": image.drawing ? "on" : "off",
+                "y_offset": image.yOffset,
+                "desaturate": image.desaturate ? "on" : "off",
             ] as [String: Any]
         }
         if let gauge = item.gauge {
@@ -156,6 +159,7 @@ public enum Serialize {
             "color": hex(shadow.color),
             "distance": shadow.distance,
             "angle": shadow.angle,
+            "blur": shadow.blur,
         ]
     }
 

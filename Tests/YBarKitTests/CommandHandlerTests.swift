@@ -79,6 +79,73 @@ import Testing
         #expect(stack.barManager.store.item(named: "s") == nil)
     }
 
+    /// `slider.interactive` is a boolean leaf like any other (on/off/toggle),
+    /// is published by --query, and never blocks a percentage set: a
+    /// read-only meter is still driven by its script.
+    @Test func sliderInteractiveIsSetToggledAndQueried() throws {
+        let stack = try makeStack()
+        var reply = stack.handler.handle(arguments: [
+            "--add", "slider", "s", "left", "80",
+            "--set", "s", "slider.interactive=off", "slider.percentage=42",
+        ])
+        #expect(reply.isEmpty)
+        var slider = try #require(try query(stack, "s")["slider"] as? [String: Any])
+        #expect(slider["interactive"] as? String == "off")
+        #expect((slider["percentage"] as? NSNumber)?.floatValue == 42)
+
+        reply = stack.handler.handle(arguments: ["--set", "s", "slider.interactive=toggle"])
+        #expect(reply.isEmpty)
+        slider = try #require(try query(stack, "s")["slider"] as? [String: Any])
+        #expect(slider["interactive"] as? String == "on")
+
+        reply = stack.handler.handle(arguments: ["--set", "s", "slider.interactive=maybe"])
+        #expect(reply.hasPrefix("[!] invalid boolean"))
+    }
+
+    /// `background.shadow.blur` is an animatable float leaf, published by
+    /// --query next to distance and angle.
+    @Test func shadowBlurIsSetAnimatedAndQueried() throws {
+        let stack = try makeStack()
+        var reply = stack.handler.handle(arguments: [
+            "--add", "item", "x", "left",
+            "--set", "x", "background.shadow.drawing=on", "background.shadow.blur=4",
+        ])
+        #expect(reply.isEmpty)
+        let geometry = try #require(try query(stack, "x")["geometry"] as? [String: Any])
+        let background = try #require(geometry["background"] as? [String: Any])
+        let shadow = try #require(background["shadow"] as? [String: Any])
+        #expect((shadow["blur"] as? NSNumber)?.floatValue == 4)
+
+        reply = stack.handler.handle(arguments: [
+            "--animate", "sin", "30", "--set", "x", "background.shadow.blur=12",
+        ])
+        #expect(reply.isEmpty)
+        #expect(stack.scheduler.isAnimating)
+    }
+
+    /// `image.desaturate` toggles like every boolean leaf and `image.y_offset`
+    /// animates like every float one; --query publishes both.
+    @Test func imageDesaturateAndYOffsetAreSetAndQueried() throws {
+        let stack = try makeStack()
+        var reply = stack.handler.handle(arguments: [
+            "--add", "item", "x", "left",
+            "--set", "x", "image.string=sf.circle", "image.desaturate=on", "image.y_offset=2",
+        ])
+        #expect(reply.isEmpty)
+        var image = try #require(try query(stack, "x")["image"] as? [String: Any])
+        #expect(image["desaturate"] as? String == "on")
+        #expect((image["y_offset"] as? NSNumber)?.floatValue == 2)
+
+        reply = stack.handler.handle(arguments: [
+            "--set", "x", "image.desaturate=toggle",
+            "--animate", "sin", "30", "--set", "x", "image.y_offset=6",
+        ])
+        #expect(reply.isEmpty)
+        image = try #require(try query(stack, "x")["image"] as? [String: Any])
+        #expect(image["desaturate"] as? String == "off")
+        #expect(stack.scheduler.isAnimating)
+    }
+
     @Test func removeCancelsTheItemsAnimations() throws {
         let stack = try makeStack()
         let reply = stack.handler.handle(arguments: [
