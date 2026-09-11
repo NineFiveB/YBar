@@ -159,12 +159,17 @@ sbar.add("item", {
 local settings_row = sbar.add("item", {
   position = popup_pos,
   width = popup_width,
+  -- Two slot rules shape this row. A part's fixed width REPLACES ink +
+  -- paddings, so the inset has to fit inside it; and an item centres its
+  -- parts by default, so the slots must sum to popup_width or the whole
+  -- row drifts right by half the shortfall (the label is off, so the icon
+  -- slot is the row).
   icon = {
     string = icons.gear .. "  Settings",
     align = "left",
     color = colors.white,
     font = { size = 12.0 },
-    width = popup_width - 20,
+    width = popup_width,
     padding_left = inset,
   },
   label = { drawing = false },

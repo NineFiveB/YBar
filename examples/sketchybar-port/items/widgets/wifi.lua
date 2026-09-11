@@ -89,6 +89,11 @@ local current_name = sbar.add("item", {
   },
 })
 
+-- The two slots sum to popup_width (an item centres its parts, so a
+-- shortfall drifts the row right by half of it), and the dot's slot holds
+-- the inset plus its ink — a fixed part width replaces ink + paddings, so
+-- 16 left the 15 pt bullet 4 pt to draw in. 18 also puts "Connected" on
+-- the network rows' text column (inset + 6).
 local current_status = sbar.add("item", {
   position = popup_pos,
   drawing = false,
@@ -98,7 +103,7 @@ local current_status = sbar.add("item", {
     string = "•",
     color = colors.green,
     font = { size = 15, style = settings.font.style_map["Bold"] },
-    width = 16,
+    width = 18,
     padding_left = inset,
   },
   label = {
@@ -106,7 +111,7 @@ local current_status = sbar.add("item", {
     string = "Connected",
     color = colors.grey,
     font = { size = 12 },
-    width = popup_width - 18 - inset,
+    width = popup_width - 18,
   },
 })
 
@@ -201,12 +206,17 @@ local vpn_button = sbar.add("item", {
 local settings_row = sbar.add("item", {
   position = popup_pos,
   width = popup_width,
+  -- Two slot rules shape this row. A part's fixed width REPLACES ink +
+  -- paddings, so the inset has to fit inside it; and an item centres its
+  -- parts by default, so the slots must sum to popup_width or the whole
+  -- row drifts right by half the shortfall (the label is off, so the icon
+  -- slot is the row).
   icon = {
     string = icons.gear .. "  Settings",
     align = "left",
     color = colors.white,
     font = { size = 12.0 },
-    width = popup_width - 20,
+    width = popup_width,
     padding_left = inset,
   },
   label = { drawing = false },
