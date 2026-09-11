@@ -198,19 +198,8 @@ public final class SceneBuilder {
             emitBackground(item.background, rect: backgroundRect, scale: scale, into: &list)
         }
 
-        // Fixed-width alignment slack (unclamped: overflow anchors per align
-        // and the clip below trims the far side — sketchybar behavior).
-        var penX = contentBox.minX
-        if item.customWidth >= 0 {
-            let natural = Layout.naturalLength(
-                item: item, measured: MeasuredContent(iconSize: iconSize, labelSize: labelSize))
-            let slack = CGFloat(item.customWidth) - natural
-            switch item.align {
-            case "c": penX += slack / 2
-            case "r": penX += slack
-            default: break
-            }
-        }
+        let measured = MeasuredContent(iconSize: iconSize, labelSize: labelSize)
+        var penX = contentBox.minX + SceneBuilder.alignmentOffset(item: item, measured: measured)
 
         // Fixed-width items clip their content to the content box: width
         // animations must be a clipped reveal, never overprint neighbors.
@@ -249,6 +238,10 @@ public final class SceneBuilder {
             penX += CGFloat(graph.capacity)
         }
         if let slider = item.slider {
+            // The track origin comes from the shared helper -- the same
+            // computation BarManager.updateSlider maps presses through -- so
+            // a press can never land on a fraction the frame did not paint.
+            penX = SceneBuilder.sliderTrackX(item: item, contentBox: contentBox, measured: measured)
             emitSlider(slider, penX: penX, centerY: centerY,
                        scale: scale, atlas: atlas, clip: clip, into: &list)
             penX += CGFloat(slider.width)
@@ -314,6 +307,42 @@ public final class SceneBuilder {
             y: centerY - backgroundHeight / 2 - CGFloat(item.background.yOffset),
             width: contentBox.width + paddingLeft + paddingRight,
             height: backgroundHeight)
+    }
+
+    /// Fixed-width alignment slack (unclamped: overflow anchors per align and
+    /// the item clip trims the far side — sketchybar behavior). Zero for a
+    /// dynamic-width item.
+    static func alignmentOffset(item: Item, measured: MeasuredContent) -> CGFloat {
+        guard item.customWidth >= 0 else { return 0 }
+        let slack = CGFloat(item.customWidth) - Layout.naturalLength(item: item, measured: measured)
+        switch item.align {
+        case "c": return slack / 2
+        case "r": return slack
+        default: return 0
+        }
+    }
+
+    /// Bar-local x of a slider's track: the pen position `emit` reaches after
+    /// the alignment slack, a leading image, the icon (its paddings advance
+    /// even for an empty string; a fixed icon width replaces them) and a
+    /// graph. BarManager.updateSlider maps presses through this same
+    /// function, so the hit side cannot drift from the painted track — its
+    /// own copy once clamped the slack and skipped the paddings of an empty
+    /// icon, and the media widget kept its icon at natural width to dodge
+    /// that. (The Windows port clamps the slack deliberately and should drop
+    /// the clamp.)
+    static func sliderTrackX(item: Item, contentBox: CGRect, measured: MeasuredContent) -> CGFloat {
+        var penX = contentBox.minX + alignmentOffset(item: item, measured: measured)
+        if let image = item.image, image.align != "r" {
+            penX += image.advance
+        }
+        if item.icon.drawing {
+            penX += Layout.partAdvance(item.icon, inkWidth: measured.iconSize.width)
+        }
+        if let graph = item.graph {
+            penX += CGFloat(graph.capacity)
+        }
+        return penX
     }
 
     // MARK: - Components
