@@ -131,11 +131,13 @@ public final class BarManager {
 
     /// fullscreen_show: raise each surface over the active Space's fullscreen
     /// window, or restore its configured level. Called on active-space changes
-    /// (Daemon) and when the property toggles.
+    /// (Daemon) and when the property toggles. Under fullscreen_hide there is
+    /// nothing to raise — the panel is not on the Space — so the level is
+    /// simply restored; the collection behavior itself is set by apply().
     public func updateFullscreenElevation() {
+        let mayRaise = settings.fullscreenPolicy == .raise
         for surface in surfaces {
-            let raise = settings.fullscreenShow
-                && BarManager.hasFullscreenWindow(on: surface.screen)
+            let raise = mayRaise && BarManager.hasFullscreenWindow(on: surface.screen)
             surface.setElevated(raise, settings: settings)
         }
     }
@@ -335,6 +337,7 @@ public final class BarManager {
                 popupSurfaces[host.id] = popupSurface
             }
             popupSurface.itemFrames = scene.itemFrames
+            popupSurface.hidesInFullscreen = settings.fullscreenPolicy == .hide
 
             // Host frame (bar-local, y-down) -> global AppKit coords (y-up).
             let barFrame = surface.panelFrame
@@ -838,6 +841,7 @@ public final class BarManager {
         let tooltip = tooltipSurface ?? PopupSurface(hostItemID: -1, device: device)
         tooltipSurface = tooltip
         tooltip.panel.hasShadow = false
+        tooltip.hidesInFullscreen = settings.fullscreenPolicy == .hide
         let barFrame = surface.panelFrame
         let anchor = CGRect(
             x: barFrame.minX + frame.minX,

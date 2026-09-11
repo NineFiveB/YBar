@@ -325,3 +325,65 @@ private func mouse(_ kind: MouseEventKind, x: CGFloat = 50) -> MouseEventInfo {
         #expect(stepper.delta(scrollingDeltaY: 3, precise: true, gestureBegan: true) == nil)
     }
 }
+
+/// fullscreen_hide (review finding B5): hiding on a fullscreen Space is the
+/// WindowServer's job — a panel without .fullScreenAuxiliary is simply not
+/// carried there — and it is opt-in. The default and fullscreen_show=on keep
+/// the flag, so the three shipped keyless configs and every topmost=on bar
+/// behave exactly as before.
+@MainActor
+@Suite(.serialized) struct FullscreenPolicyTests {
+    @Test func defaultCarriesWithoutRaising() {
+        let settings = BarSettings()
+        #expect(settings.fullscreenPolicy == .carry)
+        let behavior = BarSurface.collectionBehavior(sticky: true, policy: settings.fullscreenPolicy)
+        #expect(behavior.contains(.fullScreenAuxiliary))
+        #expect(behavior.contains(.canJoinAllSpaces))
+    }
+
+    @Test func showRaisesAndStillCarries() {
+        var settings = BarSettings()
+        settings.fullscreenShow = true
+        #expect(settings.fullscreenPolicy == .raise)
+        #expect(BarSurface.collectionBehavior(sticky: true, policy: .raise).contains(.fullScreenAuxiliary))
+    }
+
+    @Test func hideDropsTheAuxiliaryFlagAndWinsOverShow() {
+        var settings = BarSettings()
+        settings.fullscreenShow = true
+        settings.fullscreenHide = true
+        #expect(settings.fullscreenPolicy == .hide)
+        let sticky = BarSurface.collectionBehavior(sticky: true, policy: .hide)
+        #expect(!sticky.contains(.fullScreenAuxiliary))
+        #expect(sticky.contains(.canJoinAllSpaces))
+        // sticky=off keeps its own flag set; only the auxiliary bit goes.
+        let pinned = BarSurface.collectionBehavior(sticky: false, policy: .hide)
+        #expect(!pinned.contains(.fullScreenAuxiliary))
+        #expect(pinned.contains(.moveToActiveSpace))
+    }
+
+    /// Popups and tooltips follow the bar off fullscreen Spaces, and back.
+    @Test func popupPanelFollowsThePolicy() throws {
+        let manager = try makeHeadlessManager()
+        let popup = PopupSurface(hostItemID: -1, device: manager.device)
+        #expect(popup.panel.collectionBehavior.contains(.fullScreenAuxiliary))
+        popup.hidesInFullscreen = true
+        #expect(!popup.panel.collectionBehavior.contains(.fullScreenAuxiliary))
+        popup.hidesInFullscreen = false
+        #expect(popup.panel.collectionBehavior.contains(.fullScreenAuxiliary))
+    }
+
+    @Test func queryBarReportsBothKeys() throws {
+        let manager = try makeHeadlessManager()
+        let handler = CommandHandler(
+            barManager: manager, eventBus: EventBus(),
+            scriptRunner: ScriptRunner(), scheduler: AnimationScheduler())
+        #expect(handler.handle(arguments: ["--bar", "fullscreen_show=on", "fullscreen_hide=on"]).isEmpty)
+        let text = handler.handle(arguments: ["--query", "bar"])
+        let bar = try #require(try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+        #expect(bar["fullscreen_show"] as? Bool == true)
+        #expect(bar["fullscreen_hide"] as? Bool == true)
+        #expect(manager.settings.fullscreenPolicy == .hide)
+        #expect(handler.handle(arguments: ["--bar", "fullscreen_hide=maybe"]) == "[!] invalid boolean: maybe")
+    }
+}
