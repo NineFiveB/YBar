@@ -74,6 +74,10 @@ public struct GlyphInstance {
 
     /// Set when the glyph lives in the color (BGRA) atlas page rather than the mask page.
     public static let flagColorGlyph: UInt32 = 1 << 0
+    /// Colour images only: render at luminance (image.desaturate — a
+    /// greyed-out icon for a not-running app or a disabled row). Same bit
+    /// as the Windows port's kGlyphFlagDesaturate.
+    public static let flagDesaturate: UInt32 = 1 << 1
 
     public init(
         origin: SIMD2<Float>, size: SIMD2<Float>,

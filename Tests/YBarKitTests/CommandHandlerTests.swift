@@ -123,6 +123,29 @@ import Testing
         #expect(stack.scheduler.isAnimating)
     }
 
+    /// `image.desaturate` toggles like every boolean leaf and `image.y_offset`
+    /// animates like every float one; --query publishes both.
+    @Test func imageDesaturateAndYOffsetAreSetAndQueried() throws {
+        let stack = try makeStack()
+        var reply = stack.handler.handle(arguments: [
+            "--add", "item", "x", "left",
+            "--set", "x", "image.string=sf.circle", "image.desaturate=on", "image.y_offset=2",
+        ])
+        #expect(reply.isEmpty)
+        var image = try #require(try query(stack, "x")["image"] as? [String: Any])
+        #expect(image["desaturate"] as? String == "on")
+        #expect((image["y_offset"] as? NSNumber)?.floatValue == 2)
+
+        reply = stack.handler.handle(arguments: [
+            "--set", "x", "image.desaturate=toggle",
+            "--animate", "sin", "30", "--set", "x", "image.y_offset=6",
+        ])
+        #expect(reply.isEmpty)
+        image = try #require(try query(stack, "x")["image"] as? [String: Any])
+        #expect(image["desaturate"] as? String == "off")
+        #expect(stack.scheduler.isAnimating)
+    }
+
     @Test func removeCancelsTheItemsAnimations() throws {
         let stack = try makeStack()
         let reply = stack.handler.handle(arguments: [

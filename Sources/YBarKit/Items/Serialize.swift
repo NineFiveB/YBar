@@ -106,6 +106,8 @@ public enum Serialize {
                 "string": image.source,
                 "size": image.size,
                 "drawing": image.drawing ? "on" : "off",
+                "y_offset": image.yOffset,
+                "desaturate": image.desaturate ? "on" : "off",
             ] as [String: Any]
         }
         if let gauge = item.gauge {

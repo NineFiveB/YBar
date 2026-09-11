@@ -175,6 +175,13 @@ public enum PropertySetter {
         case "rotation":
             return setFloatValue(key: "item.\(item.id).image.rotation", current: image.rotation,
                                  value: value, ctx: ctx) { image.rotation = $0 }
+        case "y_offset":
+            return setFloatValue(key: "item.\(item.id).image.y_offset", current: image.yOffset,
+                                 value: value, ctx: ctx) { image.yOffset = $0 }
+        case "desaturate":
+            return setBoolValue(current: image.desaturate, value: value, ctx: ctx) {
+                image.desaturate = $0
+            }
         case "align":
             image.align = value.hasPrefix("r") ? "r" : "l"
             ctx.invalidate()
