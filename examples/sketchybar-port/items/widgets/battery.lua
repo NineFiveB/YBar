@@ -8,6 +8,11 @@ local settings = require("settings")
 -- Settings footer. The pill shows only the icon (percentage lives in
 -- the popup). Maintenance, charge limit, low power mode, and current
 -- status are gone — and with them the `battery` CLI dependency.
+--
+-- The pill is driven by the engine's native battery_change /
+-- power_source_change events (IOKit power-source notifications; no pmset
+-- polling). pmset runs only on the slow routine belt behind the events and
+-- when the popup opens, for the rows only it knows (time remaining).
 
 local popup_width = 260
 local inset = 12
@@ -23,7 +28,7 @@ local battery = sbar.add("item", "widgets.battery", {
     padding_right = 8,
   },
   label = { drawing = false },
-  update_freq = 10,
+  update_freq = 300,   -- belt behind the native events, not the driver
   padding_left = 2,
   padding_right = 2,
 })
@@ -32,6 +37,8 @@ local battery_bracket = sbar.add("bracket", "widgets.battery.bracket", { battery
   background = { color = colors.bg1 },
   popup = { align = "center", height = 30 }
 })
+
+require("helpers.hover").pill(battery_bracket, battery)
 
 local popup_pos = "popup." .. battery_bracket.name
 
@@ -159,12 +166,17 @@ sbar.add("item", {
 local settings_row = sbar.add("item", {
   position = popup_pos,
   width = popup_width,
+  -- Two slot rules shape this row. A part's fixed width REPLACES ink +
+  -- paddings, so the inset has to fit inside it; and an item centres its
+  -- parts by default, so the slots must sum to popup_width or the whole
+  -- row drifts right by half the shortfall (the label is off, so the icon
+  -- slot is the row).
   icon = {
     string = icons.gear .. "  Settings",
     align = "left",
     color = colors.white,
     font = { size = 12.0 },
-    width = popup_width - 20,
+    width = popup_width,
     padding_left = inset,
   },
   label = { drawing = false },
@@ -175,40 +187,80 @@ local function hide_details()
   battery_bracket:set({ popup = { drawing = false } })
 end
 
-local function update_main_icon()
+-- Last state pushed by the native events, so battery_change /
+-- power_source_change can restyle the pill without any child process.
+local last_charge = nil   -- 0-100
+local on_ac = nil         -- true | false | nil (unknown)
+
+local function popup_open()
+  return battery_bracket:query().popup.drawing == "on"
+end
+
+local function apply_pill()
+  -- Unknown charge (AC-only desktop with no reading) reads as full.
+  local charge = last_charge or 100
+  local icon, color
+  -- The events carry no isCharging flag. "On the adapter and not full" is
+  -- what the old pmset regex effectively showed as the bolt anyway: its
+  -- "charging" match also hit "discharging" and "not charging", so only
+  -- "Battery Power" (and a "charged" 100%) ever suppressed it.
+  if on_ac and charge < 100 then
+    icon, color = icons.battery.charging, colors.green
+  elseif charge > 80 then
+    icon, color = icons.battery._100, colors.green
+  elseif charge > 60 then
+    icon, color = icons.battery._75, colors.green
+  elseif charge > 40 then
+    icon, color = icons.battery._50, colors.green
+  elseif charge > 20 then
+    icon, color = icons.battery._25, colors.orange
+  else
+    icon, color = icons.battery._0, colors.red
+  end
+  battery:set({ icon = { string = icon, color = color } })
+end
+
+local function apply_popup_rows()
+  header:set({ label = { string = last_charge and (last_charge .. "%") or "—" } })
+  power_source:set({ label = on_ac == false and "Battery" or "Power Adapter" })
+end
+
+-- One pmset round trip: re-seeds the state behind the events (the belt,
+-- and the boot-time forced run before any event has fired) and fills the
+-- one popup row only pmset knows, the time estimate.
+local function refresh_from_pmset()
   sbar.exec("pmset -g batt", function(batt_info)
     local found, _, charge = batt_info:find("(%d+)%%")
-    charge = found and tonumber(charge) or nil
-
-    local is_charging = batt_info:find("charging") ~= nil
-      and batt_info:find("Battery Power") == nil
-
-    local icon, color
-    if is_charging then
-      icon, color = icons.battery.charging, colors.green
-    elseif charge and charge > 80 then
-      icon, color = icons.battery._100, colors.green
-    elseif charge and charge > 60 then
-      icon, color = icons.battery._75, colors.green
-    elseif charge and charge > 40 then
-      icon, color = icons.battery._50, colors.green
-    elseif charge and charge > 20 then
-      icon, color = icons.battery._25, colors.orange
-    else
-      icon, color = icons.battery._0, colors.red
+    if found then last_charge = tonumber(charge) end
+    if batt_info:find("Battery Power") then
+      on_ac = false
+    elseif batt_info:find("AC Power") then
+      on_ac = true
     end
+    apply_pill()
 
-    battery:set({ icon = { string = icon, color = color } })
-
-    if battery_bracket:query().popup.drawing == "on" then
-      header:set({ label = { string = charge and (charge .. "%") or "—" } })
-      power_source:set({
-        label = batt_info:find("Battery Power") and "Battery" or "Power Adapter",
-      })
+    if popup_open() then
+      apply_popup_rows()
       local found_time, _, remaining = batt_info:find(" (%d+:%d+) remaining")
       remaining_time:set({ label = found_time and remaining or "No estimate" })
     end
   end)
+end
+
+local function update_main_icon(env)
+  local sender = env and env.SENDER
+  if sender == "battery_change" then
+    last_charge = tonumber(env.INFO) or last_charge
+    apply_pill()
+    if popup_open() then apply_popup_rows() end
+  elseif sender == "power_source_change" then
+    on_ac = env.INFO == "AC"
+    apply_pill()
+    if popup_open() then apply_popup_rows() end
+  else
+    -- routine (the 300 s belt) / forced / system_woke: full round trip.
+    refresh_from_pmset()
+  end
 end
 
 local function update_health()
@@ -224,13 +276,16 @@ local function toggle_details()
   local should_draw = battery_bracket:query().popup.drawing == "off"
   if should_draw then
     battery_bracket:set({ popup = { drawing = true } })
-    update_main_icon()
+    apply_popup_rows()      -- from the event state, before pmset answers
+    refresh_from_pmset()
     update_health()
     update_history()
   else
     hide_details()
   end
 end
+
+require("helpers.hover").row(settings_row)
 
 settings_row:subscribe("mouse.clicked", function()
   sbar.exec("open 'x-apple.systempreferences:com.apple.Battery-Settings.extension'")
@@ -239,7 +294,10 @@ end)
 
 battery:subscribe("mouse.clicked", toggle_details)
 battery:subscribe("mouse.exited.global", hide_details)
-battery:subscribe({ "routine", "power_source_change", "system_woke" }, update_main_icon)
+battery:subscribe(
+  { "routine", "battery_change", "power_source_change", "system_woke" },
+  update_main_icon
+)
 
 sbar.add("item", "widgets.battery.padding", {
   position = "right",

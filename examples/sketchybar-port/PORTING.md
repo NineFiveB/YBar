@@ -3,7 +3,7 @@
 The original SbarLua config (~2,900 lines) runs on YBar through the
 `sketchybar.lua` compat shim with **verbatim copies** of: `colors.lua`,
 `settings.lua`, `icons.lua`, `bar.lua`, `default.lua`, `front_app.lua`,
-`spaces.lua`, `battery.lua`, and `helpers/{default_font,shell,app_icons}.lua`.
+and `helpers/{default_font,shell,app_icons}.lua`.
 
 ## Install
 
@@ -18,14 +18,18 @@ ybar          # or restart the daemon
 1. **Entry point** — `ybarrc.lua` replaces `sketchybarrc` + `init.lua`;
    `sbar = require("sketchybar")` loads the compat shim instead of the SbarLua
    `.so`. No helper `make` at startup.
-2. **Helper binaries stay in the original tree** — `SKETCHYBAR_CONFIG` at the
-   top of `ybarrc.lua` points at your sketchybar checkout for: `menus` (menu-bar
-   capture), `calendar_events.sh`, `bluetooth_battery.sh`, `system_stats.sh`,
-   `altserver_click.sh`. Adjust if yours lives elsewhere.
+2. **Helpers are vendored** — everything the widgets shell out to ships in
+   `helpers/` beside this file, and `SKETCHYBAR_CONFIG` at the top of
+   `ybarrc.lua` names this directory: `calendar_events.sh` (self-compiles
+   `calendar_events.swift`), `bluetooth_battery.sh`, `system_stats_rich.sh`,
+   `wifi_scan.py`, `battery_history.py`, `claude_agents.sh`, plus the two
+   compiled ones below (`statusitems`, `menus`). Nothing points at a
+   sketchybar checkout.
 3. **CPU provider** — the `cpu_load` event-provider binary is replaced by
    YBar's built-in `system_stats` event (in-process kernel sampling;
-   `env.CPU_USAGE` instead of `env.total_load`). The popup's RAM/GPU/disk
-   sliders still use `system_stats.sh`.
+   `env.CPU_USAGE` instead of `env.total_load`). The popup's memory gauge
+   and chip name come from `helpers/system_stats_rich.sh`, polled only
+   while the popup is open.
 4. **Network speeds** — the `network_load` binary is optional as before; the
    port registers the `network_update` event up front so subscriptions succeed
    without it (speeds show `??? Bps` until the binary exists).

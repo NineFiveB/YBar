@@ -67,6 +67,8 @@ local media_bracket = sbar.add("bracket", "widgets.media.bracket", { media.name 
   popup = { align = "center", wrap_width = popup_width, auto_close = false },
 })
 
+require("helpers.hover").pill(media_bracket, media)
+
 local popup_pos = "popup." .. media_bracket.name
 
 local media_padding = sbar.add("item", "widgets.media.padding", {
@@ -605,10 +607,17 @@ media:subscribe("media_change", function(env)
   -- Pill: unchanged from the pre-popup widget.
   local text = (artist ~= "" and (artist .. " — ") or "") .. title
   local color = playing and colors.white or colors.grey
+  -- Marquee pace: the engine scrolls ONE cycle (ink + 24pt) per
+  -- scroll_duration/60 s, so a fixed duration makes long titles whip past
+  -- faster than short ones. Scale the duration with the text length instead,
+  -- for a constant ~45pt/s reading pace at any title length (utf8.len so
+  -- multi-byte chars like the em dash don't inflate the estimate).
+  local chars = utf8.len(text) or #text
+  local scroll_frames = math.max(240, math.floor(chars * 7.7 + 32))
   media:set({
     drawing = show,
     icon = { color = color },
-    label = { string = text, color = color },
+    label = { string = text, color = color, scroll_duration = scroll_frames },
   })
   media_padding:set({ drawing = show })
 
@@ -745,6 +754,8 @@ repeat_btn:subscribe("mouse.clicked", function()
   sbar.exec(app_cmd(app, body))
   sbar.delay(0.3, status_once)
 end)
+
+require("helpers.hover").row(source_row)
 
 source_row:subscribe("mouse.clicked", function()
   local app = current_app
