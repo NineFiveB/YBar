@@ -24,6 +24,30 @@ public final class CommandHandler {
     public var onForcedUpdate: (() -> Void)?
     /// Lua-first item dispatch (wired by the daemon; falls back to shell scripts).
     public var dispatchItem: ((Item, [String: String]) -> Void)?
+    /// `--volume`: the daemon points this at AudioProvider (nil headless, so a
+    /// test can never touch the real output device). Returns false when the
+    /// device refused the write.
+    public var onVolume: ((VolumeRequest) -> Bool)?
+
+    /// What `--volume <token>` asks for. Absolute levels are the Windows port's
+    /// grammar; the signed step form replaces the one thing themes still shelled
+    /// `osascript` for — `set volume output volume ((output volume of (get
+    /// volume settings)) + 4)` — without a read round trip through Lua.
+    public enum VolumeRequest: Equatable {
+        case absolute(Int)
+        case step(Int)
+    }
+
+    /// Pure: `"50"` / `"50.6"` (rounded) → absolute 0...100; `"+4"` / `"-4"` →
+    /// step. Anything else (out of range, non-numeric, empty) is nil.
+    static func parseVolume(_ token: String) -> VolumeRequest? {
+        if let sign = token.first, sign == "+" || sign == "-" {
+            guard let delta = Int(token.dropFirst()) else { return nil }
+            return .step(sign == "-" ? -delta : delta)
+        }
+        guard let level = Double(token), level.isFinite, level >= 0, level <= 100 else { return nil }
+        return .absolute(Int(level.rounded()))
+    }
 
     public init(barManager: BarManager, eventBus: EventBus,
                 scriptRunner: ScriptRunner, scheduler: AnimationScheduler) {
@@ -247,6 +271,32 @@ public final class CommandHandler {
                     continue
                 }
                 onHotloadToggle?(flag)
+
+            case "volume":
+                // ybar extension, mirrored from the Windows port: the daemon
+                // already holds the output device, so a slider drag is one
+                // call instead of an osascript spawn. The port's optional
+                // second token routes to an app's audio session; macOS has
+                // no per-app volume API, so it is refused by name.
+                guard batch.args.count == 1 || batch.args.count == 2 else {
+                    emit("[!] usage: --volume <0-100|+N|-N>")
+                    continue
+                }
+                if batch.args.count == 2 {
+                    emit("[!] per-app volume is not available on macOS")
+                    continue
+                }
+                guard let request = CommandHandler.parseVolume(batch.args[0]) else {
+                    emit("[!] invalid volume: \(batch.args[0])")
+                    continue
+                }
+                guard let onVolume else {
+                    emit("[!] volume control is not available")
+                    continue
+                }
+                if !onVolume(request) {
+                    emit("[!] the output device refused the volume change")
+                }
 
             case "exit":
                 onExit?()
