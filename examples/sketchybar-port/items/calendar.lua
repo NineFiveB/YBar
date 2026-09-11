@@ -34,7 +34,10 @@ local cal = sbar.add("item", "calendar", {
     font = { family = settings.font.numbers, style = settings.font.style_map["Regular"] },
   },
   position = "right",
-  update_freq = 30,
+  -- 10 s so the minute rolls over promptly (the native menu bar clock
+  -- updates on the minute); os.date is cheap, and the tick sets only the
+  -- two clock strings — the grid and the events feed belong to popup open.
+  update_freq = 10,
   padding_left = 1,
   padding_right = 1,
   background = {
@@ -334,6 +337,9 @@ end
 cal:subscribe("mouse.clicked", toggle_calendar_popup)
 cal:subscribe("mouse.exited.global", hide_calendar_popup)
 
+-- Clock only. The events feed spawns the EventKit helper and repaints all
+-- 42 cells, so it runs when the popup opens (toggle_calendar_popup), not
+-- on every tick of a popup nobody is looking at.
 cal:subscribe({ "forced", "routine", "system_woke" }, function()
   -- Native menu bar clock format: "Mon Aug 3" + "7:50 PM" (no dots, day
   -- and hour without leading zeros).
@@ -341,5 +347,4 @@ cal:subscribe({ "forced", "routine", "system_woke" }, function()
     icon = os.date("%a %b ") .. tostring(os.date("*t").day),
     label = (os.date("%I:%M %p"):gsub("^0", "", 1)),
   })
-  fetch_calendar_events()
 end)
