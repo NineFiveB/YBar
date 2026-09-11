@@ -430,9 +430,20 @@ public final class LuaRuntime {
         }
         register("query_item") { L in
             MainActor.assumeIsolated {
-                guard let runtime = LuaRuntime.current, let name = argString(L, 1),
-                      let item = runtime.barManager.store.item(named: name)
-                else {
+                guard let runtime = LuaRuntime.current, let name = argString(L, 1) else {
+                    lua_pushnil(L)
+                    return 1
+                }
+                // The CLI's shadowing rule, verbatim: a reserved target (bar,
+                // defaults, events, displays, apps) wins over an item of that
+                // name. This is also how `ybar.query_table("apps")` hands a
+                // widget the app list as a table instead of a JSON string.
+                if let reserved = Serialize.reserved(
+                    target: name, manager: runtime.barManager, eventBus: runtime.eventBus) {
+                    LuaRuntime.push(reserved, to: L)
+                    return 1
+                }
+                guard let item = runtime.barManager.store.item(named: name) else {
                     lua_pushnil(L)
                     return 1
                 }
