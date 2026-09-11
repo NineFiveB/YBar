@@ -1,17 +1,16 @@
 -- YBar Liquid Glass theme over the FULL sketchybar-setup port.
 -- Every element and placement is identical to the sketchybar config (apple
 -- menu, app menus + workspace swap, workspaces with app icons, calendar,
--- AltServer, battery + popup + charge slider, bluetooth, wifi + speeds,
--- cpu + stats popup) — restyled as dark Liquid Glass: blurred backdrops,
+-- battery + popup + charge history, bluetooth, wifi, cpu + stats popup,
+-- now-playing) — restyled as dark Liquid Glass: blurred backdrops,
 -- specular rims, 20pt macOS-26 corners.
 --
 -- The item files are REUSED verbatim from ../sketchybar-port; only this
 -- directory's colors.lua / bar.lua / default.lua differ.
 --
--- Install:
---   cp -R examples/sketchybar-port ~/.config/ybar-port-files
---   cp -R examples/sketchybar-glass/* ~/.config/ybar/
---   (then adjust PORT_DIR below to ~/.config/ybar-port-files)
+-- Install: `scripts/ybar-theme use sketchybar-glass` (see docs/THEMES.md).
+-- Nothing to edit: PORT_DIR below finds the port tree beside this file in
+-- the repo, or under ~/.config/ybar/themes when installed by ybar-theme.
 
 -- The port tree ships beside this theme in the repo; a theme installed via
 -- ybar-theme lands in ~/.config/ybar/themes instead, so fall back there.
