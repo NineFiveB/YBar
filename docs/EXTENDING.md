@@ -68,6 +68,13 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
   at startup so a bar launched mid-song shows it immediately)
 - Native providers: NSWorkspace, IOKit battery, CoreAudio volume, NWPathMonitor,
   in-process CPU/memory stats
+- Output volume write path: `ybar --volume <0-100|+N|-N>` / `ybar.volume(pct)`
+  (in-process CoreAudio; 0 mutes keeping the level, `"+4"`/`"-4"` step from the
+  current level — no more `osascript` per slider tick)
+- Running apps, permission-free: `ybar --query apps` → `[{name, bundle_id, pid,
+  active, hidden}]` (also `ybar.query_table("apps")` as a Lua table; `apps` is a
+  reserved query target like `bar`/`displays`) and `ybar --app <pid|bundle-id>
+  activate|hide|quit|kill` — no window titles, so no Screen Recording grant
 - AeroSpace integration: the workspace-change hook can invoke `ybar --trigger`
   directly (the CLI folds `$AEROSPACE_FOCUSED_WORKSPACE` from its environment),
   with debounced, generation-guarded refreshes for rapid switching
@@ -81,13 +88,18 @@ On Windows the event and provider set maps one-to-one to native equivalents
 - `make app` builds a minimal **app bundle** so the daemon owns its TCC identity —
   Bluetooth, Calendar, and Apple Events prompts attribute to YBar instead of your
   terminal, and grants cover every helper the daemon spawns
+- `ybar autostart enable [-c <config>]|disable|status` writes and bootstraps the
+  `com.ybar.YBar` LaunchAgent (bundle binary, KeepAlive on crash only, config
+  discovered at each start unless pinned)
 
 ## Where to start
 
 - Read a real config end to end: [`examples/`](../examples) — the flagship
   `sketchybar-glass` theme, a `yabai-skhd` setup, and a declarative
   `jsonc-demo`.
-- Themes ship as selectable presets: `scripts/ybar-theme list|use <name>|install
-  <git-url>` — see [THEMES.md](THEMES.md) to publish your own.
+- Themes ship as selectable presets: `ybar theme list|current|use <name>|reset|
+  install <git-url>` (a running bar reloads in place; the choice is honoured by
+  config discovery on every start) — see [THEMES.md](THEMES.md) to publish
+  your own.
 - The engine internals (how items, layout, and rendering fit together) are in
   [ARCHITECTURE.md](ARCHITECTURE.md).

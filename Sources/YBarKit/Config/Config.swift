@@ -1,20 +1,34 @@
 import Foundation
 
 /// Config discovery, sketchybar-compatible search order with a Lua twist:
-/// `-c <path>` → per directory, `<name>rc.lua` (embedded YbarLua) is preferred
-/// over the executable `<name>rc` shell script, then the declarative
-/// `<name>rc.jsonc` / `<name>.jsonc`:
+/// `-c <path>` → the selected theme (default instance only) → per directory,
+/// `<name>rc.lua` (embedded YbarLua) is preferred over the executable
+/// `<name>rc` shell script, then the declarative `<name>rc.jsonc` / `<name>.jsonc`:
 /// `$XDG_CONFIG_HOME/<name>/` → `~/.config/<name>/` → `~/.{<name>rc.lua,<name>rc}`.
 public enum ConfigLocator {
     public static func locate(
         explicitPath: String?, instanceName: String,
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        home: URL = FileManager.default.homeDirectoryForCurrentUser
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        executable: URL? = AppBundle.executableURL()
     ) -> URL? {
         let fileManager = FileManager.default
         if let explicitPath {
             let url = URL(fileURLWithPath: (explicitPath as NSString).expandingTildeInPath)
             return fileManager.fileExists(atPath: url.path) ? url : nil
+        }
+        // `ybar theme use` records a choice in ~/.config/ybar/current-theme;
+        // honouring it here is what makes a theme survive restarts and
+        // autostart — otherwise "recorded; start ybar to apply" would be a
+        // lie. Explicit -c above always wins; `ybar theme reset` clears it.
+        // Gated to the default instance, as the port is (config.cpp): the
+        // state file is not instance-scoped, and a renamed secondary bar
+        // must not be hijacked by the primary's theme.
+        if instanceName == "ybar",
+           let themed = ThemeCatalog.currentEntry(
+               home: home,
+               roots: ThemeCatalog.roots(home: home, executable: executable, environment: environment)) {
+            return themed
         }
         var candidates: [URL] = []
 

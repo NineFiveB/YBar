@@ -70,7 +70,7 @@ vol:set({
 })
 vol:subscribe("mouse.clicked", function(env)
   if env.PERCENTAGE then
-    ybar.exec("osascript -e 'set volume output volume " .. env.PERCENTAGE .. "'")
+    ybar.volume(env.PERCENTAGE) -- in-process CoreAudio write, no osascript spawn
   end
 end)
 vol:subscribe("volume_change", function(env)
