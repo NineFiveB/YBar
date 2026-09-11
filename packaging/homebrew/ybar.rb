@@ -1,6 +1,9 @@
 # THIS FILE IS THE SOURCE OF TRUTH — github.com/NineFiveB/homebrew-ybar mirrors
-# it verbatim (Formula/ybar.rb there); copy it over on every release, after
-# updating the url tag + sha256 below.
+# it verbatim (Formula/ybar.rb there). The release workflow
+# (.github/workflows/release.yml) pins the url tag + sha256 below from the
+# tag's own source tarball, proves them with a build-from-source install,
+# commits the pin back here and pushes the copy to the tap; nothing in it
+# is edited by hand any more.
 #
 # A formula, not a cask: YBar has no Developer ID, so a downloaded binary
 # arrives quarantined with an untrusted signature and Gatekeeper refuses it.
@@ -11,9 +14,9 @@ class Ybar < Formula
   desc "Metal-rendered, sketchybar-compatible macOS status bar"
   homepage "https://github.com/NineFiveB/YBar"
   url "https://github.com/NineFiveB/YBar/archive/refs/tags/v0.1.0.tar.gz"
-  # SOURCE tarball hash (curl -L <url above> | shasum -a 256) - NOT the
+  # SOURCE tarball hash (curl -fL <url above> | shasum -a 256) - NOT the
   # app-zip hash that `make release` prints, which is a different,
-  # machine-signed artifact. Regenerate on every new tag.
+  # machine-signed artifact. Pinned by the release workflow on every tag.
   sha256 "88bf58485b702f9d4f1db7d618728bd04457693594696ae0bc1e79fe9db9693c"
   license "GPL-3.0-only"
   head "https://github.com/NineFiveB/YBar.git", branch: "main"
