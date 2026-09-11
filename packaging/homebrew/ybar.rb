@@ -35,6 +35,13 @@ class Ybar < Formula
     (app/"Contents/MacOS").mkpath
     (app/"Contents/Resources").mkpath
     cp "packaging/Info.plist", app/"Contents/Info.plist"
+    # Same build stamp as the Makefile: a --HEAD install names its commit in
+    # CFBundleVersion, which `ybar --version` appends. A tag install keeps
+    # the release build number from the committed plist.
+    if build.head?
+      system "plutil", "-replace", "CFBundleVersion", "-string",
+             Utils.git_short_head, app/"Contents/Info.plist"
+    end
     cp ".scratch/release/ybar", app/"Contents/MacOS/ybar"
     cp_r ".scratch/release/YBar_YBarKit.bundle", app/"Contents/Resources"
 
