@@ -1,7 +1,8 @@
 import simd
 
 // GPU instance layouts. These must match the structs in Shaders/YBar.metal exactly
-// (verified by the stride assertions below, called from Renderer.init).
+// (checked by InstanceLayout.mismatch at Renderer.init, which throws on drift,
+// and pinned stride by stride and offset by offset in InstancesTests).
 
 /// One SDF quad: rounded/squircle rect with fill, optional 2-stop gradient, border.
 /// All coordinates are in device pixels, top-left origin.
@@ -31,6 +32,13 @@ public struct QuadInstance {
     public static let flagArc: UInt32 = 1 << 2
     /// Bar background only: punch the DisplayList's hole rects out of this quad.
     public static let flagHoles: UInt32 = 1 << 3
+    /// Soft falloff quad (drop shadow, or a glow when the colour is light).
+    /// The quad is drawn EXPANDED by the blur radius so the falloff has
+    /// somewhere to live; the true shape's halfSize rides in fill2.xy and the
+    /// blur radius in gradientDir.x, both of which a shadow quad otherwise
+    /// leaves unused. Nothing about the 112-byte layout changes — the same
+    /// bit and fields as the Windows port's kQuadFlagShadow.
+    public static let flagShadow: UInt32 = 1 << 4
 
     public init(
         origin: SIMD2<Float>, size: SIMD2<Float>, radii: SIMD4<Float>,
@@ -67,6 +75,10 @@ public struct GlyphInstance {
 
     /// Set when the glyph lives in the color (BGRA) atlas page rather than the mask page.
     public static let flagColorGlyph: UInt32 = 1 << 0
+    /// Colour images only: render at luminance (image.desaturate — a
+    /// greyed-out icon for a not-running app or a disabled row). Same bit
+    /// as the Windows port's kGlyphFlagDesaturate.
+    public static let flagDesaturate: UInt32 = 1 << 1
 
     public init(
         origin: SIMD2<Float>, size: SIMD2<Float>,
@@ -143,17 +155,28 @@ public struct DisplayList {
 }
 
 enum InstanceLayout {
-    /// Strides expected by the Metal-side structs; asserted at renderer init.
+    /// Strides expected by the Metal-side structs; checked at renderer init.
     static let quadStride = 112
     static let glyphStride = 64
     static let shapeStride = 32
+    /// 48, not the Windows port's 32: the Metal Hole pads with a float3,
+    /// which is 16-byte aligned on both sides of the buffer.
+    static let holeStride = 48
 
-    static func validate() {
-        assert(MemoryLayout<QuadInstance>.stride == quadStride,
-               "QuadInstance stride \(MemoryLayout<QuadInstance>.stride) != Metal \(quadStride)")
-        assert(MemoryLayout<GlyphInstance>.stride == glyphStride,
-               "GlyphInstance stride \(MemoryLayout<GlyphInstance>.stride) != Metal \(glyphStride)")
-        assert(MemoryLayout<ShapeVertex>.stride == shapeStride,
-               "ShapeVertex stride \(MemoryLayout<ShapeVertex>.stride) != Metal \(shapeStride)")
+    /// The first Swift struct whose stride no longer matches its Metal twin,
+    /// or nil while the ABI holds. A value rather than an assert: `-c release`
+    /// (what brew and `make release` ship) elides asserts, and a trap would
+    /// put the daemon into launchd's KeepAlive crash loop, so Renderer.init
+    /// throws with this text instead.
+    static func mismatch() -> String? {
+        let checks: [(name: String, expected: Int, actual: Int)] = [
+            ("QuadInstance", quadStride, MemoryLayout<QuadInstance>.stride),
+            ("GlyphInstance", glyphStride, MemoryLayout<GlyphInstance>.stride),
+            ("ShapeVertex", shapeStride, MemoryLayout<ShapeVertex>.stride),
+            ("HoleInstance", holeStride, MemoryLayout<HoleInstance>.stride),
+        ]
+        return checks.first { $0.expected != $0.actual }.map {
+            "\($0.name) stride \($0.actual) != Metal \($0.expected)"
+        }
     }
 }
