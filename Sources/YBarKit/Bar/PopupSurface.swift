@@ -31,7 +31,7 @@ public final class PopupSurface {
         panel.isReleasedWhenClosed = false
         panel.animationBehavior = .none
         panel.level = .popUpMenu
-        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        panel.collectionBehavior = BarSurface.collectionBehavior(sticky: true, policy: .carry)
 
         var madeGlass: NSView?
         #if compiler(>=6.2)
@@ -75,6 +75,18 @@ public final class PopupSurface {
     }
 
     public var scale: CGFloat { max(panel.backingScaleFactor, 1) }
+
+    /// fullscreen_hide: a popup or tooltip stays off fullscreen Spaces with
+    /// its bar. Carried there on its own it would float over the fullscreen
+    /// window at menu level with no bar to hang from (scripts can open a
+    /// popup without a click).
+    var hidesInFullscreen = false {
+        didSet {
+            guard hidesInFullscreen != oldValue else { return }
+            panel.collectionBehavior = BarSurface.collectionBehavior(
+                sticky: true, policy: hidesInFullscreen ? .hide : .carry)
+        }
+    }
 
     /// Place and show the panel. `anchor` is the host item's frame in global
     /// AppKit coordinates (bottom-left origin, y-up); the popup hangs below it
