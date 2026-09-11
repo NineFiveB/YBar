@@ -38,6 +38,8 @@ local battery_bracket = sbar.add("bracket", "widgets.battery.bracket", { battery
   popup = { align = "center", height = 30 }
 })
 
+require("helpers.hover").pill(battery_bracket, battery)
+
 local popup_pos = "popup." .. battery_bracket.name
 
 -- ── Header: "Battery" + percentage ─────────────────────────────────────────
@@ -282,6 +284,8 @@ local function toggle_details()
     hide_details()
   end
 end
+
+require("helpers.hover").row(settings_row)
 
 settings_row:subscribe("mouse.clicked", function()
   sbar.exec("open 'x-apple.systempreferences:com.apple.Battery-Settings.extension'")

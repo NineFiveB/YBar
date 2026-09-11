@@ -1,6 +1,7 @@
 local icons = require("icons")
 local colors = require("colors")
 local settings = require("settings")
+local hover = require("helpers.hover")
 
 -- YBAR PORT: Wi-Fi popup mimicking the macOS Settings > Wi-Fi pane:
 -- header with a working power toggle, the connected network with a green
@@ -41,6 +42,8 @@ local wifi_bracket = sbar.add("bracket", "widgets.wifi.bracket", {
   background = { color = colors.bg1 },
   popup = { align = "center", height = 30 }
 })
+
+hover.pill(wifi_bracket, wifi)
 
 local popup_pos = "popup." .. wifi_bracket.name
 
@@ -137,7 +140,7 @@ local function add_section_header(title)
 end
 
 local function add_net_row(name)
-  return sbar.add("item", name, {
+  local row = sbar.add("item", name, {
     position = popup_pos,
     drawing = false,
     width = popup_width,
@@ -158,6 +161,8 @@ local function add_net_row(name)
       padding_right = inset,
     },
   })
+  hover.row(row)
+  return row
 end
 
 local known_header = add_section_header("Known Networks")
@@ -439,6 +444,9 @@ for i, row in ipairs(other_rows) do
     join(other[i], row)
   end)
 end
+
+hover.row(vpn_button)
+hover.row(settings_row)
 
 settings_row:subscribe("mouse.clicked", function()
   sbar.exec("open 'x-apple.systempreferences:com.apple.wifi-settings-extension'")
