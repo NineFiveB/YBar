@@ -99,6 +99,14 @@ public enum BarPropertySetter {
             manager.settings.fullscreenShow = flag
             manager.updateFullscreenElevation()
             return nil
+        case "fullscreen_hide":
+            guard let flag = PropertySetter.parseBool(value) else { return "[!] invalid boolean: \(value)" }
+            manager.settings.fullscreenHide = flag
+            // A bar elevated on a fullscreen Space must come back down: the
+            // settings write re-applied the collection behavior, this
+            // re-evaluates the level.
+            manager.updateFullscreenElevation()
+            return nil
         case "wifi_ssid_prompt":
             guard let flag = PropertySetter.parseBool(value) else { return "[!] invalid boolean: \(value)" }
             if flag { DaemonHooks.shared.requestLocation?() }
