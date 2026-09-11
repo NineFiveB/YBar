@@ -1,5 +1,5 @@
 {
-  "$comment": "Community theme registry \u2014 ybar-theme install <url>. PRs welcome; tag your repo with the ybar-theme GitHub topic.",
+  "$comment": "Community theme registry \u2014 ybar theme install <url>. PRs welcome; tag your repo with the ybar-theme GitHub topic.",
   "themes": [
     {
       "name": "sketchybar-glass",
