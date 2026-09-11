@@ -104,7 +104,7 @@ local current_status = sbar.add("item", {
   icon = {
     align = "left",
     string = "•",
-    color = colors.green,
+    color = colors.connected,
     font = { size = 15, style = settings.font.style_map["Bold"] },
     width = 18,
     padding_left = inset,
@@ -112,7 +112,7 @@ local current_status = sbar.add("item", {
   label = {
     align = "left",
     string = "Connected",
-    color = colors.grey,
+    color = colors.connected,
     font = { size = 12 },
     width = popup_width - 18,
   },
@@ -379,11 +379,11 @@ local function update_vpn_status()
     local connected = output:match("%(Connected%)") ~= nil
     local present = output:match("%S") ~= nil
     vpn_button:set({
-      icon = { color = connected and colors.green or colors.grey },
+      icon = { color = connected and colors.connected or colors.grey },
       label = {
         string = connected and "Connected"
           or (present and "Not Connected" or "Not Installed"),
-        color = connected and colors.green or colors.grey,
+        color = connected and colors.connected or colors.grey,
       },
     })
   end)
