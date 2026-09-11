@@ -62,6 +62,9 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
   at startup so a bar launched mid-song shows it immediately)
 - Native providers: NSWorkspace, IOKit battery, CoreAudio volume, NWPathMonitor,
   in-process CPU/memory stats
+- Output volume write path: `ybar --volume <0-100|+N|-N>` / `ybar.volume(pct)`
+  (in-process CoreAudio; 0 mutes keeping the level, `"+4"`/`"-4"` step from the
+  current level — no more `osascript` per slider tick)
 - AeroSpace integration: the workspace-change hook can invoke `ybar --trigger`
   directly (the CLI folds `$AEROSPACE_FOCUSED_WORKSPACE` from its environment),
   with debounced, generation-guarded refreshes for rapid switching

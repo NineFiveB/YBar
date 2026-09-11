@@ -104,4 +104,35 @@ import Testing
         #expect(popup["align"] as? String == "c")
         #expect(popup["drawing"] as? String == "off")
     }
+
+    // MARK: - --volume
+
+    /// Headless the hook is nil, so none of these can reach the real output
+    /// device; every reply is a validation result.
+    @Test func volumeValidatesBeforeTouchingTheDevice() throws {
+        let stack = try makeStack()
+        #expect(stack.handler.handle(arguments: ["--volume"]).hasPrefix("[!] usage: --volume"))
+        #expect(stack.handler.handle(arguments: ["--volume", "101"]) == "[!] invalid volume: 101")
+        #expect(stack.handler.handle(arguments: ["--volume", "abc"]) == "[!] invalid volume: abc")
+        #expect(stack.handler.handle(arguments: ["--volume", "+x"]) == "[!] invalid volume: +x")
+        #expect(stack.handler.handle(arguments: ["--volume", "50", "Music"])
+            == "[!] per-app volume is not available on macOS")
+        // Well-formed but unwired: the parser accepted it, the hook is missing.
+        #expect(stack.handler.handle(arguments: ["--volume", "50"]) == "[!] volume control is not available")
+        #expect(stack.handler.handle(arguments: ["--volume", "-4"]) == "[!] volume control is not available")
+    }
+
+    @Test func volumeParsesAbsoluteLevelsAndSignedSteps() throws {
+        let stack = try makeStack()
+        var requests: [CommandHandler.VolumeRequest] = []
+        stack.handler.onVolume = { requests.append($0); return true }
+        let reply = stack.handler.handle(arguments: [
+            "--volume", "50", "--volume", "+4", "--volume", "-3", "--volume", "50.6", "--volume", "0",
+        ])
+        #expect(reply.isEmpty)
+        #expect(requests == [.absolute(50), .step(4), .step(-3), .absolute(51), .absolute(0)])
+        stack.handler.onVolume = { _ in false }
+        #expect(stack.handler.handle(arguments: ["--volume", "10"])
+            == "[!] the output device refused the volume change")
+    }
 }

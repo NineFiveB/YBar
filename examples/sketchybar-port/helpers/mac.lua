@@ -9,14 +9,15 @@ M.WIFI_SETTINGS = "open 'x-apple.systempreferences:com.apple.wifi-settings-exten
 M.CALENDAR = "open -a Calendar"
 
 -- Scroll on the item adjusts the output volume (4% per tick); the
--- volume_change event repaints the module.
+-- volume_change event repaints the module. `ybar.volume` writes CoreAudio
+-- in-process, and the signed string form steps from the current level, so
+-- a scroll burst no longer spawns an osascript per tick.
 function M.volume_scroll(item)
   item:subscribe("mouse.scrolled", function(env)
     local delta = tonumber(env.SCROLL_DELTA) or 0
     if delta == 0 then return end
-    local step = delta > 0 and 4 or -4
-    sbar.exec("osascript -e 'set volume output volume "
-      .. "((output volume of (get volume settings)) + (" .. step .. "))'")
+    local err = ybar.volume(delta > 0 and "+4" or "-4")
+    if err then print(err) end
   end)
 end
 

@@ -177,6 +177,7 @@ public enum CLIClient {
       ybar --subscribe clock system_woke
       ybar --animate tanh 30 --set clock label.color=0xffff0000
       ybar --query bar
+      ybar --volume 40                (or +4 / -4 to step the output volume)
 
     See docs/ARCHITECTURE.md for the full command grammar.
     """
