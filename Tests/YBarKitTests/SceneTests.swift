@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import simd
 import Testing
@@ -312,5 +313,102 @@ struct HeadlessScene {
         }
         let knobCenterY = knob.origin.y + knob.size.y / 2
         #expect(abs(knobCenterY - Float(box.midY * scene.scale)) <= 2)
+    }
+}
+
+/// The drag hit-mapping and the renderer once computed a slider's track
+/// origin separately and disagreed (review finding A8): the hit side clamped
+/// the alignment slack, skipped the paddings of an empty icon and knew
+/// nothing of a leading image. SceneBuilder.sliderTrackX now serves both;
+/// these pin the painted track to it and a press at its midpoint to 50%.
+@MainActor
+@Suite(.serialized) struct SliderTrackTests {
+    private let trackWidth: Float = 80
+
+    private func headlessManager() throws -> BarManager {
+        let manager = try BarManager()
+        manager.settings.displayPolicy = .list([])
+        return manager
+    }
+
+    private func press(x: CGFloat) -> MouseEventInfo {
+        MouseEventInfo(kind: .down, point: CGPoint(x: x, y: 10), button: "left",
+                       modifier: "none", scrollDelta: 0)
+    }
+
+    /// The slider lives in the manager's store (the press path resolves it
+    /// there) and is laid out by the headless scene, which writes the frame
+    /// the surfaces snapshot. Returns the helper's track x, the painted
+    /// track's device x (the one quad exactly trackWidth wide) and the
+    /// content box.
+    private func addSlider(to manager: BarManager, scene: HeadlessScene,
+                           configure: (Item) -> Void)
+        throws -> (item: Item, trackX: CGFloat, paintedX: Float?, box: CGRect) {
+        let item = try #require(manager.store.add(name: "seek", position: .left))
+        item.kind = .slider
+        item.slider = SliderState(width: trackWidth)
+        configure(item)
+        let (list, boxes) = scene.build([item])
+        let box = try #require(boxes[item.id])
+        let trackX = SceneBuilder.sliderTrackX(item: item, contentBox: box, measured: scene.measure(item))
+        let painted = list.quads.first { $0.size.x == trackWidth * Float(scene.scale) }?.origin.x
+        return (item, trackX, painted, box)
+    }
+
+    @Test func centredOverflowUsesTheUnclampedSlack() throws {
+        let scene = HeadlessScene()
+        let manager = try headlessManager()
+        let (item, trackX, painted, box) = try addSlider(to: manager, scene: scene) { item in
+            item.icon.paddingLeft = 8
+            item.icon.paddingRight = 8
+            item.customWidth = 60      // natural is 16 + 80 = 96: overflow
+            item.align = "c"
+        }
+        // -36 of slack split evenly, then the empty icon's 16pt of paddings.
+        #expect(trackX == box.minX - 2)
+        #expect(painted == Float((trackX * scene.scale).rounded()))
+
+        let popup = PopupSurface(hostItemID: -1, device: manager.device)
+        popup.itemFrames = [(item.id, item.frame)]
+        manager.handlePopupMouse(press(x: trackX + CGFloat(trackWidth) / 2), on: popup)
+        #expect(abs((item.slider?.percentage ?? 0) - 50) < 0.01)
+    }
+
+    @Test func emptyIconPaddingsAdvanceTheTrack() throws {
+        let scene = HeadlessScene()
+        let manager = try headlessManager()
+        let (item, trackX, painted, box) = try addSlider(to: manager, scene: scene) { item in
+            item.icon.paddingLeft = 8
+            item.icon.paddingRight = 8
+        }
+        #expect(trackX == box.minX + 16)
+        #expect(painted == Float((trackX * scene.scale).rounded()))
+
+        // The bar surface takes the same path as the popup one.
+        let screen = try #require(NSScreen.screens.first)
+        let surface = BarSurface(screen: screen, arrangementIndex: 1)
+        surface.itemFrames = [(item.id, item.frame)]
+        manager.handleMouse(press(x: trackX + CGFloat(trackWidth) / 2), on: surface)
+        #expect(abs((item.slider?.percentage ?? 0) - 50) < 0.01)
+    }
+
+    @Test func leadingImageAdvancesTheTrack() throws {
+        let scene = HeadlessScene()
+        let manager = try headlessManager()
+        let (item, trackX, painted, box) = try addSlider(to: manager, scene: scene) { item in
+            let image = ImageState()
+            image.source = "sf.circle"
+            image.size = 18
+            image.paddingLeft = 2
+            image.paddingRight = 2
+            item.image = image
+        }
+        #expect(trackX == box.minX + 22)
+        #expect(painted == Float((trackX * scene.scale).rounded()))
+
+        let popup = PopupSurface(hostItemID: -1, device: manager.device)
+        popup.itemFrames = [(item.id, item.frame)]
+        manager.handlePopupMouse(press(x: trackX + CGFloat(trackWidth) / 2), on: popup)
+        #expect(abs((item.slider?.percentage ?? 0) - 50) < 0.01)
     }
 }
