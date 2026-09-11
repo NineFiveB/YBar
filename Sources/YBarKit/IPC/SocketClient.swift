@@ -117,33 +117,7 @@ public enum CLIClient {
             argv.removeFirst()
         }
 
-        // AeroSpace hook fast path: `exec-on-workspace-change` exports its
-        // payload as environment variables. Folding them into the trigger here
-        // lets the hook invoke ybar directly — no shell wrapper needed for
-        // `$AEROSPACE_FOCUSED_WORKSPACE` interpolation (one fewer process
-        // spawn on every workspace switch).
-        if argv.first == "--trigger",
-           !argv.contains(where: { $0.hasPrefix("FOCUSED_WORKSPACE=") }),
-           let focused = ProcessInfo.processInfo.environment["AEROSPACE_FOCUSED_WORKSPACE"] {
-            argv.append("FOCUSED_WORKSPACE=\(focused)")
-            if let previous = ProcessInfo.processInfo.environment["AEROSPACE_PREV_WORKSPACE"] {
-                argv.append("PREV_WORKSPACE=\(previous)")
-            }
-        }
-
-        // Same fast path for yabai signals: `yabai -m signal --add ...
-        // action="ybar --trigger yabai_space_change"` exports its payload as
-        // $YABAI_* environment variables — fold every one into the trigger so
-        // signal actions need no shell wrapper for interpolation.
-        if argv.first == "--trigger" {
-            for (key, value) in ProcessInfo.processInfo.environment
-            where key.hasPrefix("YABAI_") {
-                let name = String(key.dropFirst("YABAI_".count))
-                if !argv.contains(where: { $0.hasPrefix("\(name)=") }) {
-                    argv.append("\(name)=\(value)")
-                }
-            }
-        }
+        argv = foldTriggerEnvironment(into: argv, environment: ProcessInfo.processInfo.environment)
 
         let instanceName = Version.instanceName
         let socketPath = WireFormat.socketPath(instanceName: instanceName)
@@ -161,6 +135,35 @@ public enum CLIClient {
             FileHandle.standardError.write(Data("[!] \(error)\n".utf8))
             return 1
         }
+    }
+
+    /// Workspace-hook fast path. AeroSpace's `exec-on-workspace-change` and
+    /// yabai's signal actions export their payload as environment variables;
+    /// folding them into a `--trigger` message here lets the hook invoke ybar
+    /// directly, with no shell wrapper for `$AEROSPACE_FOCUSED_WORKSPACE` or
+    /// `$YABAI_*` interpolation (one fewer process spawn per workspace
+    /// switch). Explicit `KEY=value` tokens always win over the environment;
+    /// every other message passes through untouched.
+    static func foldTriggerEnvironment(into argv: [String],
+                                       environment: [String: String]) -> [String] {
+        guard argv.first == "--trigger" else { return argv }
+        var argv = argv
+        func fold(_ name: String, _ value: String) {
+            guard !argv.contains(where: { $0.hasPrefix("\(name)=") }) else { return }
+            argv.append("\(name)=\(value)")
+        }
+        if let focused = environment["AEROSPACE_FOCUSED_WORKSPACE"] {
+            fold("FOCUSED_WORKSPACE", focused)
+        }
+        if let previous = environment["AEROSPACE_PREV_WORKSPACE"] {
+            fold("PREV_WORKSPACE", previous)
+        }
+        // Sorted so the folded tail is deterministic (dictionary order is not).
+        for (key, value) in environment.sorted(by: { $0.key < $1.key })
+        where key.hasPrefix("YABAI_") {
+            fold(String(key.dropFirst("YABAI_".count)), value)
+        }
+        return argv
     }
 
     static let helpText = """
