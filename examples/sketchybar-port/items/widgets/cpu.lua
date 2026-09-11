@@ -39,6 +39,8 @@ local cpu_bracket = sbar.add("bracket", "widgets.cpu.bracket", { cpu.name }, {
   popup = { align = "center" }
 })
 
+require("helpers.hover").pill(cpu_bracket, cpu)
+
 -- ── Popup: gauge dashboard ────────────────────────────────────────────────
 local popup_pos = "popup." .. cpu_bracket.name
 
