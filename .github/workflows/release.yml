@@ -1,0 +1,219 @@
+name: Release
+
+# Cut a release with `git tag v0.1.1 && git push origin v0.1.1`. The tag's
+# version must already be in the three places the version gate reads
+# (Version.current in SocketClient.swift, CFBundleShortVersionString in
+# packaging/Info.plist, VERSION in the Makefile); the formula's url and
+# sha256 are pinned here from the tag's own source tarball, never by hand.
+#
+# Required secret: HOMEBREW_TAP_TOKEN. A fine-grained personal access token
+# with Contents: read and write on NineFiveB/homebrew-ybar only; it pushes
+# the pinned formula to the tap. Without it the tap push is skipped with a
+# warning, and the pinned formula still lands on main through GITHUB_TOKEN.
+#
+# Deliberately not here: a YBar-<v>.zip asset. Users would have to strip
+# quarantine and re-sign it anyway (docs/INSTALL.md), so the source build
+# through the formula stays the install path.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  # The GitHub Release and the pinned-formula commit on main.
+  contents: write
+
+env:
+  TAP_REPO: NineFiveB/homebrew-ybar
+  FORMULA: packaging/homebrew/ybar.rb
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The formula commit needs main's history to tell whether the tag
+          # sits on it.
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: version
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          echo "value=$v" >> "$GITHUB_OUTPUT"
+          echo "Releasing ybar $v"
+
+      # The version string lives in three hand-edited places; a tag that
+      # disagrees with any of them would ship a binary answering the wrong
+      # `--version` (and pin a formula whose version does not match).
+      - name: Version gate
+        env:
+          V: ${{ steps.version.outputs.value }}
+        run: |
+          swift_version=$(sed -nE 's/^ *public static let current = "([^"]+)".*/\1/p' Sources/YBarKit/IPC/SocketClient.swift)
+          plist_version=$(plutil -extract CFBundleShortVersionString raw -o - packaging/Info.plist)
+          make_version=$(sed -nE 's/^VERSION[[:space:]]*\?=[[:space:]]*(.*)$/\1/p' Makefile)
+          status=0
+          check() {
+            if [[ "$2" == "$V" ]]; then echo "ok    $1 = $2"
+            else echo "FAIL  $1 = '$2' but the tag says $V"; status=1; fi
+          }
+          check "Version.current (Sources/YBarKit/IPC/SocketClient.swift)" "$swift_version"
+          check "CFBundleShortVersionString (packaging/Info.plist)" "$plist_version"
+          check "VERSION (Makefile)" "$make_version"
+          exit $status
+
+      - name: Toolchain
+        run: swift --version
+
+      # docs/BUILDING.md: no-op on the runner's Xcode toolchain, kept so the
+      # workflow also documents the Command Line Tools path.
+      - name: Swift Testing symlinks (Command Line Tools only)
+        run: |
+          clt=/Library/Developer/CommandLineTools
+          if [[ "$(xcode-select -p)" == "$clt" && -d "$clt/Library/Developer/Frameworks/Testing.framework" ]]; then
+            products=$HOME/.cache/ybar-build/debug
+            mkdir -p "$products/YBarKitTests.xctest/Contents/Frameworks"
+            ln -sfn "$clt/Library/Developer/Frameworks/Testing.framework" \
+                    "$products/YBarKitTests.xctest/Contents/Frameworks/Testing.framework"
+            ln -sfn "$clt/Library/Developer/usr/lib/lib_TestingInterop.dylib" \
+                    "$products/lib_TestingInterop.dylib"
+          else
+            echo "full Xcode toolchain: no symlinks needed"
+          fi
+
+      - name: Test
+        run: make test 2>&1 | tee test.log
+
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log
+          path: test.log
+
+      # The hash comes from the tarball GitHub serves at the formula's own
+      # url for this tag, the bytes every `brew install` will fetch. `curl -f`
+      # turns a 404 into a failure instead of a hashed error page (the v0.1.0
+      # formula once pinned sha256("Not Found")), and the two checks after it
+      # make sure the download is a gzip archive carrying our Package.swift.
+      - name: Fetch and hash the source tarball
+        id: tarball
+        env:
+          V: ${{ steps.version.outputs.value }}
+        run: |
+          base=$(sed -nE 's/^ *url "(https:\/\/github\.com\/[^"]+)\/archive\/refs\/tags\/v[^"]+\.tar\.gz".*/\1/p' "$FORMULA")
+          [[ -n "$base" ]] || { echo "could not read the repository url from $FORMULA"; exit 1; }
+          url="$base/archive/refs/tags/v$V.tar.gz"
+          echo "fetching $url"
+          curl -fsSL --retry 3 --retry-delay 5 -o source.tar.gz "$url" \
+            || { echo "download failed: is v$V pushed to ${base#https://github.com/}?"; exit 1; }
+          file source.tar.gz | grep -q 'gzip compressed' \
+            || { echo "not a gzip archive:"; file source.tar.gz; exit 1; }
+          repo="${base##*/}"
+          tar -tzf source.tar.gz | grep -qx "$repo-$V/Package.swift" \
+            || { echo "tarball has no $repo-$V/Package.swift:"; tar -tzf source.tar.gz | head; exit 1; }
+          sha=$(shasum -a 256 source.tar.gz | cut -d' ' -f1)
+          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "SHA256 $sha  $url"
+
+      - name: Pin the formula
+        env:
+          V: ${{ steps.version.outputs.value }}
+          SHA: ${{ steps.tarball.outputs.sha256 }}
+        run: |
+          sed -i '' -E "s#^( *url \"https://github\.com/[^\"]+/archive/refs/tags/)v[^\"]+(\.tar\.gz\")#\1v$V\2#" "$FORMULA"
+          sed -i '' -E "s#^( *sha256 \")[0-9a-f]{64}(\")#\1$SHA\2#" "$FORMULA"
+          grep -q "refs/tags/v$V.tar.gz" "$FORMULA" || { echo "url pin did not apply"; exit 1; }
+          grep -q "sha256 \"$SHA\"" "$FORMULA" || { echo "sha256 pin did not apply"; exit 1; }
+          git --no-pager diff -- "$FORMULA"
+
+      # Proof rather than a smoke test: Homebrew fetches the pinned url,
+      # verifies the pinned hash, builds from source, and the formula's own
+      # `test do` runs `ybar --version`.
+      - name: brew install --build-from-source + brew test
+        run: |
+          brew install --formula --build-from-source "./$FORMULA" 2>&1 | tee brew-install.log
+          brew test --formula "./$FORMULA"
+          "$(brew --prefix)/bin/ybar" --version
+
+      - name: Upload brew log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: brew-install-log
+          path: brew-install.log
+
+      # The pinned formula goes back to main so the repo copy stays the
+      # source of truth (see the header of packaging/homebrew/ybar.rb). The
+      # pin is re-applied on main's copy rather than copied over it, so a
+      # formula edit that landed after the tag survives. Skipped when the
+      # tag is not on main (a release cut from a branch).
+      - name: Commit the pinned formula to main
+        env:
+          V: ${{ steps.version.outputs.value }}
+          SHA: ${{ steps.tarball.outputs.sha256 }}
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::warning::$GITHUB_REF_NAME is not on main; the pinned formula was not committed back."
+            exit 0
+          fi
+          git checkout -- "$FORMULA"
+          git checkout -B main origin/main
+          sed -i '' -E "s#^( *url \"https://github\.com/[^\"]+/archive/refs/tags/)v[^\"]+(\.tar\.gz\")#\1v$V\2#" "$FORMULA"
+          sed -i '' -E "s#^( *sha256 \")[0-9a-f]{64}(\")#\1$SHA\2#" "$FORMULA"
+          grep -q "refs/tags/v$V.tar.gz" "$FORMULA" && grep -q "sha256 \"$SHA\"" "$FORMULA" \
+            || { echo "pin did not apply on main"; exit 1; }
+          git add "$FORMULA"
+          if git diff --cached --quiet; then echo "main already pins v$V"; exit 0; fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "packaging: pin the ybar formula to v$V" \
+                     -m "Pinned by the release workflow from the tag's source tarball (sha256 $SHA)."
+          git push origin main
+          # Back to the tag for the steps that follow.
+          git checkout --detach "$GITHUB_SHA"
+          git checkout -- "$FORMULA"
+          sed -i '' -E "s#^( *url \"https://github\.com/[^\"]+/archive/refs/tags/)v[^\"]+(\.tar\.gz\")#\1v$V\2#" "$FORMULA"
+          sed -i '' -E "s#^( *sha256 \")[0-9a-f]{64}(\")#\1$SHA\2#" "$FORMULA"
+
+      - name: Push the formula to the tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          V: ${{ steps.version.outputs.value }}
+        run: |
+          if [[ -z "$HOMEBREW_TAP_TOKEN" ]]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN is not set; $TAP_REPO was not updated. Copy $FORMULA to Formula/ybar.rb there by hand."
+            exit 0
+          fi
+          git clone --depth=1 "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/$TAP_REPO.git" tap
+          mkdir -p tap/Formula
+          cp "$FORMULA" tap/Formula/ybar.rb
+          cd tap
+          git add Formula/ybar.rb
+          if git diff --cached --quiet; then echo "the tap already carries v$V"; exit 0; fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "ybar $V"
+          git push origin HEAD
+
+      - name: Publish the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: YBar ${{ steps.version.outputs.value }}
+          body: |
+            YBar ${{ steps.version.outputs.value }} for macOS 14+, built from source by the formula:
+
+            ```sh
+            brew tap NineFiveB/ybar
+            brew install ybar
+            ```
+
+            Source tarball `SHA256` `${{ steps.tarball.outputs.sha256 }}` (pinned in `packaging/homebrew/ybar.rb`).
+            First-run permissions and autostart: docs/INSTALL.md.
