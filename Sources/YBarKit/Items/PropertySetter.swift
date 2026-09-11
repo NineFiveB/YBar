@@ -311,6 +311,18 @@ public enum PropertySetter {
         case "y_offset":
             return setFloatValue(key: "item.\(item.id).popup.y_offset", current: item.popup.yOffset,
                                  value: value, ctx: ctx) { [weak item] in item?.popup.yOffset = $0 }
+        case "fade_in", "fade_out":
+            // Durations handed to the window animation, never themselves
+            // animated: set directly, clamped at 0 (the Windows port's
+            // setFloatDirect), so a shared theme's `popup.fade_in` is no
+            // longer an unknown-property error.
+            guard let frames = Float(value), frames.isFinite else { return "[!] invalid number: \(value)" }
+            if path.first == "fade_in" {
+                item.popup.fadeInFrames = max(0, frames)
+            } else {
+                item.popup.fadeOutFrames = max(0, frames)
+            }
+            return nil
         case "background":
             switch rest.first {
             case "color":

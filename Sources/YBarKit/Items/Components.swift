@@ -263,6 +263,12 @@ public struct PopupState: Sendable {
     public var align: Character = "l"
     /// > 0: blurred system material behind the whole panel.
     public var blurRadius: Float = 0
+    /// Open/close opacity fade, in frames at 60 Hz (Windows-port parity;
+    /// 0 keeps sketchybar's hard cut). The window server runs the ramp, so
+    /// it costs no app frames — unlike animating a property, which would
+    /// re-render every one.
+    public var fadeInFrames: Float = 0
+    public var fadeOutFrames: Float = 0
     public var background = BackgroundStyle()
 
     public init() {
