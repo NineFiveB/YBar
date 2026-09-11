@@ -47,6 +47,8 @@ public enum Serialize {
             "hidden": settings.hidden,
             "topmost": settings.level.rawValue,
             "sticky": settings.sticky,
+            "fullscreen_show": settings.fullscreenShow,
+            "fullscreen_hide": settings.fullscreenHide,
             "idle_inhibit": settings.idleInhibit,
             "notch_width": settings.notchWidth,
             "notch_offset": settings.notchOffset,
