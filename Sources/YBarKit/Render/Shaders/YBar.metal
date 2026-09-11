@@ -50,6 +50,7 @@ constant uint kQuadFlagArc        = 1u << 2;
 constant uint kQuadFlagHoles      = 1u << 3;
 constant uint kQuadFlagShadow     = 1u << 4;
 constant uint kGlyphFlagColor     = 1u << 0;
+constant uint kGlyphFlagGrey      = 1u << 1;
 
 // Vertex-pulled unit quad: vid 0..3 as a triangle strip.
 static inline float2 unit_corner(uint vid) {
@@ -278,7 +279,15 @@ fragment float4 glyph_fragment(
     if (in.flags & kGlyphFlagColor) {
         // Color page stores premultiplied BGRA (emoji, multicolor symbols).
         float4 texel = colorAtlas.sample(atlasSampler, in.uv);
-        return texel * in.color.a;
+        texel *= in.color.a;
+        if (in.flags & kGlyphFlagGrey) {
+            // Rec. 709 luma. Valid on PREMULTIPLIED colour: alpha scales all
+            // three channels equally, so the weighted sum stays premultiplied
+            // and needs no un-premultiply/re-premultiply round trip.
+            float luma = dot(texel.rgb, float3(0.2126, 0.7152, 0.0722));
+            texel.rgb = float3(luma);
+        }
+        return texel;
     }
     float coverage = maskAtlas.sample(atlasSampler, in.uv).r;
     float alpha = coverage * in.color.a;
