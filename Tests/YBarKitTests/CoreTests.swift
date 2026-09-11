@@ -264,6 +264,106 @@ import Testing
             environment: ["XDG_CONFIG_HOME": xdg.path], home: home)
         #expect(found?.path == xdg.appendingPathComponent("ybar/ybar.jsonc").path)
     }
+
+    /// `ybar theme use` records a NAME in ~/.config/ybar/current-theme. For the
+    /// default instance it beats the ordinary search; an explicit -c still
+    /// wins; a stale name (theme deleted) falls back; and a renamed instance
+    /// is never hijacked by it — the port's config.cpp rules.
+    @Test func currentThemeWinsForTheDefaultInstanceOnly() throws {
+        let home = try scratchHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let config = home.appendingPathComponent(".config/ybar")
+        FileManager.default.createFile(atPath: config.appendingPathComponent("ybarrc.lua").path, contents: nil)
+        let theme = config.appendingPathComponent("themes/glass")
+        try FileManager.default.createDirectory(at: theme, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: theme.appendingPathComponent("ybar.jsonc").path, contents: nil)
+        try "glass\n".write(to: config.appendingPathComponent("current-theme"), atomically: true, encoding: .utf8)
+        let other = home.appendingPathComponent(".config/other")
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: other.appendingPathComponent("otherrc.lua").path, contents: nil)
+
+        func locate(_ instance: String, explicit: String? = nil) -> URL? {
+            ConfigLocator.locate(explicitPath: explicit, instanceName: instance,
+                                 environment: [:], home: home, executable: nil)
+        }
+        #expect(locate("ybar")?.path == theme.appendingPathComponent("ybar.jsonc").path)
+        #expect(locate("other")?.lastPathComponent == "otherrc.lua")
+        #expect(locate("ybar", explicit: config.appendingPathComponent("ybarrc.lua").path)?
+            .lastPathComponent == "ybarrc.lua")
+        try "gone\n".write(to: config.appendingPathComponent("current-theme"), atomically: true, encoding: .utf8)
+        #expect(locate("ybar")?.lastPathComponent == "ybarrc.lua")
+    }
+}
+
+// MARK: - Local verbs
+
+@Suite struct LocalVerbsTests {
+    @Test func launchAgentPlistOmitsConfigUnlessPinned() throws {
+        let binary = "/Users/me/Applications/YBar.app/Contents/MacOS/ybar"
+        let discovered = LaunchAgent.plist(binary: binary, configPath: nil)
+        #expect(discovered["Label"] as? String == "com.ybar.YBar")
+        #expect(discovered["ProgramArguments"] as? [String] == [binary])
+        #expect(discovered["RunAtLoad"] as? Bool == true)
+        #expect((discovered["KeepAlive"] as? [String: Bool])?["SuccessfulExit"] == false)
+        let pinned = LaunchAgent.plist(binary: binary, configPath: "/Users/me/.config/ybar/ybarrc.lua")
+        #expect(pinned["ProgramArguments"] as? [String] == [binary, "-c", "/Users/me/.config/ybar/ybarrc.lua"])
+        // launchd reads XML plists; the round trip must preserve the shape.
+        let back = try PropertyListSerialization.propertyList(
+            from: LaunchAgent.plistData(pinned), format: nil) as? [String: Any]
+        #expect(back?["ProgramArguments"] as? [String] == pinned["ProgramArguments"] as? [String])
+        #expect((back?["KeepAlive"] as? [String: Bool])?["SuccessfulExit"] == false)
+    }
+
+    @Test func bundleDetectionAndHomebrewOptPath() {
+        #expect(AppBundle.bundleURL(containing: URL(
+            fileURLWithPath: "/Users/me/Applications/YBar.app/Contents/MacOS/ybar"))?.path
+            == "/Users/me/Applications/YBar.app")
+        #expect(AppBundle.bundleURL(containing: URL(
+            fileURLWithPath: "/Users/me/.cache/ybar-build/debug/ybar")) == nil)
+        #expect(AppBundle.homebrewOptPath(
+            for: "/opt/homebrew/Cellar/ybar/0.1.0/YBar.app/Contents/MacOS/ybar")
+            == "/opt/homebrew/opt/ybar/YBar.app/Contents/MacOS/ybar")
+        #expect(AppBundle.homebrewOptPath(for: "/Users/me/Applications/YBar.app/Contents/MacOS/ybar") == nil)
+    }
+
+    @Test func themeCatalogFirstRootWinsAndStaleSelectionIsNil() throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ybar-themes-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let shipped = home.appendingPathComponent("shipped")
+        let user = home.appendingPathComponent(".config/ybar/themes")
+        for (root, name, entry) in [
+            (shipped, "a", "ybarrc.lua"), (user, "a", "ybar.jsonc"),
+            (user, "b", "ybarrc.jsonc"), (user, "c", "README.md"),
+        ] {
+            let directory = root.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: directory.appendingPathComponent(entry).path, contents: nil)
+        }
+        let roots = ThemeCatalog.roots(home: home, executable: nil, environment: ["YBAR_THEME_ROOTS": shipped.path])
+        let themes = ThemeCatalog.collect(roots: roots)
+        #expect(themes.map(\.name) == ["a", "b"])
+        #expect(themes.first?.entry.path == shipped.appendingPathComponent("a/ybarrc.lua").path)
+
+        try "b\n".write(to: ThemeCatalog.stateFile(home: home), atomically: true, encoding: .utf8)
+        #expect(ThemeCatalog.currentEntry(home: home, roots: roots)?.path
+            == user.appendingPathComponent("b/ybarrc.jsonc").path)
+        try "zzz\n".write(to: ThemeCatalog.stateFile(home: home), atomically: true, encoding: .utf8)
+        #expect(ThemeCatalog.currentEntry(home: home, roots: roots) == nil)
+    }
+
+    /// Only `theme` and `autostart` are local; everything else must fall
+    /// through to the socket client untouched.
+    @Test func onlyThemeAndAutostartAreLocal() {
+        #expect(LocalVerbs.run(arguments: [], instanceName: "ybar") == nil)
+        #expect(LocalVerbs.run(arguments: ["--query", "bar"], instanceName: "ybar") == nil)
+        #expect(LocalVerbs.run(arguments: ["--theme"], instanceName: "ybar") == nil)
+        // Bad sub-verbs are usage errors, and touch nothing.
+        #expect(LocalVerbs.run(arguments: ["theme", "bogus"], instanceName: "ybar") == 1)
+        #expect(LocalVerbs.run(arguments: ["theme", "use"], instanceName: "ybar") == 1)
+        #expect(LocalVerbs.run(arguments: ["autostart", "bogus"], instanceName: "ybar") == 1)
+        #expect(LocalVerbs.run(arguments: ["autostart", "enable", "extra"], instanceName: "ybar") == 1)
+    }
 }
 
 // MARK: - Boolean leaves
