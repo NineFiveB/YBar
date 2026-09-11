@@ -23,6 +23,9 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
 - SDF rounded rects (per-corner radii, borders, gradients, shadows), glyph atlas
   with font fallback, color emoji, tinted SF Symbols (`icon=sf:wifi`), ink-precise
   text metrics matching sketchybar's pixel behavior
+- `background.shadow.blur` (points, animatable) softens a plate's shadow into a
+  falloff; a light shadow colour at distance 0 with a blur is a glow (brackets
+  and slider tracks included)
 - Five-cursor item layout (`left right center q e`, notch-aware), fixed widths
   with align slack and clipping, `--default` prototypes
 - Per-setup notch handling: the `q`/`e` dead zone exists only on physically

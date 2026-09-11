@@ -157,6 +157,7 @@ public enum Serialize {
             "color": hex(shadow.color),
             "distance": shadow.distance,
             "angle": shadow.angle,
+            "blur": shadow.blur,
         ]
     }
 
