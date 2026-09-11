@@ -60,7 +60,7 @@ public final class FontCache {
         // sketchybar measures ink, not advances (text.c): glyph-path bounds
         // with (int)(width + 1.5). Advances run wider and unevenly so.
         let pathBounds = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
-        let width = CGFloat(Int(pathBounds.width + 1.5))
+        let width = FontCache.layoutWidth(ink: pathBounds.width)
         let shaped = ShapedLine(
             line: line, width: width, ascent: ascent, descent: descent,
             inkWidth: pathBounds.width,
@@ -106,6 +106,16 @@ public final class FontCache {
         fonts.removeAll()
         lines.removeAll()
         symbolImages.removeAll()
+    }
+
+    /// sketchybar's text_get_length: the tight ink width truncated as
+    /// `(int)(width + 1.5)` — truncated, not rounded, so 10.0 becomes 11 and
+    /// 10.5 becomes 12. Every padding and alignment in a ported config
+    /// depends on this exact table (the port pins the same formula), and it
+    /// never goes negative or traps on a degenerate line.
+    nonisolated public static func layoutWidth(ink: CGFloat) -> CGFloat {
+        guard ink.isFinite else { return 0 }
+        return CGFloat(max(0, Int(ink + 1.5)))
     }
 
     /// `sf:wifi` → "wifi"; nil for ordinary text.
