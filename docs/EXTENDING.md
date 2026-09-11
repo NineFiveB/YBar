@@ -44,7 +44,9 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
   `slider.interactive=off` makes a slider a read-only fill meter (a press is an
   ordinary click; sets still apply)
 - **Alias items** — live ScreenCaptureKit captures of other apps' menu bar items
-  (`--add alias "App[,Window]"`)
+  (`--add alias "App[,Window]"`, Screen Recording); a click on an alias with no
+  script or Lua handler is forwarded to the captured item (Accessibility —
+  macOS may prompt on the first click)
 - **Marquee text** (`scroll_texts`), **hover tooltips**, `background.image` +
   `background.clip` cutouts, **idle inhibitor**
 - **Arc gauges** — speedometer-style rings with the label centered in the dial
