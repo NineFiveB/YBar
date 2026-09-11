@@ -394,18 +394,21 @@ public final class SceneBuilder {
             source: image.source, size: image.size, rotation: image.rotation)
         guard let entry = atlas.entry(colorImage: nsImage, cacheKey: key,
                                       sizePoints: sizePoints) else { return }
+        // image.y_offset is positive-up like the text offsets; y-down here.
         let rect = CGRect(
             x: penX,
-            y: centerY - sizePoints.height / 2,
+            y: centerY - sizePoints.height / 2 - CGFloat(image.yOffset),
             width: sizePoints.width,
             height: sizePoints.height)
+        var flags = GlyphInstance.flagColorGlyph
+        if image.desaturate { flags |= GlyphInstance.flagDesaturate }
         list.glyphs.append(GlyphInstance(
             origin: SIMD2(Float(rect.minX * scale), Float(rect.minY * scale)),
             size: SIMD2(Float(rect.width * scale), Float(rect.height * scale)),
             uvOrigin: entry.uvOrigin,
             uvSize: entry.uvSize,
             color: SIMD4(1, 1, 1, 1),
-            flags: GlyphInstance.flagColorGlyph))
+            flags: flags))
     }
 
     /// Speedometer arc (flagArc quad) with the item's label centered in the

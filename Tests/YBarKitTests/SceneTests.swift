@@ -413,6 +413,50 @@ struct HeadlessScene {
     }
 }
 
+/// `image.desaturate` and `image.y_offset` (review finding A11): the grey
+/// path is a glyph flag the shader honours on the colour page (no atlas-key
+/// dimension), and the offset moves the image up like every other y_offset.
+@MainActor
+@Suite struct ImageStyleTests {
+    private func imageItem(name: String, yOffset: Float, desaturate: Bool) -> Item {
+        let item = Item(name: name, position: .left)
+        let image = ImageState()
+        image.source = "sf.circle"
+        image.size = 18
+        image.yOffset = yOffset
+        image.desaturate = desaturate
+        item.image = image
+        return item
+    }
+
+    @Test func desaturateSetsTheGreyFlagAndYOffsetLiftsTheImage() throws {
+        let scene = HeadlessScene(scale: 2)
+        let plain = imageItem(name: "a", yOffset: 0, desaturate: false)
+        let styled = imageItem(name: "b", yOffset: 3, desaturate: true)
+        let (list, _) = scene.build([plain, styled])
+        #expect(list.glyphs.count == 2)
+        let first = try #require(list.glyphs.first)
+        let second = try #require(list.glyphs.last)
+        #expect(first.flags == GlyphInstance.flagColorGlyph)
+        #expect(second.flags == GlyphInstance.flagColorGlyph | GlyphInstance.flagDesaturate)
+        // 3pt up at 2x: 6px less y (y-down).
+        #expect(second.origin.y == first.origin.y - 6)
+        #expect(second.size == first.size)
+    }
+
+    @Test func queryReportsBoth() {
+        let item = Item(name: "t", position: .left)
+        let image = ImageState()
+        image.source = "sf.circle"
+        image.yOffset = 2
+        image.desaturate = true
+        item.image = image
+        let dictionary = Serialize.itemDictionary(item)["image"] as? [String: Any]
+        #expect(dictionary?["y_offset"] as? Float == 2)
+        #expect(dictionary?["desaturate"] as? String == "on")
+    }
+}
+
 /// `background.shadow.blur` (review finding A5): above 0 the shadow quad is
 /// grown by the blur on every side, the true half size rides in fill2.xy,
 /// the blur in gradientDir.x and flag bit 4 selects the shader's squared
