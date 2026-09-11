@@ -102,7 +102,7 @@ public enum CLIClient {
             print(helpText)
             return 0
         case "--version", "-v":
-            print("ybar \(Version.current)")
+            print("ybar \(Version.display)")
             return 0
         case "--config", "-c":
             // `ybar -c <path>` boots the daemon with an explicit config.
@@ -184,6 +184,24 @@ public enum CLIClient {
 
 public enum Version {
     public static let current = "0.1.0"
+    /// The enclosing bundle's CFBundleVersion: the short commit hash that
+    /// `make app`, `make release` and a `--HEAD` formula install stamp at
+    /// assembly time, or the release build number the committed plist
+    /// carries. Nil for a bare executable (`make run`, the test host).
+    public static var build: String? {
+        guard let value = Bundle.main.infoDictionary?["CFBundleVersion"] as? String,
+              !value.isEmpty else { return nil }
+        return value
+    }
+    /// What `--version` prints after "ybar ".
+    public static var display: String { display(current: current, build: build) }
+
+    /// `0.1.0 (a1b2c3d)` from a bundle, the bare `0.1.0` otherwise, so a bug
+    /// report from a dev build names its commit (SECURITY.md asks for either).
+    static func display(current: String, build: String?) -> String {
+        guard let build else { return current }
+        return "\(current) (\(build))"
+    }
     /// Instance name is the binary basename: renaming the binary yields an
     /// independent bar instance with its own socket and config (sketchybar behavior).
     public static var instanceName: String {
