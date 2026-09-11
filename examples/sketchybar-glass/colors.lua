@@ -11,6 +11,8 @@ return {
   orange = 0xffe8e8e8,
   magenta = 0xffd8d8d8,
   grey = 0xff8e8e8e,         -- secondary
+  connected = 0xff30d158,    -- "Connected" status text/dot: the one chromatic
+                             -- accent in the scheme (macOS system green)
   transparent = 0x00000000,
 
   bar = {
