@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Executes parsed command batches against the live object model.
@@ -298,6 +299,16 @@ public final class CommandHandler {
                     emit("[!] the output device refused the volume change")
                 }
 
+            case "app":
+                // The permission-free level of app control, paired with
+                // `--query apps`: NSRunningApplication by pid or bundle id,
+                // no window titles, no Accessibility, no Screen Recording.
+                guard batch.args.count == 2 else {
+                    emit("[!] usage: --app <pid|bundle-id> activate|hide|quit|kill")
+                    continue
+                }
+                emit(AppControl.perform(batch.args[1], on: batch.args[0]))
+
             case "exit":
                 onExit?()
 
@@ -380,6 +391,43 @@ public final class CommandHandler {
 
         default:
             return "[!] unknown --add type: \(kind) (supported: item, graph, slider, bracket, event)"
+        }
+    }
+
+    /// `--app`: the action is validated before the target is resolved, so a
+    /// typo never reaches an application, and a bundle id may match several
+    /// processes (two copies of one app) — the action goes to each.
+    enum AppControl {
+        static let actions = ["activate", "hide", "quit", "kill"]
+
+        static func perform(_ action: String, on target: String) -> String? {
+            guard actions.contains(action) else {
+                return "[!] unknown --app action: \(action) (activate|hide|quit|kill)"
+            }
+            let apps = resolve(target)
+            guard !apps.isEmpty else { return "[!] no running app matching \(target)" }
+            for app in apps {
+                let sent: Bool
+                switch action {
+                case "activate":
+                    // macOS 14 cooperative activation: the daemon yields
+                    // explicitly instead of relying on the deprecated
+                    // ignoringOtherApps flag, which no longer does anything.
+                    sent = app.activate(from: .current, options: [.activateAllWindows])
+                case "hide": sent = app.hide()
+                case "quit": sent = app.terminate()
+                default: sent = app.forceTerminate()
+                }
+                if !sent { return "[!] could not \(action) \(app.localizedName ?? target)" }
+            }
+            return nil
+        }
+
+        static func resolve(_ target: String) -> [NSRunningApplication] {
+            if let pid = pid_t(target) {
+                return NSRunningApplication(processIdentifier: pid).map { [$0] } ?? []
+            }
+            return NSRunningApplication.runningApplications(withBundleIdentifier: target)
         }
     }
 
