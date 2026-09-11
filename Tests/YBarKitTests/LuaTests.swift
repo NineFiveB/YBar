@@ -205,6 +205,28 @@ import Testing
         """, stack.runtime) == nil)
     }
 
+    /// `query_table` applies the CLI's shadowing rule: reserved targets win
+    /// over an item of the same name, and `apps` arrives as a table (a widget
+    /// cannot decode the JSON string `ybar.query` returns).
+    @Test func queryTableServesReservedTargetsAsTables() throws {
+        let stack = try makeStack()
+        defer { stack.runtime.shutdown() }
+        let error = run("""
+        ybar.bar({ height = 40 })
+        ybar.add("item", "bar", "left")
+        ybar.add("item", "apps", "left")
+        assert(ybar.query_table("bar").height == 40, "bar shadows the item")
+        local apps = ybar.query_table("apps")
+        assert(type(apps) == "table" and apps.name == nil, "apps is the list, not the item")
+        for _, app in ipairs(apps) do
+          assert(type(app.name) == "string" and type(app.pid) == "number")
+          assert(type(app.active) == "boolean" and type(app.hidden) == "boolean")
+        end
+        assert(ybar.query_table("no-such-item") == nil)
+        """, stack.runtime)
+        #expect(error == nil)
+    }
+
     @Test func configErrorsAreReportedNotFatal() throws {
         let stack = try makeStack()
         defer { stack.runtime.shutdown() }

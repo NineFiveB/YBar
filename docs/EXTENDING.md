@@ -65,6 +65,10 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
 - Output volume write path: `ybar --volume <0-100|+N|-N>` / `ybar.volume(pct)`
   (in-process CoreAudio; 0 mutes keeping the level, `"+4"`/`"-4"` step from the
   current level — no more `osascript` per slider tick)
+- Running apps, permission-free: `ybar --query apps` → `[{name, bundle_id, pid,
+  active, hidden}]` (also `ybar.query_table("apps")` as a Lua table; `apps` is a
+  reserved query target like `bar`/`displays`) and `ybar --app <pid|bundle-id>
+  activate|hide|quit|kill` — no window titles, so no Screen Recording grant
 - AeroSpace integration: the workspace-change hook can invoke `ybar --trigger`
   directly (the CLI folds `$AEROSPACE_FOCUSED_WORKSPACE` from its environment),
   with debounced, generation-guarded refreshes for rapid switching
