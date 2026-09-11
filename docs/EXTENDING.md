@@ -82,13 +82,18 @@ On Windows the event and provider set maps one-to-one to native equivalents
 - `make app` builds a minimal **app bundle** so the daemon owns its TCC identity —
   Bluetooth, Calendar, and Apple Events prompts attribute to YBar instead of your
   terminal, and grants cover every helper the daemon spawns
+- `ybar autostart enable [-c <config>]|disable|status` writes and bootstraps the
+  `com.ybar.YBar` LaunchAgent (bundle binary, KeepAlive on crash only, config
+  discovered at each start unless pinned)
 
 ## Where to start
 
 - Read a real config end to end: [`examples/`](../examples) — the flagship
   `sketchybar-glass` theme, a `yabai-skhd` setup, and a declarative
   `jsonc-demo`.
-- Themes ship as selectable presets: `scripts/ybar-theme list|use <name>|install
-  <git-url>` — see [THEMES.md](THEMES.md) to publish your own.
+- Themes ship as selectable presets: `ybar theme list|current|use <name>|reset|
+  install <git-url>` (a running bar reloads in place; the choice is honoured by
+  config discovery on every start) — see [THEMES.md](THEMES.md) to publish
+  your own.
 - The engine internals (how items, layout, and rendering fit together) are in
   [ARCHITECTURE.md](ARCHITECTURE.md).

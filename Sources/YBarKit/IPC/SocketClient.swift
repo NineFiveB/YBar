@@ -181,6 +181,14 @@ public enum CLIClient {
       ybar --query apps               running apps: name, bundle_id, pid, active, hidden
       ybar --app com.apple.Safari activate      (or hide | quit | kill; a pid works too)
 
+    Local verbs (no daemon needed):
+      ybar theme list|current|use <name>|reset|install <git-url>
+                                    select a theme; a running bar reloads in place,
+                                    otherwise YBar.app is started with it
+      ybar autostart enable [-c <config>]|disable|status
+                                    manage the com.ybar.YBar LaunchAgent (KeepAlive,
+                                    config discovered at each start unless pinned)
+
     See docs/ARCHITECTURE.md for the full command grammar.
     """
 }
