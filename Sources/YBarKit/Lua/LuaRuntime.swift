@@ -434,16 +434,29 @@ public final class LuaRuntime {
                     lua_pushnil(L)
                     return 1
                 }
-                // The CLI's shadowing rule, verbatim: a reserved target (bar,
-                // defaults, events, displays, apps) wins over an item of that
-                // name. This is also how `ybar.query_table("apps")` hands a
-                // widget the app list as a table instead of a JSON string.
-                if let reserved = Serialize.reserved(
-                    target: name, manager: runtime.barManager, eventBus: runtime.eventBus) {
+                // Querying BY NAME applies the CLI's shadowing rule verbatim: a
+                // reserved target (bar, defaults, events, displays, apps) wins
+                // over an item of that name. That is also how
+                // `ybar.query_table("apps")` hands a widget the app list as a
+                // table instead of a JSON string.
+                //
+                // The handle form passes preferItem, and there the item wins: a
+                // handle describes the item it was created for, so a config
+                // that adds an item named `apps` (or `bar`) can still read its
+                // own item back through `handle:query()` — `apps` only became
+                // reserved in this release, and silently answering a handle
+                // with the app-list array breaks the `:query().popup.drawing`
+                // idiom every popup toggle uses. A handle whose item is gone
+                // still falls through to the reserved table.
+                let preferItem = lua_toboolean(L, 2) != 0
+                let item = runtime.barManager.store.item(named: name)
+                if !(preferItem && item != nil),
+                   let reserved = Serialize.reserved(
+                       target: name, manager: runtime.barManager, eventBus: runtime.eventBus) {
                     LuaRuntime.push(reserved, to: L)
                     return 1
                 }
-                guard let item = runtime.barManager.store.item(named: name) else {
+                guard let item else {
                     lua_pushnil(L)
                     return 1
                 }
@@ -773,7 +786,10 @@ public final class LuaRuntime {
     end
     function ybar.delay(seconds, fn) raw.delay(seconds, fn) end
     function ybar.update() raw.update() end
-    function ybar.query_table(name) return raw.query_item(name) end
+    -- own = true asks for the ITEM of that name even when the name is a
+    -- reserved target; the compat shim's handles pass it for the same reason
+    -- item_methods:query() does.
+    function ybar.query_table(name, own) return raw.query_item(name, own) end
     function ybar.trigger(event, env) raw.trigger(event, env or {}) end
     function ybar.push(name, values) raw.push(name, values) end
     function ybar.exec(cmd, fn) raw.exec(cmd, fn) end
@@ -794,7 +810,10 @@ public final class LuaRuntime {
     function item_methods:set(t) ybar.set(self.name, t) end
     function item_methods:subscribe(event, fn) ybar.subscribe(self.name, event, fn) end
     function item_methods:push(values) ybar.push(self.name, values) end
-    function item_methods:query() return raw.query_item(self.name) end
+    -- true = "this handle's own item first": a reserved query target
+    -- (bar/defaults/events/displays/apps) must not answer for the item the
+    -- handle was created for. ybar.query_table(name) keeps the CLI rule.
+    function item_methods:query() return raw.query_item(self.name, true) end
 
     local function handle(name)
       return setmetatable({ name = name }, item_methods)
