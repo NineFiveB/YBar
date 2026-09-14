@@ -105,6 +105,24 @@ struct HeadlessScene {
         #expect(list.glyphs[0].color == item.icon.shadow.color.simd)
     }
 
+    /// The colour atlas page is sampled as-is (only the instance alpha is
+    /// honoured), so a shadow copy of an emoji would be a second opaque emoji
+    /// rather than a silhouette: colour glyphs get no shadow (finding GPU3).
+    @Test func colourGlyphsGetNoShadowCopy() {
+        let scene = HeadlessScene(scale: 1)
+        let item = Item(name: "t", position: .left)
+        item.label.string = "a🔋"
+        item.label.shadow.drawing = true
+        item.label.shadow.distance = 4
+        item.label.shadow.angle = 90
+        let (list, _) = scene.build([item])
+        let colour = list.glyphs.filter { $0.flags & GlyphInstance.flagColorGlyph != 0 }
+        // The emoji really is on the colour page; the "a" really is not.
+        #expect(colour.count == 1)
+        // One shadow for the "a", then both inks — no fourth quad.
+        #expect(list.glyphs.count == 3)
+    }
+
     @Test func queryReportsTextShadow() {
         var part = TextPart()
         part.shadow.drawing = true
@@ -166,7 +184,7 @@ struct HeadlessScene {
 /// the box is inset by the border width, and the stroke never leaves it.
 @MainActor
 @Suite struct GraphPlateTests {
-    private func graphItem(borderWidth: Float) -> Item {
+    private func graphItem(borderWidth: Float, borderAlpha: Float = 1) -> Item {
         let item = Item(name: "g", position: .left)
         item.kind = .graph
         let graph = GraphState(capacity: 40)
@@ -175,6 +193,7 @@ struct HeadlessScene {
         item.background.drawing = true
         item.background.height = 20
         item.background.borderWidth = borderWidth
+        item.background.borderColor = YColor(alpha: borderAlpha, red: 1, green: 1, blue: 1)
         return item
     }
 
@@ -215,6 +234,41 @@ struct HeadlessScene {
         #expect(xs.contains(Float(box.minX + 40)))
         #expect(ys.min() == Float(box.midY - 10))
         #expect(ys.max() == Float(box.midY + 10))
+    }
+
+    /// border_width is inherited from the --default prototype and switched
+    /// off by a transparent border_color (examples/sketchybar-port's graphs),
+    /// so only a border that paints may shrink the graph (finding GPU2).
+    @Test func invisibleBorderMeansNoInset() {
+        let scene = HeadlessScene(scale: 1)
+        let item = graphItem(borderWidth: 3, borderAlpha: 0)
+        let (list, boxes) = scene.build([item])
+        guard let box = boxes[item.id] else {
+            Issue.record("graph item was not laid out")
+            return
+        }
+        let xs = list.triangles.map(\.position.x)
+        let ys = list.triangles.map(\.position.y)
+        #expect(xs.contains(Float(box.minX)))
+        #expect(xs.contains(Float(box.minX + 40)))
+        #expect(ys.min() == Float(box.midY - 10))
+        #expect(ys.max() == Float(box.midY + 10))
+    }
+
+    /// A border wider than the plate must not turn the box inside out.
+    @Test func hugeBorderCannotInvertTheBox() {
+        let scene = HeadlessScene(scale: 1)
+        let item = graphItem(borderWidth: 40)
+        let (list, boxes) = scene.build([item])
+        guard let box = boxes[item.id] else {
+            Issue.record("graph item was not laid out")
+            return
+        }
+        let xs = list.triangles.map(\.position.x)
+        let ys = list.triangles.map(\.position.y)
+        // Collapsed to the centre line at worst — never mirrored.
+        #expect(xs.allSatisfy { $0 >= Float(box.minX) && $0 <= Float(box.minX + 40) })
+        #expect(ys.allSatisfy { $0 >= Float(box.midY - 10) && $0 <= Float(box.midY + 10) })
     }
 }
 
@@ -599,6 +653,39 @@ struct HeadlessScene {
         #expect(plate.origin.x == Float((box.minX + 100 - ink.width - 3).rounded()))
     }
 
+    /// The plate is sized from the NATURAL ink, so it can overflow the slot
+    /// the glyphs are clipped to; it must be trimmed by the same clip rather
+    /// than painting over the neighbours (review finding GPU1).
+    @Test func plateIsTrimmedToANarrowSlot() throws {
+        let scene = HeadlessScene(scale: 1)
+        let item = Item(name: "t", position: .left)
+        item.label.string = "Hello world"
+        item.label.customWidth = 20
+        plated(&item.label)
+        let (list, boxes) = scene.build([item])
+        let box = try #require(boxes[item.id])
+        #expect(scene.fontCache.naturalMeasure(part: item.label).width > 20)
+        let plate = try #require(list.quads.last)
+        // The plate starts 3pt (its own left padding) before the slot and is
+        // ink-wide: both ends are cut back to the slot.
+        #expect(plate.origin.x == Float(box.minX))
+        #expect(plate.origin.x + plate.size.x == Float(box.minX + 20))
+    }
+
+    /// A collapsed item (width=0, every --animate width frame under the
+    /// natural content) clips its glyphs away; the plate must go with them.
+    @Test func collapsedItemDrawsNoPlate() {
+        let scene = HeadlessScene(scale: 1)
+        let item = Item(name: "t", position: .left)
+        item.label.string = "Hello world"
+        item.customWidth = 0
+        plated(&item.label)
+        let (list, _) = scene.build([item])
+        // Bar background only — no ink, and no plate behind the missing ink.
+        #expect(list.quads.count == 1)
+        #expect(list.glyphs.isEmpty)
+    }
+
     @Test func nothingIsDrawnWhenTheStyleIsOff() {
         let scene = HeadlessScene(scale: 1)
         let item = Item(name: "t", position: .left)
@@ -679,5 +766,31 @@ struct HeadlessScene {
         #expect(item.slider?.percentage == 30)
         manager.handlePopupMouse(mouse(.clicked), on: popup)
         #expect(clicked == ["battery"])
+    }
+}
+
+/// A bar with no frame (`--bar height=0`, or a margin at least half the
+/// screen wide) is a config state, not a transient: nothing but a geometry
+/// change can clear it, and every path that changes bar geometry already ends
+/// in setNeedsRender(). The guard must report once and stop, not leave a 1 s
+/// retry re-arming itself forever on an otherwise idle daemon (LIFETIME-1).
+@MainActor
+@Suite(.serialized) struct EmptyBarFrameTests {
+    @Test func anEmptyBarFrameIsNotPolledFor() throws {
+        let manager = try BarManager()
+        // An empty display list keeps the manager from building real panels.
+        manager.settings.displayPolicy = .list([])
+        let screen = try #require(NSScreen.screens.first)
+        let surface = BarSurface(screen: screen, arrangementIndex: 1)
+        var settings = BarSettings()
+        settings.height = 0
+        // hidden keeps the (zero-height) panel out of the window list; the
+        // frame is applied either way.
+        settings.hidden = true
+        surface.apply(settings: settings, screen: screen)
+
+        #expect(surface.barSize.height == 0)
+        #expect(!manager.render(surface: surface))
+        #expect(!manager.retryScheduled)
     }
 }

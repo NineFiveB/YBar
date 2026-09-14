@@ -360,7 +360,20 @@ public final class SceneBuilder {
             : contentBox.height - 2
         // A bordered plate frames the graph: inset the box by the border
         // width so stroke and fill run inside the frame instead of over it.
-        let inset = item.background.drawing ? CGFloat(max(0, item.background.borderWidth)) : 0
+        // Only a border that actually PAINTS earns the inset. border_width is
+        // inherited wholesale from the --default prototype and the usual way
+        // to switch a plate off is a transparent colour, not a zero width
+        // (examples/sketchybar-port's cpu/battery graphs do exactly that), so
+        // keying on the width alone shrank those graphs by a border on every
+        // side with no frame anywhere to justify it. Clamped to half the box:
+        // a border wider than the graph must not invert it.
+        let borderPaints = item.background.drawing
+            && item.background.borderWidth > 0
+            && item.background.borderColor.alpha > 0
+        let inset = borderPaints
+            ? max(0, min(CGFloat(item.background.borderWidth),
+                         CGFloat(graph.capacity) / 2, height / 2))
+            : 0
         let box = CGRect(
             x: (penX + inset) * scale,
             y: (centerY - height / 2 + inset) * scale,
@@ -574,6 +587,32 @@ public final class SceneBuilder {
         return quad
     }
 
+    /// The same plate, trimmed to a clip rect (device px) the way
+    /// `glyphInstance` trims a glyph. Quads carry no clip field and the
+    /// pipeline sets no scissor, so the trim is geometric: intersect, and drop
+    /// the radius of every corner sitting on a cut edge so the cut reads as a
+    /// straight edge instead of a rounded bulge mid-item. nil when the clip
+    /// removes the plate entirely.
+    static func clippedQuad(
+        _ background: BackgroundStyle, rect: CGRect, scale: CGFloat, clip: CGRect?
+    ) -> QuadInstance? {
+        var quad = backgroundQuad(background, rect: rect, scale: scale)
+        guard let clip else { return quad }
+        let device = CGRect(x: CGFloat(quad.origin.x), y: CGFloat(quad.origin.y),
+                            width: CGFloat(quad.size.x), height: CGFloat(quad.size.y))
+        let visible = device.intersection(clip)
+        guard !visible.isEmpty else { return nil }
+        guard visible != device else { return quad }
+        // radii is (topLeft, topRight, bottomRight, bottomLeft).
+        if visible.minX > device.minX { quad.radii.x = 0; quad.radii.w = 0 }
+        if visible.maxX < device.maxX { quad.radii.y = 0; quad.radii.z = 0 }
+        if visible.minY > device.minY { quad.radii.x = 0; quad.radii.y = 0 }
+        if visible.maxY < device.maxY { quad.radii.z = 0; quad.radii.w = 0 }
+        quad.origin = SIMD2(Float(visible.minX), Float(visible.minY))
+        quad.size = SIMD2(Float(visible.width), Float(visible.height))
+        return quad
+    }
+
     /// Real Liquid Glass (NSGlassEffectView) exists on macOS 26+: the backdrop
     /// itself refracts and glints, so the shader's painted rim/sheen imitation
     /// stays off there — layered on the true material it reads as a glow
@@ -662,8 +701,12 @@ public final class SceneBuilder {
                 width: (CGFloat(part.customWidth) * scale).rounded(),
                 height: .greatestFiniteMagnitude / 2)
             clip = clip.map { $0.intersection(partBox) } ?? partBox
-            if clip?.isEmpty == true { return }
         }
+        // An empty clip means the whole part is hidden — a collapsed slot, or
+        // a collapsed ITEM (width=0, or any --animate width frame below the
+        // natural content). Return before the plate too: glyphs drop out of
+        // an empty clip on their own, a plate quad would not.
+        if clip?.isEmpty == true { return }
 
         // icon.background / label.background: one plate behind the part's
         // ink, sized from the natural measure plus the plate's own paddings
@@ -681,7 +724,14 @@ public final class SceneBuilder {
                 width: ink.width + CGFloat(part.background.paddingLeft)
                     + CGFloat(part.background.paddingRight),
                 height: height)
-            list.quads.append(SceneBuilder.backgroundQuad(part.background, rect: plate, scale: scale))
+            // The plate obeys the clip the ink obeys: the natural ink it is
+            // sized from can overflow a narrower slot (label.width=N below the
+            // text, a marquee) or a fixed-width item, and an unclipped quad
+            // would paint that overflow over its neighbours.
+            if let quad = SceneBuilder.clippedQuad(
+                part.background, rect: plate, scale: scale, clip: clip) {
+                list.quads.append(quad)
+            }
         }
         penX -= marqueeOffset
 
@@ -777,6 +827,14 @@ public final class SceneBuilder {
         instances.reserveCapacity(placements.count * (shadow == nil ? 1 : 2))
         if let shadow {
             for placement in placements {
+                // Colour-page glyphs (emoji, multicolour symbols) sample the
+                // BGRA atlas as-is — the shader's colour branch keeps only
+                // in.color.a and ignores the shadow's rgb — so a shadow copy
+                // would be a second, fully coloured emoji offset behind the
+                // first, not a silhouette. Skip it; the ink still draws. A
+                // real silhouette needs a shader flag emitting
+                // colour.rgb * texel.a, which is beyond sketchybar parity.
+                guard !placement.entry.isColor else { continue }
                 if let instance = glyphInstance(
                     origin: placement.origin + shadow.offsetPx,
                     entry: placement.entry, color: shadow.color, clip: clip) {
