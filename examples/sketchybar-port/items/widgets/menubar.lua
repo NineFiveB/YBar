@@ -12,7 +12,10 @@ local hover = require("helpers.hover")
 
 local popup_width = 280
 local inset = 12
-local max_rows = 12
+-- Enough rows for a real app menu, not just the item list: Raycast's has 13
+-- entries and AeroSpace's 43. Unused rows are hidden, so the only cost of a
+-- generous cap is that many item objects.
+local max_rows = 26
 
 local helper = (PORT_DIR or (os.getenv("HOME") .. "/.config/ybar"))
   .. "/helpers/bin/statusitems"
@@ -138,6 +141,10 @@ local visible_map = {}    -- row i -> items_cache entry
 local hidden_set = {}
 local show_hidden = false
 local no_access = false
+-- Drill-down: nil at the item list, else the app whose menu is on screen.
+-- `path` is the helper's dot-separated index chain, so a submenu is one
+-- level deeper and "back" is a single pop.
+local menu_view = nil     -- { entry = <items_cache entry>, path = {…}, rows = {…} }
 local refreshing = false
 
 local spinner = require("helpers.spinner").attach(header)
@@ -173,7 +180,60 @@ local function display_name(entry)
   return name
 end
 
+local shell_quote = function(v) return "'" .. tostring(v):gsub("'", "'\\''") .. "'" end
+
+-- Render the drilled-into menu: one row per entry, a back row on top.
+-- Separators (blank, disabled) are dropped — they carry no text, and a row
+-- that cannot be clicked is noise in a list this short.
+local function populate_menu()
+  access_row:set({ drawing = false })
+  local view = menu_view
+  local shown = {}
+  for _, e in ipairs(view.rows) do
+    if e.title ~= "" then shown[#shown + 1] = e end
+  end
+  view.shown = shown
+
+  for i, row in ipairs(rows) do
+    if i == 1 then
+      row:set({
+        drawing = true,
+        image = { drawing = false },
+        icon = { drawing = true, string = "‹", align = "left",
+                 color = colors.grey, padding_left = inset + 4,
+                 font = { size = 14, style = settings.font.style_map["Bold"] } },
+        label = { string = display_name(view.entry), color = colors.grey },
+      })
+    else
+      local e = shown[i - 1]
+      if e then
+        row:set({
+          drawing = true,
+          image = { drawing = false },
+          icon = { drawing = true, string = e.submenu and "›" or " ", align = "right",
+                   color = colors.grey, padding_left = 0,
+                   padding_right = inset, font = { size = 12 } },
+          label = {
+            string = e.title,
+            color = e.enabled and colors.white or colors.grey,
+            padding_left = inset + 4,
+          },
+        })
+      else
+        row:set({ drawing = false })
+      end
+    end
+  end
+  local capacity = #rows - 1
+  local hint = "click runs · ‹ back"
+  if #shown > capacity then
+    hint = hint .. " · " .. (#shown - capacity) .. " more not shown"
+  end
+  hint_row:set({ drawing = true, icon = { string = hint } })
+end
+
 local function populate()
+  if menu_view then return populate_menu() end
   access_row:set({ drawing = no_access })
 
   local hidden_count = 0
@@ -194,10 +254,12 @@ local function populate()
     if entry then
       row:set({
         drawing = true,
-        image = { string = "app." .. entry.name },
+        image = { drawing = true, string = "app." .. entry.name },
+        icon = { drawing = false },
         label = {
           string = display_name(entry) .. (entry.hidden and "  ·  hidden" or ""),
           color = entry.hidden and colors.grey or colors.white,
+          padding_left = 0,
         },
       })
     else
@@ -242,11 +304,74 @@ end
 
 -- ── Interactions ───────────────────────────────────────────────────────────
 local function hide_popup()
+  -- Always leave at the item list: an auto-close (pointer leaving the bar)
+  -- runs no Lua, so a popup reopened later would otherwise still be showing
+  -- some app's menu with no memory of why.
+  menu_view = nil
   bracket:set({ popup = { drawing = false } })
+end
+
+-- Load an app's menu (or a submenu) into the popup. Async: the helper reads
+-- the AX tree of another process, which is not instant, and the popup must
+-- not freeze the bar while it does.
+local function open_menu(entry, path)
+  local cmd = shell_quote(helper) .. " menu " .. entry.pid .. " " .. entry.index
+  if #path > 0 then cmd = cmd .. " " .. table.concat(path, ".") end
+  sbar.exec(cmd, function(out, code)
+    -- No menu (Creative Cloud's icon opens a panel instead): fall back to
+    -- pressing the item, which is what the widget always did.
+    if code ~= 0 or not out:match("%S") then
+      if #path == 0 then
+        hide_popup()
+        sbar.delay(0.2, function()
+          sbar.exec(shell_quote(helper) .. " press " .. entry.pid .. " " .. entry.index)
+        end)
+      end
+      return
+    end
+    local parsed = {}
+    for line in out:gmatch("[^\n]+") do
+      local idx, enabled, submenu, title = line:match("^(%d+)\t(%d)\t(%d)\t(.*)$")
+      if idx then
+        parsed[#parsed + 1] = {
+          index = tonumber(idx), enabled = enabled == "1",
+          submenu = submenu == "1", title = title,
+        }
+      end
+    end
+    menu_view = { entry = entry, path = path, rows = parsed }
+    populate()
+  end)
 end
 
 for i, row in ipairs(rows) do
   row:subscribe("mouse.clicked", function(env)
+    -- Inside an app's menu the rows mean something else entirely.
+    if menu_view then
+      if i == 1 then
+        -- Back: one level up, or out to the item list.
+        if #menu_view.path == 0 then
+          menu_view = nil
+        else
+          local up = {}
+          for n = 1, #menu_view.path - 1 do up[n] = menu_view.path[n] end
+          return open_menu(menu_view.entry, up)
+        end
+        return populate()
+      end
+      local e = menu_view.shown and menu_view.shown[i - 1]
+      if not e or not e.enabled then return end
+      local path = {}
+      for n = 1, #menu_view.path do path[n] = menu_view.path[n] end
+      path[#path + 1] = e.index
+      if e.submenu then return open_menu(menu_view.entry, path) end
+      local target = menu_view.entry
+      hide_popup()
+      sbar.exec(shell_quote(helper) .. " item " .. target.pid .. " " .. target.index
+        .. " " .. table.concat(path, "."))
+      return
+    end
+
     local entry = visible_map[i]
     if not entry then return end
     if env.BUTTON == "right" then
@@ -256,11 +381,7 @@ for i, row in ipairs(rows) do
       populate()
       return
     end
-    hide_popup()
-    sbar.delay(0.2, function()
-      sbar.exec("'" .. helper:gsub("'", "'\\''") .. "' press "
-        .. entry.pid .. " " .. entry.index)
-    end)
+    open_menu(entry, {})
   end)
 end
 
@@ -273,6 +394,7 @@ end)
 local function toggle_popup(env)
   local should_draw = bracket:query().popup.drawing == "off"
   if should_draw then
+    menu_view = nil
     show_hidden = (env and env.MODIFIER == "alt") or false
     bracket:set({ popup = { drawing = true } })
     populate()
