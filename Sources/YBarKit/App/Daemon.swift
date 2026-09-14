@@ -424,8 +424,11 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
             case .absolute(let percent):
                 return self.audioProvider.setVolume(percent: percent)
             case .step(let delta):
-                return self.audioProvider.setVolume(
-                    percent: AudioProvider.currentVolumePercent() + delta)
+                // Not `currentVolumePercent() + delta`: that reader reports a
+                // muted device as 0 (the display convention), so a scroll up on
+                // a muted Mac jumped to delta% and overwrote the level unmuting
+                // is meant to restore. step(by:) resolves against the scalar.
+                return self.audioProvider.step(by: delta)
             }
         }
         commandHandler.forcedQueries = [
@@ -522,13 +525,27 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
     // MARK: - Config
 
     private func executeConfig() {
-        guard let url = ConfigLocator.locate(
+        guard let resolution = ConfigLocator.resolve(
             explicitPath: explicitConfigPath, instanceName: instanceName) else {
             if let explicitConfigPath {
                 FileHandle.standardError.write(
                     Data("[!] config not found: \(explicitConfigPath)\n".utf8))
             }
             return
+        }
+        let url = resolution.url
+        // The one case where the loaded file is not the one the user expects:
+        // a recorded theme outranks their own rc, and hotload then watches the
+        // theme's directory, so editing their rc does nothing either. Name both
+        // files and the way out — the selection may have been recorded by the
+        // pre-1.0 `ybar-theme` script, back when nothing read it.
+        if let theme = resolution.theme, let shadowed = resolution.shadowed {
+            FileHandle.standardError.write(Data("""
+                [?] config: loading theme "\(theme)" (\(url.path)); \
+                \(shadowed.path) is ignored while a theme is selected — \
+                run `ybar theme reset` to go back to it.
+
+                """.utf8))
         }
         configURL = url
         let directory = url.deletingLastPathComponent()

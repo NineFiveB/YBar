@@ -34,7 +34,10 @@ function item_methods:subscribe(event, fn)
 end
 
 function item_methods:query()
-  return ybar.query_table(self.name) or {}
+  -- own = true: a handle answers for its own item even when the name is one of
+  -- YBar's reserved query targets (bar/defaults/events/displays/apps), which
+  -- sketchybar does not reserve — a ported config is free to name an item that.
+  return ybar.query_table(self.name, true) or {}
 end
 
 function item_methods:push(values)
