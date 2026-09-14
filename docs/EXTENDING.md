@@ -81,7 +81,8 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
   in-process CPU/memory stats
 - Output volume write path: `ybar --volume <0-100|+N|-N>` / `ybar.volume(pct)`
   (in-process CoreAudio; 0 mutes keeping the level, `"+4"`/`"-4"` step from the
-  current level — no more `osascript` per slider tick); in Lua a number is
+  level the device holds — muted included, so a scroll up resumes where it was
+  muted — no more `osascript` per slider tick); in Lua a number is
   absolute and a signed string relative, and the call returns nil or a `[!]`
   string. A number is *always* absolute: `ybar.volume(current - 10)` saturates
   into 0-100 (so an undershoot mutes) and never becomes a step — only the

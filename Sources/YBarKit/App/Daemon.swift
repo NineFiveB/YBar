@@ -424,8 +424,11 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
             case .absolute(let percent):
                 return self.audioProvider.setVolume(percent: percent)
             case .step(let delta):
-                return self.audioProvider.setVolume(
-                    percent: AudioProvider.currentVolumePercent() + delta)
+                // Not `currentVolumePercent() + delta`: that reader reports a
+                // muted device as 0 (the display convention), so a scroll up on
+                // a muted Mac jumped to delta% and overwrote the level unmuting
+                // is meant to restore. step(by:) resolves against the scalar.
+                return self.audioProvider.step(by: delta)
             }
         }
         commandHandler.forcedQueries = [
