@@ -5,6 +5,17 @@ local settings = require("settings")
 local config_dir = SKETCHYBAR_CONFIG  -- YBAR PORT: helpers live in the original tree
 local menus_bin = config_dir .. "/helpers/menus/bin/menus"
 
+-- YBAR PORT: the menus helper is an opt-in build (`make helpers` from a
+-- clone; it links the private SkyLight framework, so the Homebrew formula
+-- never builds it — see README.md). Probe once: without the binary neither
+-- `-l` nor a click_script could run, so the menu items are not created at
+-- all and the swap is a no-op, leaving a Homebrew install with a clean bar
+-- instead of fifteen items that fail silently.
+local function is_executable(path)
+  return os.execute("test -x '" .. path:gsub("'", "'\\''") .. "'") == true
+end
+MENUS_HELPER_AVAILABLE = is_executable(menus_bin)
+
 local menu_watcher = sbar.add("item", {
   drawing = false,
   updates = false,
@@ -18,6 +29,12 @@ sbar.add("event", "swap_menus_and_spaces")
 -- YBAR PORT: spaces.lua checks this on workspace-change/wake resyncs so they
 -- can't re-show the workspace pills while the app menus occupy the bar.
 MENUS_VISIBLE = false
+
+if not MENUS_HELPER_AVAILABLE then
+  -- The event stays registered (spaces.lua and front_app.lua subscribe to
+  -- it); with no handler here a swap leaves the pills and front_app in place.
+  return menu_watcher
+end
 
 local max_items = 15
 local menu_items = {}
