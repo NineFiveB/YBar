@@ -1,5 +1,10 @@
 import AppKit
-import ScreenCaptureKit
+// @preconcurrency: ScreenCaptureKit gained its Sendable annotations after
+// the macOS 15 SDK, so an older toolchain rejects awaiting
+// SCShareableContent from the main actor ("non-sendable result type ...
+// cannot be sent from nonisolated context") and the build fails for
+// anyone on macOS 14/15 - which README still promises to support.
+@preconcurrency import ScreenCaptureKit
 
 /// Capture loop for alias items: finds each alias's source window (another
 /// app's menu bar item) and screenshots it via ScreenCaptureKit on the item's
