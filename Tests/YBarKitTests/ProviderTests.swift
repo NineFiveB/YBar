@@ -110,6 +110,29 @@ import Testing
         #expect(AudioProvider.percent(channels: [(muted: nil, volume: nil), (muted: nil, volume: nil)]) == 0)
         #expect(AudioProvider.percent(channels: [(muted: false, volume: 0)]) == 0)
     }
+
+    /// The scalar reader keeps the level a muted device is holding — the
+    /// display convention above folds it to 0, which is right for rendering
+    /// and wrong as a step base.
+    @Test func scalarPercentIgnoresMute() {
+        #expect(AudioProvider.scalarPercent(channels: [(muted: true, volume: 0.6)]) == 60)
+        #expect(AudioProvider.isMuted(channels: [(muted: true, volume: 0.6)]))
+        #expect(AudioProvider.scalarPercent(channels: [(muted: nil, volume: nil), (muted: true, volume: 0.6)]) == 60)
+        #expect(!AudioProvider.isMuted(channels: [(muted: false, volume: 0.6)]))
+        #expect(AudioProvider.scalarPercent(channels: []) == 0)
+    }
+
+    /// `--volume +4` on a Mac muted at 60%: resume at 64%, not the 4% the old
+    /// `currentVolumePercent() + delta` base produced (which also overwrote the
+    /// kept scalar, so a later system unmute had nothing to restore). A step
+    /// down while muted leaves the device alone.
+    @Test func stepResolvesAgainstTheKeptScalarWhileMuted() {
+        #expect(AudioProvider.stepTarget(delta: 4, scalar: 60, muted: true) == 64)
+        #expect(AudioProvider.stepTarget(delta: -4, scalar: 60, muted: true) == nil)
+        #expect(AudioProvider.stepTarget(delta: 4, scalar: 60, muted: false) == 64)
+        #expect(AudioProvider.stepTarget(delta: -4, scalar: 2, muted: false) == 0)
+        #expect(AudioProvider.stepTarget(delta: 40, scalar: 90, muted: false) == 100)
+    }
 }
 
 @Suite struct NetworkInfoTests {

@@ -118,9 +118,12 @@ colors, bool grammar (`on/off/true/false/yes/no/1/0` + `toggle` on bool
 leaves), `width=dynamic` (-1 sentinel with measured-width animation seeding),
 auto-enable of `background.drawing` on color set, lazy `gauge.*`/`image.*`
 component attachment, and the exact `[!]`/`[?]` error string formats (one
-known slip to close in code, not in this contract: the port replies
-`[!] invalid boolean:` for `image.drawing` and `[!] invalid image.drawing:`
-for `background.image.drawing` — the reverse of the reference).
+known slip left to close in code, not in this contract: the port replies
+`[!] invalid image.drawing:` for `background.image.drawing`, where the
+reference now replies `[!] invalid boolean:` — its answer for every boolean
+leaf. `image.drawing` was the other half of that slip and is closed: the
+reference routes it through the shared boolean setter too, so both sides say
+`[!] invalid boolean:` there).
 
 Windows-specific accepted no-ops: `notch_width`, `notch_offset`,
 `notch_display_height` (no notched hardware — number-validated, stored and
