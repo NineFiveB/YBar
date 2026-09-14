@@ -5,6 +5,12 @@ sbar.bar({
   color = colors.bar.bg,
   glass = true,
   fullscreen_show = true,
+  -- A floating island rather than a full-width strip: inset from both screen
+  -- edges and dropped below the top, with the pills' own corner radius so the
+  -- bar reads as the largest pill in the set rather than a separate shape.
+  margin = 10,
+  y_offset = 6,
+  corner_radius = 9,
   -- Status-bar window level, which sits ABOVE the native menu bar's level.
   -- With "Automatically hide and show the menu bar" on, macOS still reveals
   -- its menu bar when the pointer reaches the top edge - right where this bar
