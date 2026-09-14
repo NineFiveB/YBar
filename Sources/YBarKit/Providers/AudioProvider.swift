@@ -121,8 +121,16 @@ public final class AudioProvider {
     }
 
     public static func currentVolumePercent() -> Int {
+        percent(channels: channelReadings())
+    }
+
+    /// The default output device's raw readings, main element first and channel
+    /// 1 as the fallback AirPods/DisplayPort devices need. Callers that must
+    /// tell "muted" from "turned down" (the `+N`/`-N` step base) read these
+    /// instead of `currentVolumePercent()`, which folds both into 0.
+    static func channelReadings() -> [(muted: Bool?, volume: Float32?)] {
         let device = defaultOutputDevice()
-        guard device != kAudioObjectUnknown else { return 0 }
+        guard device != kAudioObjectUnknown else { return [] }
 
         func readUInt32(_ address: inout AudioObjectPropertyAddress) -> UInt32? {
             guard AudioObjectHasProperty(device, &address) else { return nil }
@@ -144,26 +152,57 @@ public final class AudioProvider {
             return status == noErr ? value : nil
         }
 
-        let channels = [kAudioObjectPropertyElementMain, 1].map { element -> (muted: Bool?, volume: Float32?) in
+        return [kAudioObjectPropertyElementMain, 1].map { element -> (muted: Bool?, volume: Float32?) in
             var muteAddr = muteAddress(element: element)
             var volumeAddr = volumeAddress(element: element)
             return (readUInt32(&muteAddr).map { $0 != 0 }, readFloat32(&volumeAddr))
         }
-        return percent(channels: channels)
     }
 
     /// Pure: the percentage for the ordered channel readings (main element
     /// first, channel 1 as the fallback AirPods/DisplayPort devices need). A
     /// muted channel is 0 outright; one with no usable volume defers to the
-    /// next; nothing usable is 0. Split out for testability.
+    /// next; nothing usable is 0. Split out for testability. This is the
+    /// DISPLAY convention (what a theme renders and what `volume_change`
+    /// publishes) — writes resolve against `scalarPercent` instead.
     nonisolated static func percent(channels: [(muted: Bool?, volume: Float32?)]) -> Int {
+        isMuted(channels: channels) ? 0 : scalarPercent(channels: channels)
+    }
+
+    /// Pure: is the device muted, scanning in the same order `percent` does —
+    /// a channel that already reported audible volume settles the question
+    /// before a later channel's mute flag is consulted.
+    nonisolated static func isMuted(channels: [(muted: Bool?, volume: Float32?)]) -> Bool {
         for channel in channels {
-            if channel.muted == true { return 0 }
+            if channel.muted == true { return true }
+            if let volume = channel.volume, volume > 0 { return false }
+        }
+        return false
+    }
+
+    /// Pure: the device's volume SCALAR as a percentage, ignoring mute — what
+    /// AppleScript's `output volume of (get volume settings)` reports, and the
+    /// level CoreAudio keeps while muted. A step must resolve against this, not
+    /// against `percent`: basing `+4` on the muted display value would set 4%
+    /// and destroy the level the user muted at.
+    nonisolated static func scalarPercent(channels: [(muted: Bool?, volume: Float32?)]) -> Int {
+        for channel in channels {
             if let volume = channel.volume, volume > 0 {
                 return Int((volume * 100).rounded())
             }
         }
         return 0
+    }
+
+    /// Pure: the level `--volume ±N` resolves to, or nil for "leave the device
+    /// alone". Stepping UP from a muted device resumes from the kept scalar
+    /// (60% muted, `+4` → 64%, unmuted by the write) instead of from the
+    /// display 0; stepping DOWN while muted is a no-op, because lowering an
+    /// already-silent device may not silently discard the level unmuting is
+    /// supposed to restore.
+    nonisolated static func stepTarget(delta: Int, scalar: Int, muted: Bool) -> Int? {
+        if muted && delta <= 0 { return nil }
+        return min(max(scalar + delta, 0), 100)
     }
 
     // MARK: - Writes
@@ -193,6 +232,21 @@ public final class AudioProvider {
         }
         if applied { start() }
         return applied
+    }
+
+    /// `--volume +N` / `-N`, the form scroll-to-adjust uses. The base is the
+    /// device scalar, so the step matches what the `osascript` line it replaced
+    /// did (`set volume output volume ((output volume of (get volume settings))
+    /// + 4)`, which also reads through mute); true when nothing needed writing
+    /// or the write landed.
+    @discardableResult
+    public func step(by delta: Int) -> Bool {
+        let channels = AudioProvider.channelReadings()
+        guard let target = AudioProvider.stepTarget(
+            delta: delta,
+            scalar: AudioProvider.scalarPercent(channels: channels),
+            muted: AudioProvider.isMuted(channels: channels)) else { return true }
+        return setVolume(percent: target)
     }
 
     /// Selector order for writes: the HAL's virtual main volume (what the

@@ -174,30 +174,42 @@ import Testing
         #expect(stack.barManager.store.item(named: "anim")?.label.color.argb == 0xFF00_0000)
     }
 
-    /// `ybar.volume` is the Windows port's trampoline token for token: numbers
-    /// are absolute levels (slider arithmetic that goes negative must be
-    /// rejected, not turned into a step), strings keep their sign, and the
-    /// reply is nil on success or the handler's `[!]` line.
+    /// `ybar.volume` is the Windows port's trampoline token for token: a number
+    /// is an ABSOLUTE level saturated into 0...100 (slider arithmetic that
+    /// undershoots must not turn into a step, and a runaway value must not trap
+    /// in `Int(_: Double)` and kill the daemon), a string keeps its sign, and
+    /// the reply is nil on success or the handler's `[!]` line.
     @Test func volumeForwardsToTheCommandHandler() throws {
         let stack = try makeStack()
         defer { stack.runtime.shutdown() }
         var forwarded: [[String]] = []
         stack.runtime.handleCommand = { tokens in
             forwarded.append(tokens)
-            return tokens.last == "-4" ? "[!] invalid volume: -4" : ""
+            return ""
         }
         let error = run("""
         assert(ybar.volume(50) == nil)
         assert(ybar.volume("+4") == nil)
         assert(ybar.volume(37.6) == nil)
-        assert(ybar.volume(-4) == "[!] invalid volume: -4")
+        assert(ybar.volume(-4) == nil)
+        assert(ybar.volume(1e300) == nil)
+        assert(ybar.volume(0/0) == "[!] volume(percent) expects a number")
         assert(ybar.volume({}) == "[!] volume(percent) expects a number")
         assert(ybar.volume(50, {}) == "[!] volume(percent, app) expects a string app")
         """, stack.runtime)
         #expect(error == nil)
         #expect(forwarded == [
-            ["--volume", "50"], ["--volume", "+4"], ["--volume", "38"], ["--volume", "-4"],
+            ["--volume", "50"], ["--volume", "+4"], ["--volume", "38"],
+            ["--volume", "0"], ["--volume", "100"],
         ])
+        // …and every token the number form emits stays on the CLI's absolute
+        // branch. Only a signed STRING asks for a step: this is the contract
+        // the trampoline's clamp exists to keep.
+        for tokens in forwarded where tokens[1] != "+4" {
+            #expect(CommandHandler.parseVolume(tokens[1])
+                == .absolute(Int(tokens[1])!), "\(tokens[1]) must be absolute")
+        }
+        #expect(CommandHandler.parseVolume("-4") == .step(-4))
         // Headless (no daemon): the verb reports instead of raising.
         stack.runtime.handleCommand = nil
         #expect(run("""
@@ -223,6 +235,29 @@ import Testing
           assert(type(app.active) == "boolean" and type(app.hidden) == "boolean")
         end
         assert(ybar.query_table("no-such-item") == nil)
+        """, stack.runtime)
+        #expect(error == nil)
+    }
+
+    /// …but a HANDLE describes the item it was created for. `apps` only became
+    /// a reserved target in this release, and answering `handle:query()` with
+    /// the app-list array breaks the `:query().popup.drawing` idiom every
+    /// shipped popup toggle uses.
+    @Test func handleQueryPrefersItsOwnItem() throws {
+        let stack = try makeStack()
+        defer { stack.runtime.shutdown() }
+        let error = run("""
+        local apps = ybar.add("item", "apps", "left", { label = "launcher" })
+        local own = apps:query()
+        assert(own.name == "apps", "the handle answers for its own item")
+        assert(own.label.value == "launcher")
+        assert(own.popup.drawing == "off", "the popup toggle idiom must not index nil")
+        -- By name, the CLI's rule is unchanged: the reserved table wins.
+        assert(ybar.query_table("apps").name == nil, "query_table('apps') is the app list")
+        assert(ybar.query_table("apps", true).name == "apps", "own = true asks for the item")
+        -- A handle whose item is gone falls through to the reserved table.
+        ybar.remove("apps")
+        assert(apps:query().name == nil)
         """, stack.runtime)
         #expect(error == nil)
     }

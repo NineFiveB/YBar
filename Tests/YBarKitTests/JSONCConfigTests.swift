@@ -142,11 +142,17 @@ import Testing
         #expect(commands == [["--add", "item", "x", "left"]])
     }
 
+    /// A wrong type is rejected (a generator emitting `null` for an absent
+    /// optional would otherwise land the item at "left" by accident) — and the
+    /// message names the ITEM, not just the index: rejecting one entry discards
+    /// the whole config, so the user is looking at an empty bar and needs to be
+    /// pointed at the line that caused it.
     @Test func positionRejectsNonString() {
         for value in ["3", "null", "[\"left\"]"] {
-            #expect(throws: JSONCConfig.ConfigError.badEntry("items[0].position must be a string")) {
+            #expect(throws: JSONCConfig.ConfigError
+                .badEntry("items[0] \"clock\": position must be a string")) {
                 try JSONCConfig.commands(
-                    from: "{ \"items\": [ { \"name\": \"x\", \"position\": \(value) } ] }")
+                    from: "{ \"items\": [ { \"name\": \"clock\", \"position\": \(value) } ] }")
             }
         }
     }
