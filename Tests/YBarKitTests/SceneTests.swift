@@ -105,6 +105,24 @@ struct HeadlessScene {
         #expect(list.glyphs[0].color == item.icon.shadow.color.simd)
     }
 
+    /// The colour atlas page is sampled as-is (only the instance alpha is
+    /// honoured), so a shadow copy of an emoji would be a second opaque emoji
+    /// rather than a silhouette: colour glyphs get no shadow (finding GPU3).
+    @Test func colourGlyphsGetNoShadowCopy() {
+        let scene = HeadlessScene(scale: 1)
+        let item = Item(name: "t", position: .left)
+        item.label.string = "a🔋"
+        item.label.shadow.drawing = true
+        item.label.shadow.distance = 4
+        item.label.shadow.angle = 90
+        let (list, _) = scene.build([item])
+        let colour = list.glyphs.filter { $0.flags & GlyphInstance.flagColorGlyph != 0 }
+        // The emoji really is on the colour page; the "a" really is not.
+        #expect(colour.count == 1)
+        // One shadow for the "a", then both inks — no fourth quad.
+        #expect(list.glyphs.count == 3)
+    }
+
     @Test func queryReportsTextShadow() {
         var part = TextPart()
         part.shadow.drawing = true

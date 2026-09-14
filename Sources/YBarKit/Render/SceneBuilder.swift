@@ -827,6 +827,14 @@ public final class SceneBuilder {
         instances.reserveCapacity(placements.count * (shadow == nil ? 1 : 2))
         if let shadow {
             for placement in placements {
+                // Colour-page glyphs (emoji, multicolour symbols) sample the
+                // BGRA atlas as-is — the shader's colour branch keeps only
+                // in.color.a and ignores the shadow's rgb — so a shadow copy
+                // would be a second, fully coloured emoji offset behind the
+                // first, not a silhouette. Skip it; the ink still draws. A
+                // real silhouette needs a shader flag emitting
+                // colour.rgb * texel.a, which is beyond sketchybar parity.
+                guard !placement.entry.isColor else { continue }
                 if let instance = glyphInstance(
                     origin: placement.origin + shadow.offsetPx,
                     entry: placement.entry, color: shadow.color, clip: clip) {
