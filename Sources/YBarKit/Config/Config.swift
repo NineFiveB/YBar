@@ -6,16 +6,45 @@ import Foundation
 /// `<name>rc` shell script, then the declarative `<name>rc.jsonc` / `<name>.jsonc`:
 /// `$XDG_CONFIG_HOME/<name>/` → `~/.config/<name>/` → `~/.{<name>rc.lua,<name>rc}`.
 public enum ConfigLocator {
+    /// What discovery settled on, and why — the daemon needs the "why" to warn
+    /// about the one silent case (see `shadowed`).
+    public struct Resolution: Equatable {
+        /// The config that will be loaded.
+        public let url: URL
+        /// The recorded theme this came from, when it came from one.
+        public let theme: String?
+        /// The config ordinary discovery would have loaded had no theme been
+        /// recorded. Only ever set alongside `theme`, and only when such a file
+        /// exists: `ybar-theme use` (pre-1.0) wrote `current-theme`
+        /// unconditionally while nothing read it, so an upgraded install can
+        /// carry a selection the user has long since replaced with a config of
+        /// their own. The theme still wins — that precedence is documented and
+        /// is what makes a theme survive a restart — but the daemon says so
+        /// instead of letting the user's file disappear without a word.
+        public let shadowed: URL?
+    }
+
     public static func locate(
         explicitPath: String?, instanceName: String,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         home: URL = FileManager.default.homeDirectoryForCurrentUser,
         executable: URL? = AppBundle.executableURL()
     ) -> URL? {
+        resolve(explicitPath: explicitPath, instanceName: instanceName,
+                environment: environment, home: home, executable: executable)?.url
+    }
+
+    public static func resolve(
+        explicitPath: String?, instanceName: String,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        executable: URL? = AppBundle.executableURL()
+    ) -> Resolution? {
         let fileManager = FileManager.default
         if let explicitPath {
             let url = URL(fileURLWithPath: (explicitPath as NSString).expandingTildeInPath)
-            return fileManager.fileExists(atPath: url.path) ? url : nil
+            guard fileManager.fileExists(atPath: url.path) else { return nil }
+            return Resolution(url: url, theme: nil, shadowed: nil)
         }
         // `ybar theme use` records a choice in ~/.config/ybar/current-theme;
         // honouring it here is what makes a theme survive restarts and
@@ -24,11 +53,12 @@ public enum ConfigLocator {
         // Gated to the default instance, as the port is (config.cpp): the
         // state file is not instance-scoped, and a renamed secondary bar
         // must not be hijacked by the primary's theme.
-        if instanceName == "ybar",
-           let themed = ThemeCatalog.currentEntry(
+        var theme: (name: String, entry: URL)?
+        if instanceName == "ybar", let name = ThemeCatalog.currentName(home: home),
+           let entry = ThemeCatalog.currentEntry(
                home: home,
                roots: ThemeCatalog.roots(home: home, executable: executable, environment: environment)) {
-            return themed
+            theme = (name, entry)
         }
         var candidates: [URL] = []
 
@@ -48,7 +78,12 @@ public enum ConfigLocator {
         addDirectory(home.appendingPathComponent(".config/\(instanceName)"))
         candidates.append(home.appendingPathComponent(".\(instanceName)rc.lua"))
         candidates.append(home.appendingPathComponent(".\(instanceName)rc"))
-        return candidates.first { fileManager.fileExists(atPath: $0.path) }
+        let discovered = candidates.first { fileManager.fileExists(atPath: $0.path) }
+        if let theme {
+            return Resolution(url: theme.entry, theme: theme.name, shadowed: discovered)
+        }
+        guard let discovered else { return nil }
+        return Resolution(url: discovered, theme: nil, shadowed: nil)
     }
 }
 

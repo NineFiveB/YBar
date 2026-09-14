@@ -293,6 +293,41 @@ import Testing
         try "gone\n".write(to: config.appendingPathComponent("current-theme"), atomically: true, encoding: .utf8)
         #expect(locate("ybar")?.lastPathComponent == "ybarrc.lua")
     }
+
+    /// The theme wins, but the user's own rc must not vanish silently: a
+    /// `current-theme` left behind by the pre-1.0 `ybar-theme` script (which
+    /// wrote it unconditionally while nothing read it) can outrank a config
+    /// written long afterwards, so `resolve` reports what was shadowed and the
+    /// daemon prints it.
+    @Test func resolveReportsTheConfigAThemeShadows() throws {
+        let home = try scratchHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let config = home.appendingPathComponent(".config/ybar")
+        let theme = config.appendingPathComponent("themes/glass")
+        try FileManager.default.createDirectory(at: theme, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: theme.appendingPathComponent("ybar.jsonc").path, contents: nil)
+        try "glass\n".write(to: config.appendingPathComponent("current-theme"), atomically: true, encoding: .utf8)
+
+        func resolve(explicit: String? = nil) -> ConfigLocator.Resolution? {
+            ConfigLocator.resolve(explicitPath: explicit, instanceName: "ybar",
+                                  environment: [:], home: home, executable: nil)
+        }
+        // No user config yet: the theme loads and shadows nothing.
+        #expect(resolve()?.theme == "glass")
+        #expect(resolve()?.shadowed == nil)
+        // The user writes their own rc afterwards — still the theme, now with
+        // the file it displaced named.
+        let rc = config.appendingPathComponent("ybarrc.lua")
+        FileManager.default.createFile(atPath: rc.path, contents: nil)
+        #expect(resolve()?.url.lastPathComponent == "ybar.jsonc")
+        #expect(resolve()?.shadowed?.path == rc.path)
+        // -c and `theme reset` both take the report away with the override.
+        #expect(resolve(explicit: rc.path)?.shadowed == nil)
+        #expect(resolve(explicit: rc.path)?.theme == nil)
+        try FileManager.default.removeItem(at: config.appendingPathComponent("current-theme"))
+        #expect(resolve()?.url.path == rc.path)
+        #expect(resolve()?.theme == nil)
+    }
 }
 
 // MARK: - Local verbs
