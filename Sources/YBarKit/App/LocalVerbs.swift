@@ -141,7 +141,15 @@ enum ThemeVerbs {
     static func list() -> Int32 {
         let themes = ThemeCatalog.collect(roots: roots)
         guard !themes.isEmpty else {
-            print("no themes found")
+            // None of the roots exists — the shape a `make app` bundle has,
+            // since the shipped examples/ sit in the checkout, not the
+            // bundle. Name the way out rather than leaving the user to find
+            // docs/THEMES.md.
+            print("""
+                no themes found. From a source checkout run `scripts/ybar-theme list`, \
+                which adds the checkout's examples/ as a root; \
+                otherwise set YBAR_THEME_ROOTS=<dir of themes>.
+                """)
             return 0
         }
         let active = ThemeCatalog.currentName(home: home)
@@ -289,9 +297,14 @@ enum AutostartVerbs {
             }
             configPath = URL(fileURLWithPath: expanded).standardizedFileURL.path
         } else if ConfigLocator.locate(explicitPath: nil, instanceName: instanceName) == nil {
+            // `-c` leads: it is the only route that works for a source
+            // checkout, whose themes live outside every search root and
+            // resolve through YBAR_THEME_ROOTS — which a launchd agent does
+            // not inherit, so a name selected there would not survive here.
             return fail("""
                 [!] nothing to start with: no config under ~/.config/ybar and no theme selected. \
-                Run `ybar theme use <name>`, or pin one: ybar autostart enable -c <config>
+                Pin one: ybar autostart enable -c <config> — the route for a source checkout. \
+                Or select a theme first, then re-run: ybar theme use <name>
                 """)
         }
 
