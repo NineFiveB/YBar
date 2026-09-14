@@ -18,7 +18,7 @@
    - *Level 1:* shell/any-language plugin scripts via events + CLI (sketchybar model).
    - *Level 2:* embedded Lua API (SbarLua-style) for rich programmatic configs.
    - *Level 3:* native Swift plugin protocol for custom scene-graph nodes / shaders.
-5. **Good citizen.** Public APIs only: no private SkyLight/CGS symbols, linked or dlsym-resolved, anywhere in the tree — a capability that needs one is not built, so an OS release cannot break the bar. Low idle CPU (<0.1%), low memory, instant hot-reload.
+5. **Good citizen.** Public APIs only: the engine and every shipped binary link and dlsym-resolve nothing private — no SkyLight/CGS symbols — so a capability that needs one is not built and an OS release cannot break the bar. The single exception in the repo is an opt-in example helper, `examples/sketchybar-port/helpers/menus` (app-menu swap), which links SkyLight, is built only by `make helpers` from a clone, and ships in no install — see [its README](../examples/sketchybar-port/README.md). Low idle CPU (<0.1%), low memory, instant hot-reload.
 
 ## v1 module targets
 
