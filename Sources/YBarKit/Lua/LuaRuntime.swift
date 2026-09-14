@@ -482,8 +482,9 @@ public final class LuaRuntime {
         // so a slider drag becomes one function call instead of a shell round
         // trip (the Windows port's Trampolines::volume, token for token: the
         // reply is nil on success, the `[!]` line otherwise). A Lua number is
-        // an absolute level — `-4` from arithmetic must not turn into a step —
-        // while a string keeps its sign for the `"+4"` / `"-4"` form.
+        // an absolute level, saturated into 0...100 — `-4` from arithmetic
+        // must not turn into a step — while a string keeps its sign for the
+        // `"+4"` / `"-4"` form.
         register("volume") { L in
             MainActor.assumeIsolated {
                 guard let runtime = LuaRuntime.current else { return 0 }
@@ -494,7 +495,16 @@ public final class LuaRuntime {
                         lua_pushstring(L, "[!] volume(percent) expects a number")
                         return 1
                     }
-                    tokens.append(String(Int(level.rounded())))
+                    // Clamp BEFORE stringifying — that is what makes the number
+                    // form unconditionally absolute. Unclamped, `current - 10`
+                    // at 5 stringifies to "-5" and lands on parseVolume's
+                    // signed-STEP branch (a second decrement the script never
+                    // asked for), and any |level| >= 2^63 traps in
+                    // `Int(_: Double)`, taking the daemon down with it. The
+                    // device write clamps the same way (AudioProvider
+                    // .setVolume), so saturating here is the level the hardware
+                    // would have landed on anyway.
+                    tokens.append(String(Int(min(max(level, 0), 100).rounded())))
                 } else if let pct = argString(L, 1) {
                     tokens.append(pct)
                 } else {
