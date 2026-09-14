@@ -16,7 +16,13 @@ return {
   transparent = 0x00000000,
 
   bar = {
-    bg = 0xd9121214,         -- near-black over the glass strip
+    -- 25% over the bar's own Liquid Glass, not the old 85% near-black. The
+    -- strip now reads as the same material as the pills and popups, while
+    -- still darkening whatever sits behind it — which is what keeps a pill
+    -- (13%) distinct against it and near-white glyphs legible over a bright
+    -- wallpaper. Drop this to 0x00000000 for a fully clear strip and raise
+    -- bg1/bg2 to compensate, or the pills flatten into it.
+    bg = 0x40121214,
     border = 0x00000000,
   },
   popup = {
