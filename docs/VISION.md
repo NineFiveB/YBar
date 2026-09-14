@@ -18,7 +18,7 @@
    - *Level 1:* shell/any-language plugin scripts via events + CLI (sketchybar model).
    - *Level 2:* embedded Lua API (SbarLua-style) for rich programmatic configs.
    - *Level 3:* native Swift plugin protocol for custom scene-graph nodes / shaders.
-5. **Good citizen.** Public APIs first; private SkyLight/CGS usage isolated behind a protocol with graceful degradation per macOS release. Low idle CPU (<0.1%), low memory, instant hot-reload.
+5. **Good citizen.** Public APIs only: no private SkyLight/CGS symbols, linked or dlsym-resolved, anywhere in the tree — a capability that needs one is not built, so an OS release cannot break the bar. Low idle CPU (<0.1%), low memory, instant hot-reload.
 
 ## v1 module targets
 
@@ -42,7 +42,7 @@ Item, text run (font fallback, SF Symbols, emoji), image, rounded-rect/squircle 
 
 ## Non-goals (v1)
 
-- Windows/Linux support.
+- Linux support. (Windows is no longer a non-goal: a native port lives on the `windows` branch and shares the command grammar, IPC protocol and Lua API — see the README.)
 - Replacing menu bar *extras* hosting (NSStatusItem tray) — alias/capture of existing extras is a later milestone.
 - A GUI settings app.
 
