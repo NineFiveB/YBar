@@ -83,7 +83,9 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
   (in-process CoreAudio; 0 mutes keeping the level, `"+4"`/`"-4"` step from the
   current level — no more `osascript` per slider tick); in Lua a number is
   absolute and a signed string relative, and the call returns nil or a `[!]`
-  string
+  string. A number is *always* absolute: `ybar.volume(current - 10)` saturates
+  into 0-100 (so an undershoot mutes) and never becomes a step — only the
+  string form `"-10"` steps
 - Running apps, permission-free: `ybar --query apps` → `[{name, bundle_id, pid,
   active, hidden}]` (also `ybar.query_table("apps")` as a Lua table; `apps` is a
   reserved query target like `bar`/`displays`) and `ybar --app <pid|bundle-id>
