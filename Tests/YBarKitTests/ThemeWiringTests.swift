@@ -96,4 +96,31 @@ import Testing
         }
         #expect(hoverCalls.count == 1, "paired rows wired by \(hoverCalls.count) hover calls")
     }
+
+    /// The Spaces switch may only react to `swap_menus_and_spaces` when the
+    /// opt-in menus helper exists. Without it (every Homebrew install)
+    /// items/menus.lua returns before registering the swap handler, so the
+    /// event swaps nothing — an indicator that still flipped its glyph would
+    /// show OFF with the workspace pills right there beside it.
+    @Test func theSpacesSwitchOnlyReactsWhenTheMenusHelperIsThere() throws {
+        let items = Self.portRoot.appendingPathComponent("items")
+        var checked = 0
+        // menus.lua's own swap handler needs no textual guard: it is
+        // registered past the probe's early return, so it only exists when
+        // the helper does.
+        for file in try FileManager.default.contentsOfDirectory(atPath: items.path)
+        where file.hasSuffix(".lua") && file != "menus.lua" {
+            let lines = try String(contentsOf: items.appendingPathComponent(file), encoding: .utf8)
+                .components(separatedBy: "\n")
+            for (index, line) in lines.enumerated()
+            where line.contains(#"subscribe("swap_menus_and_spaces""#) {
+                checked += 1
+                let preceding = lines[max(0, index - 8)..<index]
+                #expect(preceding.contains { $0.contains("if MENUS_HELPER_AVAILABLE then") },
+                        "\(file):\(index + 1) reacts to the swap with no helper guard")
+            }
+        }
+        // An empty sweep would pass vacuously: both adapters carry the switch.
+        #expect(checked == 2, "expected the two spaces adapters, saw \(checked) subscribers")
+    }
 }
