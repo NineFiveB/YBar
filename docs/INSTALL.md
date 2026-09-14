@@ -40,7 +40,8 @@ granted permissions unless you re-sign with a stable local certificate (see
 
 ## Release zip
 
-(Applies once a tagged release with an attached zip exists on GitHub.)
+(Prospective: the release workflow deliberately publishes source only — no
+release carries a zip today. This route applies if one ever does.)
 
 Each tagged release ships `YBar-<version>.zip` (built by `make release`). The
 signature inside is the maintainer's local certificate — your Mac does not
@@ -68,9 +69,10 @@ codesign/xattr race — details in [BUILDING.md](BUILDING.md).
 
 ## First run
 
-YBar looks for a config at `~/.config/ybar/ybarrc.lua` (also `ybarrc`,
-`ybarrc.jsonc`, `ybar.jsonc`, then `~/.ybarrc.lua`, `~/.ybarrc`), or takes an
-explicit path via `-c`. Start from
+YBar takes an explicit path via `-c`; otherwise it starts the theme selected
+with `ybar theme use` ([THEMES.md](THEMES.md)), and failing that looks for a
+config at `~/.config/ybar/ybarrc.lua` (also `ybarrc`, `ybarrc.jsonc`,
+`ybar.jsonc`, then `~/.ybarrc.lua`, `~/.ybarrc`). Start from
 an example — Homebrew installs them under `$(brew --prefix)/share/ybar/examples`,
 a git clone has them in `examples/`:
 
@@ -90,6 +92,12 @@ identity. Stop it with `ybar --exit`
 (`~/Applications/YBar.app/Contents/MacOS/ybar --exit` if the CLI is not on
 your PATH).
 
+`ybar --version` names the build — quote it in bug reports: `make app`,
+`make release` and `brew install --HEAD` stamp the commit into the bundle
+(`ybar 0.1.0 (a1b2c3d)`), a tagged Homebrew install reports the release
+build number from the committed plist (`ybar 0.1.0 (1)`), and a binary
+outside a bundle prints the bare version.
+
 ### Permissions
 
 All prompts and grants attribute to **com.ybar.YBar** — you will see "YBar" in
@@ -99,6 +107,13 @@ script it spawns. Only the features you actually configure ask for anything:
 - **Bluetooth** — used by widgets that list/control devices. macOS prompts on
   first use; click Allow.
 - **Calendar** — used by the calendar popup. Prompts on first use.
+- **Automation (Music, Spotify)** — the first `media_change` subscription
+  seeds the now-playing state from a player that is already running by asking
+  it over AppleScript (`osascript`), so with Music or Spotify open, macOS
+  prompts "YBar wants access to control Music"; click OK. The query is given
+  60 s, so a prompt left unanswered does not wedge the daemon. Deny it and the
+  bar still follows the player's own change notifications from the next track
+  on — only the state at startup is missed.
 - **Accessibility** — needed for `modifier_change` events (live ⌥-held UX;
   without the grant modifier keys are only seen while the pointer is over the
   bar, and the daemon logs a one-time warning to stderr when a config
@@ -110,7 +125,9 @@ script it spawns. Only the features you actually configure ask for anything:
   clicking outside them needs no permission.
 - **Location (Wi-Fi network name)** — macOS gates the SSID behind Location
   Services. Opt in once with `ybar --bar wifi_ssid_prompt=on` and click
-  Allow; without it, wifi widgets show a generic connected state.
+  Allow; the network name is re-published the moment the grant lands (no
+  restart or `--trigger wifi_change` needed). Without it, wifi widgets show
+  a generic connected state.
 - **Screen Recording** — needed by the `alias` component, which screenshots
   other apps' menu bar items via ScreenCaptureKit. macOS prompts on first
   capture; if you dismissed it, grant manually under Privacy & Security →
@@ -136,10 +153,36 @@ codesign --force --sign "YBar Signing" --identifier com.ybar.YBar \
 
 ## Autostart (LaunchAgent)
 
-Save as `~/Library/LaunchAgents/com.ybar.YBar.plist`, substituting absolute
-paths (launchd does not expand `~`; Homebrew users: point at
-`$(brew --prefix)/opt/ybar/YBar.app/...`). Running the binary inside the
-bundle keeps the app's TCC identity:
+`ybar autostart enable` writes `~/Library/LaunchAgents/com.ybar.YBar.plist`
+and bootstraps it; a daemon you started by hand is first asked to `--exit`
+and handed over, so the agent's copy does not lose the instance lock to it:
+
+```sh
+ybar autostart enable                                 # config discovered at every start
+ybar autostart enable -c ~/.config/ybar/ybarrc.lua    # or pin one
+ybar autostart status
+ybar autostart disable                                # bootout + remove the plist
+```
+
+Run it from the `ybar` inside YBar.app (Homebrew's `bin/ybar` resolves into
+the keg and is rewritten to the stable `$(brew --prefix)/opt/ybar` path):
+the agent runs that bundle binary, which keeps the app's TCC identity, and a
+bare `swift build` product is refused. Without `-c`, the config is
+discovered on every respawn — the theme selected with `ybar theme use`
+first, then `~/.config/ybar` — which is what makes a theme switch survive a
+restart; `enable` refuses when nothing is discoverable rather than write an
+agent with nothing to start. With `-c`, that file wins on every restart even
+after `ybar theme use` has reloaded the running bar.
+
+Restart a supervised bar with
+`launchctl kickstart -k gui/$(id -u)/com.ybar.YBar`, never `pkill`:
+`KeepAlive.SuccessfulExit = false` restarts YBar after a crash (or a kill)
+but respects a deliberate `ybar --exit`.
+
+What `enable` writes, for reference — a hand-written copy works too,
+substituting absolute paths (launchd does not expand `~`; Homebrew users:
+point at `$(brew --prefix)/opt/ybar/YBar.app/...`). `-c <path>` joins
+`ProgramArguments` only when a config was pinned:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -151,8 +194,6 @@ bundle keeps the app's TCC identity:
     <key>ProgramArguments</key>
     <array>
         <string>/Users/you/Applications/YBar.app/Contents/MacOS/ybar</string>
-        <string>-c</string>
-        <string>/Users/you/.config/ybar/ybarrc.lua</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -168,12 +209,6 @@ bundle keeps the app's TCC identity:
 ```
 
 ```sh
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.ybar.YBar.plist
-```
-
-`KeepAlive.SuccessfulExit = false` restarts YBar after a crash but respects a
-deliberate `ybar --exit`. To unload:
-
-```sh
-launchctl bootout gui/$(id -u)/com.ybar.YBar
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.ybar.YBar.plist   # what enable runs
+launchctl bootout gui/$(id -u)/com.ybar.YBar                                  # what disable runs
 ```
