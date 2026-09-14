@@ -166,7 +166,7 @@ struct HeadlessScene {
 /// the box is inset by the border width, and the stroke never leaves it.
 @MainActor
 @Suite struct GraphPlateTests {
-    private func graphItem(borderWidth: Float) -> Item {
+    private func graphItem(borderWidth: Float, borderAlpha: Float = 1) -> Item {
         let item = Item(name: "g", position: .left)
         item.kind = .graph
         let graph = GraphState(capacity: 40)
@@ -175,6 +175,7 @@ struct HeadlessScene {
         item.background.drawing = true
         item.background.height = 20
         item.background.borderWidth = borderWidth
+        item.background.borderColor = YColor(alpha: borderAlpha, red: 1, green: 1, blue: 1)
         return item
     }
 
@@ -215,6 +216,41 @@ struct HeadlessScene {
         #expect(xs.contains(Float(box.minX + 40)))
         #expect(ys.min() == Float(box.midY - 10))
         #expect(ys.max() == Float(box.midY + 10))
+    }
+
+    /// border_width is inherited from the --default prototype and switched
+    /// off by a transparent border_color (examples/sketchybar-port's graphs),
+    /// so only a border that paints may shrink the graph (finding GPU2).
+    @Test func invisibleBorderMeansNoInset() {
+        let scene = HeadlessScene(scale: 1)
+        let item = graphItem(borderWidth: 3, borderAlpha: 0)
+        let (list, boxes) = scene.build([item])
+        guard let box = boxes[item.id] else {
+            Issue.record("graph item was not laid out")
+            return
+        }
+        let xs = list.triangles.map(\.position.x)
+        let ys = list.triangles.map(\.position.y)
+        #expect(xs.contains(Float(box.minX)))
+        #expect(xs.contains(Float(box.minX + 40)))
+        #expect(ys.min() == Float(box.midY - 10))
+        #expect(ys.max() == Float(box.midY + 10))
+    }
+
+    /// A border wider than the plate must not turn the box inside out.
+    @Test func hugeBorderCannotInvertTheBox() {
+        let scene = HeadlessScene(scale: 1)
+        let item = graphItem(borderWidth: 40)
+        let (list, boxes) = scene.build([item])
+        guard let box = boxes[item.id] else {
+            Issue.record("graph item was not laid out")
+            return
+        }
+        let xs = list.triangles.map(\.position.x)
+        let ys = list.triangles.map(\.position.y)
+        // Collapsed to the centre line at worst — never mirrored.
+        #expect(xs.allSatisfy { $0 >= Float(box.minX) && $0 <= Float(box.minX + 40) })
+        #expect(ys.allSatisfy { $0 >= Float(box.midY - 10) && $0 <= Float(box.midY + 10) })
     }
 }
 
