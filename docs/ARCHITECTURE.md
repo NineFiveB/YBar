@@ -19,7 +19,7 @@ Key departures from sketchybar, each justified by research:
 | CPU CoreGraphics raster → CALayer.contents | Instanced SDF quads + glyph atlas on GPU | Full-speed animation, gradients, real gaussian shadows, squircles, shader modules |
 | Carbon event loop, no NSApplication | Ordinary AppKit app (`.accessory` activation policy) | NSTrackingArea/NSEvent replace Carbon + private CGEvent field hacks, zero permissions |
 | mach bootstrap port (`bootstrap_register`, deprecated) | Unix domain socket, length-framed | Simpler, debuggable, any-language clients; same NUL-separated argv payload |
-| Private API required for core operation | **100% public API** — the v1 plan kept a slot for opt-in SkyLight modules behind protocols; that slot was closed, nothing in the tree links or dlsyms a private symbol (see VISION.md) | Tahoe churn firewall (macOS 26 already forced sketchybar into dlsym shims) |
+| Private API required for core operation | **100% public API** — the v1 plan kept a slot for opt-in SkyLight modules behind protocols; that slot was closed, and no engine source or shipped binary links or dlsyms a private symbol. The one private-API user in the repo sits outside that line: the opt-in `examples/sketchybar-port/helpers/menus`, built only by `make helpers` and shipped by no install (see VISION.md) | Tahoe churn firewall (macOS 26 already forced sketchybar into dlsym shims) |
 | Data via plugin shell scripts polling | Built-in native providers publish typed values + events | Kills shell-out-per-second; scripts remain fully supported |
 
 ## 2. Process model & lifecycle
