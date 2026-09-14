@@ -90,3 +90,58 @@ import Testing
         #expect(!scheduler.isAnimating)
     }
 }
+
+/// The accumulator behind the YBAR_DEBUG `[ybar:frames]` line (review
+/// finding A12), driven with synthetic timestamps: the first tick only opens
+/// the window, a closed window reports frames / elapsed, every window starts
+/// its count afresh, and a reset keeps an idle gap out of the average.
+@Suite struct FrameRateTraceTests {
+    private func run(_ trace: inout FrameRateTrace, from start: TimeInterval,
+                     hz: Double, seconds: Double) -> [Double] {
+        var reported: [Double] = []
+        for i in 1...Int(hz * seconds) {
+            if let fps = trace.record(now: start + Double(i) / hz) { reported.append(fps) }
+        }
+        return reported
+    }
+
+    @Test func firstTickOpensTheWindowWithoutReporting() {
+        var trace = FrameRateTrace(window: 2)
+        #expect(trace.record(now: 10) == nil)
+        #expect(trace.frames == 0)
+        #expect(trace.windowStart == 10)
+    }
+
+    @Test func reportsTheSustainedRateOnceTheWindowCloses() {
+        var trace = FrameRateTrace(window: 2)
+        _ = trace.record(now: 0)
+        // 120 Hz for exactly one window: the 240th tick lands on t = 2.
+        let reported = run(&trace, from: 0, hz: 120, seconds: 2)
+        #expect(reported.count == 1)
+        #expect(abs((reported.first ?? 0) - 120) < 0.01)
+    }
+
+    @Test func eachWindowStartsItsCountAfresh() {
+        var trace = FrameRateTrace(window: 2)
+        _ = trace.record(now: 0)
+        var reported = run(&trace, from: 0, hz: 120, seconds: 2)
+        // The clock drops to 60 Hz: the second window must not carry the
+        // first window's 240 ticks into its average.
+        reported += run(&trace, from: 2, hz: 60, seconds: 2)
+        #expect(reported.count == 2)
+        #expect(abs((reported.last ?? 0) - 60) < 0.01)
+    }
+
+    @Test func resetKeepsAnIdleGapOutOfTheAverage() {
+        var trace = FrameRateTrace(window: 2)
+        _ = trace.record(now: 0)
+        _ = run(&trace, from: 0, hz: 60, seconds: 1)   // half a window, then the link stops
+        trace.reset()
+        // The clock restarts 10 s later. Without the reset the 60 ticks above
+        // would be spread across the gap and the first report would read ~15.
+        #expect(trace.record(now: 10) == nil)
+        let reported = run(&trace, from: 10, hz: 60, seconds: 2)
+        #expect(reported.count == 1)
+        #expect(abs((reported.first ?? 0) - 60) < 0.01)
+    }
+}
