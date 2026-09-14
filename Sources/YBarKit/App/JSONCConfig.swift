@@ -49,8 +49,14 @@ public enum JSONCConfig {
         do {
             batches = try commands(from: source)
         } catch {
-            FileHandle.standardError.write(
-                Data("[!] \(url.lastPathComponent): \(error)\n".utf8))
+            // Translation is all-or-nothing, so one bad entry leaves an empty
+            // bar. Name the file in full and say that nothing ran: otherwise
+            // the only symptom is a bar that never appears.
+            FileHandle.standardError.write(Data("""
+                [!] \(url.path): \(error) — nothing was loaded from this config \
+                (a rejected entry stops the whole file); fix that entry and reload.
+
+                """.utf8))
             return
         }
         for argv in batches {
@@ -240,10 +246,15 @@ public enum JSONCConfig {
             commands.append(["--add", "bracket", name] + members)
         } else {
             // Only absence means "left": a wrong type (null included) is an
-            // error like every sibling key, and like the port.
+            // error like every sibling key, and like the port. Rejecting takes
+            // the whole config down with it (run() dispatches nothing), so the
+            // message names the item as well as the index — a blank bar is a
+            // hard enough symptom without having to count entries to find the
+            // line that caused it.
             let position = try entry["position"].map { value -> String in
                 guard let string = value as? String else {
-                    throw ConfigError.badEntry("items[\(index)].position must be a string")
+                    throw ConfigError.badEntry(
+                        "items[\(index)] \"\(name)\": position must be a string")
                 }
                 return string
             } ?? "left"
