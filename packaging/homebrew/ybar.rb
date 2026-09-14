@@ -77,7 +77,8 @@ class Ybar < Formula
         codesign --force --sign "YBar Signing" --identifier com.ybar.YBar \\
           #{opt_prefix}/YBar.app
 
-      First-run permission walkthrough and autostart LaunchAgent:
+      Start it at login with `ybar autostart enable` (writes and loads the
+      com.ybar.YBar LaunchAgent). First-run permission walkthrough:
       https://github.com/NineFiveB/YBar/blob/main/docs/INSTALL.md
     EOS
   end
