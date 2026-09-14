@@ -32,7 +32,7 @@ public final class BarManager {
     private var popupSurfaces: [Int: PopupSurface] = [:]
     private var atlases: [CGFloat: GlyphAtlas] = [:]
     private var renderScheduled = false
-    private var retryScheduled = false
+    private(set) var retryScheduled = false
     /// Scales / displays whose no-render condition was already reported —
     /// the retry runs every second, the stderr line must not.
     private var reportedAtlasScales: Set<CGFloat> = []
@@ -549,17 +549,20 @@ public final class BarManager {
     }
 
     /// Returns whether the surface's scene carries marquee text.
-    private func render(surface: BarSurface) -> Bool {
-        // Both guards used to return silently, and a fully static bar (no
-        // clock, no --set) never came back to retry: say so once, and poll
-        // like a lost frame does.
+    @discardableResult
+    func render(surface: BarSurface) -> Bool {
+        // Both guards used to return silently; say why once. Only the atlas
+        // guard polls: a missing texture is transient. An empty bar frame is
+        // a config state (height=0, margin >= screen width / 2) that no retry
+        // can resolve, and every path that moves a bar frame — applySettings,
+        // rebuildSurfaces, the reframeBars hook — already ends in
+        // setNeedsRender(), so a timer here would poll forever for nothing.
         let barSize = surface.barSize
         guard barSize.width > 0, barSize.height > 0 else {
             if reportedEmptyDisplays.insert(surface.arrangementIndex).inserted {
                 FileHandle.standardError.write(Data(
                     "[!] display \(surface.arrangementIndex): bar frame is empty, nothing to render\n".utf8))
             }
-            scheduleRetry()
             return false
         }
         let scale = surface.scale
