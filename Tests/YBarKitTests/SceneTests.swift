@@ -599,6 +599,39 @@ struct HeadlessScene {
         #expect(plate.origin.x == Float((box.minX + 100 - ink.width - 3).rounded()))
     }
 
+    /// The plate is sized from the NATURAL ink, so it can overflow the slot
+    /// the glyphs are clipped to; it must be trimmed by the same clip rather
+    /// than painting over the neighbours (review finding GPU1).
+    @Test func plateIsTrimmedToANarrowSlot() throws {
+        let scene = HeadlessScene(scale: 1)
+        let item = Item(name: "t", position: .left)
+        item.label.string = "Hello world"
+        item.label.customWidth = 20
+        plated(&item.label)
+        let (list, boxes) = scene.build([item])
+        let box = try #require(boxes[item.id])
+        #expect(scene.fontCache.naturalMeasure(part: item.label).width > 20)
+        let plate = try #require(list.quads.last)
+        // The plate starts 3pt (its own left padding) before the slot and is
+        // ink-wide: both ends are cut back to the slot.
+        #expect(plate.origin.x == Float(box.minX))
+        #expect(plate.origin.x + plate.size.x == Float(box.minX + 20))
+    }
+
+    /// A collapsed item (width=0, every --animate width frame under the
+    /// natural content) clips its glyphs away; the plate must go with them.
+    @Test func collapsedItemDrawsNoPlate() {
+        let scene = HeadlessScene(scale: 1)
+        let item = Item(name: "t", position: .left)
+        item.label.string = "Hello world"
+        item.customWidth = 0
+        plated(&item.label)
+        let (list, _) = scene.build([item])
+        // Bar background only — no ink, and no plate behind the missing ink.
+        #expect(list.quads.count == 1)
+        #expect(list.glyphs.isEmpty)
+    }
+
     @Test func nothingIsDrawnWhenTheStyleIsOff() {
         let scene = HeadlessScene(scale: 1)
         let item = Item(name: "t", position: .left)
