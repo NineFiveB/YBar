@@ -23,7 +23,7 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
 - `fullscreen_hide=on` (opt-in) keeps the bar, popups and tooltips **off**
   native-fullscreen Spaces entirely — the WindowServer hides them there, no
   polling; wins over `fullscreen_show`, and without it `topmost=on` still draws
-  over fullscreen
+  over fullscreen; `--query bar` reports both flags
 - SDF rounded rects (per-corner radii, borders, gradients, shadows), glyph atlas
   with font fallback, color emoji, tinted SF Symbols (`icon=sf:wifi`), ink-precise
   text metrics matching sketchybar's pixel behavior
@@ -44,7 +44,9 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
   `slider.interactive=off` makes a slider a read-only fill meter (a press is an
   ordinary click; sets still apply)
 - **Alias items** — live ScreenCaptureKit captures of other apps' menu bar items
-  (`--add alias "App[,Window]"`)
+  (`--add alias "App[,Window]"`, Screen Recording); a click on an alias with no
+  script or Lua handler is forwarded to the captured item (Accessibility —
+  macOS may prompt on the first click)
 - **Marquee text** (`scroll_texts`), **hover tooltips**, `background.image` +
   `background.clip` cutouts, **idle inhibitor**
 - **Arc gauges** — speedometer-style rings with the label centered in the dial
@@ -56,7 +58,10 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
 - **Popup flow layout** — `popup.wrap_width` wraps members into grids (calendar
   month grids, tile dashboards); blank rows collapse into slim separators
 - **Popup fades** — `popup.fade_in` / `popup.fade_out` (frames at 60 Hz, 0 = hard
-  cut) ramp the panel's opacity on open and close, same keys as the Windows port
+  cut) ramp the panel's opacity on the window server on open and close: a
+  closing panel ignores the mouse, a reopen mid-fade restarts the ramp from 0,
+  tooltips keep the hard cut; inherited through `--default popup.*` and
+  reported by `--query`; same keys as the Windows port
 
 ## Scripting & events
 
@@ -76,7 +81,9 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
   in-process CPU/memory stats
 - Output volume write path: `ybar --volume <0-100|+N|-N>` / `ybar.volume(pct)`
   (in-process CoreAudio; 0 mutes keeping the level, `"+4"`/`"-4"` step from the
-  current level — no more `osascript` per slider tick)
+  current level — no more `osascript` per slider tick); in Lua a number is
+  absolute and a signed string relative, and the call returns nil or a `[!]`
+  string
 - Running apps, permission-free: `ybar --query apps` → `[{name, bundle_id, pid,
   active, hidden}]` (also `ybar.query_table("apps")` as a Lua table; `apps` is a
   reserved query target like `bar`/`displays`) and `ybar --app <pid|bundle-id>
