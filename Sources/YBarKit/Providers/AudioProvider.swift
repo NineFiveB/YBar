@@ -21,6 +21,18 @@ public final class AudioProvider {
         mScope: kAudioObjectPropertyScopeGlobal,
         mElement: kAudioObjectPropertyElementMain)
 
+    /// CoreAudio delivers property changes on a `@Sendable` block, and this
+    /// class is main-actor isolated, so capturing `self` in one is "sending
+    /// 'self' risks causing data races" under strict concurrency (older
+    /// toolchains reject it outright; newer ones happen not to). The blocks
+    /// therefore capture nothing and reach the live provider through this
+    /// weak registry on the way back to the main actor — the same trick
+    /// `DaemonHooks` plays for the global event monitors.
+    @MainActor
+    private enum Listener {
+        static weak var provider: AudioProvider?
+    }
+
     private static func volumeAddress(element: UInt32) -> AudioObjectPropertyAddress {
         AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyVolumeScalar,
@@ -35,9 +47,9 @@ public final class AudioProvider {
             mElement: element)
     }
 
-    private lazy var listenerBlock: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+    private let listenerBlock: AudioObjectPropertyListenerBlock = { _, _ in
         MainActor.assumeIsolated {
-            self?.publishVolume(forced: false)
+            Listener.provider?.publishVolume(forced: false)
         }
     }
 
@@ -46,14 +58,15 @@ public final class AudioProvider {
     public func start() {
         guard !started else { return }
         started = true
+        Listener.provider = self
         if !deviceListenerInstalled {
             AudioObjectAddPropertyListenerBlock(
                 AudioObjectID(kAudioObjectSystemObject),
                 &AudioProvider.defaultOutputAddress,
                 .main
-            ) { [weak self] _, _ in
+            ) { _, _ in
                 MainActor.assumeIsolated {
-                    self?.rearmDevice()
+                    Listener.provider?.rearmDevice()
                 }
             }
             deviceListenerInstalled = true
