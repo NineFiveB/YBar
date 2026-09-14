@@ -239,6 +239,29 @@ import Testing
         #expect(error == nil)
     }
 
+    /// …but a HANDLE describes the item it was created for. `apps` only became
+    /// a reserved target in this release, and answering `handle:query()` with
+    /// the app-list array breaks the `:query().popup.drawing` idiom every
+    /// shipped popup toggle uses.
+    @Test func handleQueryPrefersItsOwnItem() throws {
+        let stack = try makeStack()
+        defer { stack.runtime.shutdown() }
+        let error = run("""
+        local apps = ybar.add("item", "apps", "left", { label = "launcher" })
+        local own = apps:query()
+        assert(own.name == "apps", "the handle answers for its own item")
+        assert(own.label.value == "launcher")
+        assert(own.popup.drawing == "off", "the popup toggle idiom must not index nil")
+        -- By name, the CLI's rule is unchanged: the reserved table wins.
+        assert(ybar.query_table("apps").name == nil, "query_table('apps') is the app list")
+        assert(ybar.query_table("apps", true).name == "apps", "own = true asks for the item")
+        -- A handle whose item is gone falls through to the reserved table.
+        ybar.remove("apps")
+        assert(apps:query().name == nil)
+        """, stack.runtime)
+        #expect(error == nil)
+    }
+
     @Test func configErrorsAreReportedNotFatal() throws {
         let stack = try makeStack()
         defer { stack.runtime.shutdown() }
