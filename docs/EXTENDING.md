@@ -89,7 +89,10 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
   string form `"-10"` steps
 - Running apps, permission-free: `ybar --query apps` → `[{name, bundle_id, pid,
   active, hidden}]` (also `ybar.query_table("apps")` as a Lua table; `apps` is a
-  reserved query target like `bar`/`displays`) and `ybar --app <pid|bundle-id>
+  reserved query target like `bar`/`displays`, so it shadows an item of that
+  name when you query BY NAME — an item handle's `handle:query()` always
+  describes its own item, and `ybar.query_table(name, true)` asks for the item
+  explicitly) and `ybar --app <pid|bundle-id>
   activate|hide|quit|kill` — no window titles, so no Screen Recording grant
 - AeroSpace integration: the workspace-change hook can invoke `ybar --trigger`
   directly (the CLI folds `$AEROSPACE_FOCUSED_WORKSPACE` from its environment),
