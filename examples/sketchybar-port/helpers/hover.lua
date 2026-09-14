@@ -38,15 +38,30 @@ function M.fade(target, color, frames)
   end)
 end
 
--- Colour-only attach: no gradient, no lift, and crucially no write to
--- y_offset AT ALL. Rows depend on that — a row sets its own alignment
--- offset in M.row, and an attach that touched y_offset would overwrite it
--- and make the selector hop as the pointer arrived.
-function M.attachColor(target, watchers, base, hover)
+-- Colour-only attach over a SET of targets: no gradient, no lift, and
+-- crucially no write to y_offset AT ALL. Rows depend on that — a row sets
+-- its own alignment offset in M.row, and an attach that touched y_offset
+-- would overwrite it and make the selector hop as the pointer arrived.
+--
+-- Every watcher gets ONE closure that fades every target, and that is not a
+-- style choice: the engine keeps a single handler per (item, event) pair and
+-- a later subscribe silently replaces the earlier one. So a cell whose
+-- plates light together must be wired here, in one call, rather than as
+-- several attachColor calls naming the same watcher.
+function M.attachColorAll(targets, watchers, base, hover)
   for _, w in ipairs(watchers) do
-    w:subscribe("mouse.entered", function() M.fade(target, hover, M.ENTER_FRAMES) end)
-    w:subscribe("mouse.exited", function() M.fade(target, base, M.EXIT_FRAMES) end)
+    w:subscribe("mouse.entered", function()
+      for _, t in ipairs(targets) do M.fade(t, hover, M.ENTER_FRAMES) end
+    end)
+    w:subscribe("mouse.exited", function()
+      for _, t in ipairs(targets) do M.fade(t, base, M.EXIT_FRAMES) end
+    end)
   end
+end
+
+-- The single-target case.
+function M.attachColor(target, watchers, base, hover)
+  M.attachColorAll({ target }, watchers, base, hover)
 end
 
 -- Drive `target`'s fill from the hover state of every item in `watchers`.
@@ -80,8 +95,7 @@ end
 -- icon and cap band the eye actually tracks. -1 (positive is up) is the
 -- Windows port's measurement on its tray list at 2x: content centre 143.5
 -- against a plate centre of 144.5 unadjusted.
-function M.row(item, opts)
-  opts = opts or {}
+local function plate(item, opts)
   item:set({
     background = {
       color = colors.transparent,
@@ -90,9 +104,28 @@ function M.row(item, opts)
       y_offset = opts.y_offset or -1,   -- positive is up
     },
   })
+end
+
+function M.row(item, opts)
+  opts = opts or {}
+  plate(item, opts)
   -- attachColor, NOT attach: an elevation path would clobber the y_offset
-  -- set immediately above and make the selector hop on hover.
+  -- plate() just set and make the selector hop on hover.
   M.attachColor(item, { item }, colors.transparent, opts.hover or colors.row_hover)
+end
+
+-- A multi-line cell: several rows stacked to read as ONE entry (a device
+-- name over its connection status), so the whole cell lights as one. Each
+-- row carries its own plate and every row drives all of them.
+--
+-- This exists instead of "M.row each line, then attachColor the sibling":
+-- that pairing subscribes each row to mouse.entered twice, and the engine
+-- keeps only the last handler per (item, event) — the sibling registration
+-- replaced the row's own, so each line lit its neighbour instead of itself.
+function M.rowGroup(items, opts)
+  opts = opts or {}
+  for _, item in ipairs(items) do plate(item, opts) end
+  M.attachColorAll(items, items, colors.transparent, opts.hover or colors.row_hover)
 end
 
 return M
