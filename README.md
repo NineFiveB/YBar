@@ -1,5 +1,7 @@
 # YBar
 
+[![CI](https://github.com/NineFiveB/YBar/actions/workflows/ci.yml/badge.svg)](https://github.com/NineFiveB/YBar/actions/workflows/ci.yml)
+
 **Top bar for macOS and Windows** — a GPU-rendered, scriptable status bar. On macOS, Metal renders everything (SDF shapes, glyph-atlas text, display-link-paced animation at near-zero CPU); a [native Windows port](#windows) mirrors the engine on Direct3D 11 + Windows.UI.Composition. The architecture is [sketchybar](https://github.com/FelixKratz/SketchyBar)'s proven live-object model: a single `ybar` binary that is both daemon and CLI client, driven entirely over IPC — plus an embedded Lua runtime so whole configs run in-process, and themes and scripts move between the two platforms with only OS-inherent edits.
 
 ![YBar in use: AeroSpace workspace pills with live app icons, then the app-menus swap](docs/media/ybar-demo.gif)
@@ -49,7 +51,7 @@ brew install ybar           # latest tagged release; --HEAD builds current main
 (Recent Homebrew asks you to confirm trusting a third-party tap on first
 install — that prompt is expected; `brew trust NineFiveB/ybar` pre-approves it.)
 
-See [docs/INSTALL.md](docs/INSTALL.md) for the release-zip route, first-run privacy-permission walkthrough, stable local signing (keeps TCC grants across rebuilds), and login autostart.
+`ybar autostart enable` then registers the bar as a login LaunchAgent (KeepAlive on crash, config discovered at each start). See [docs/INSTALL.md](docs/INSTALL.md) for the first-run privacy-permission walkthrough, stable local signing (keeps TCC grants across rebuilds), and what autostart writes.
 
 (Windows users: see [Windows](#windows) below.)
 
@@ -172,7 +174,7 @@ Three surfaces, mixable at will:
 
 The example config's workspace pills speak both **AeroSpace** and **yabai** (native macOS Spaces) and pick the one actually running — the two can coexist installed side by side; see [examples/yabai-skhd](examples/yabai-skhd) for the yabai/skhd setup, including what needs yabai's scripting addition and what works without it. On Windows the same pills speak **komorebi** and **YTile** instead, driven off their event streams.
 
-**Themes**: ship-selectable presets — `scripts/ybar-theme list|use <name>|install <git-url>`. See [docs/THEMES.md](docs/THEMES.md) for the gallery (Liquid Glass flagship, the darxk Waybar replication, and more) and how to publish your own. [examples/yabai-skhd](examples/yabai-skhd) has the yabai signal recipes (instant window-level updates; the CLI folds `$YABAI_*` signal vars into `--trigger` env) and an skhd setup driving the bar's hotkey-mode indicator pill.
+**Themes**: ship-selectable presets — `ybar theme list|current|use <name>|reset|install <git-url>` (`use` re-points a running bar in place through `--reload <path>`, and config discovery honours the choice on every later start; `scripts/ybar-theme` remains as a shim for a source checkout). See [docs/THEMES.md](docs/THEMES.md) for the gallery (Liquid Glass flagship, the darxk Waybar replication, and more) and how to publish your own. [examples/yabai-skhd](examples/yabai-skhd) has the yabai signal recipes (instant window-level updates; the CLI folds `$YABAI_*` signal vars into `--trigger` env) and an skhd setup driving the bar's hotkey-mode indicator pill.
 
 ## Acknowledgments
 
