@@ -1,19 +1,35 @@
 # Themes
 
-A YBar theme is a directory with a `ybarrc.lua` (or `ybar.jsonc`) entry point.
-Switch between them with the selector:
+A YBar theme is a directory with a `ybarrc.lua` (or `ybar.jsonc`,
+`ybarrc.jsonc`) entry point. Switch between them with the built-in verbs
+(no daemon needed):
 
 ```sh
-scripts/ybar-theme list           # shipped + installed themes
-scripts/ybar-theme use darxk      # relaunch the bar with a theme
-scripts/ybar-theme install <git-url>   # add a community theme
+ybar theme list                # shipped + installed themes; * marks the selected one
+ybar theme use darxk           # a running bar reloads in place; otherwise YBar.app is started
+ybar theme current             # the selected name
+ybar theme reset               # forget the selection
+ybar theme install <git-url>   # clone a community theme into ~/.config/ybar/themes
 ```
+
+`use` records the name in `~/.config/ybar/current-theme` and sends the
+running daemon `--reload <entry>` — the same verb you can send by hand to
+re-point a bar at any config (`ybar --reload ~/x/ybarrc.lua`; a bare
+`ybar --reload` re-runs the current one). Config discovery honours the
+selection on every later start of the default `ybar` instance, after an
+explicit `-c` and before the `~/.config/ybar` search — so drop `-c` from a
+LaunchAgent, or let `ybar autostart enable` write one without it
+([INSTALL.md](INSTALL.md)). Themes are looked up under `$YBAR_THEME_ROOTS`
+(colon-separated), the `examples/` beside the binary, the Homebrew keg's
+`share/ybar/examples` and `~/.config/ybar/themes`; from a source checkout,
+`scripts/ybar-theme …` forwards to the binary with the checkout's
+`examples/` added as a root.
 
 ## Shipped themes
 
 | Theme | Directory | Look |
 |---|---|---|
-| **sketchybar-glass** | `examples/sketchybar-glass` | Liquid Glass: monochrome near-black bar, real `NSGlassEffectView` pills and popups, full widget suite (wifi/bluetooth/battery/system monitor/calendar/menus/Claude, and a now-playing popup with album artwork, seek + volume sliders, and transport controls). The flagship. |
+| **sketchybar-glass** | `examples/sketchybar-glass` | Liquid Glass: monochrome near-black bar, real `NSGlassEffectView` pills and popups, full widget suite (wifi/bluetooth/battery/calendar/menus/Claude, a system monitor with CPU and memory gauges plus a GPU utilization graph when the driver reports one, and a now-playing popup with album artwork, seek + volume sliders, and transport controls). The flagship. |
 | **darxk** | `examples/darxk` | Replication of [00Darxk/dotfiles](https://github.com/00Darxk/dotfiles) Waybar: translucent dark bar, segmented rounded capsules with Catppuccin accents, inverted light pills for active workspace and window title, brew-updates + GitHub-notifications modules. |
 | **sketchybar-port** | `examples/sketchybar-port` | The full sketchybar-setup port in its original styling. |
 | **jsonc-demo** | `examples/jsonc-demo` | Minimal declarative JSONC config — clock and battery, no Lua. |
@@ -27,8 +43,10 @@ All shipped themes are macOS-tuned: they survive native-fullscreen Spaces
 (`fullscreen_show`), auto-detect the notch (`notch_width = 0`, centered
 content uses the `q`/`e` cursors so it flanks the housing), show charging
 state, and their modules are interactive — scroll the volume module to
-adjust it, click volume/battery/wifi for the matching Settings pane, click
-the clock for Calendar (`helpers/mac.lua` has the shared pieces).
+adjust it (through `ybar.volume`, an in-process CoreAudio write; the themes
+no longer spawn `osascript` for it), click volume/battery/wifi for the
+matching Settings pane, click the clock for Calendar (`helpers/mac.lua` has
+the shared pieces).
 
 To hide the native macOS menu bar entirely, set `topmost = "on"` on the bar
 (the glass theme does). With menu-bar auto-hide enabled, macOS still reveals
@@ -46,12 +64,28 @@ sketchybar compat shim (`sbar = require("sketchybar")`) or the native
 (`aerospace`, `brew`, `gh`) and hide modules when they are absent, so one
 theme works across machines.
 
+A few engine idioms the shipped themes lean on:
+
+- `slider.interactive = "off"` turns a slider into a read-only fill meter
+  (a battery or CPU pill): a press is an ordinary click and never scrubs the
+  value, while `slider.percentage` sets still apply.
+- `icon.background.*` / `label.background.*` draw a plate behind that part
+  alone, at ink width plus the part's own paddings, without widening the item
+  — a badge, or one highlighted label inside a pill.
+- `background.shadow.blur` with a light `background.shadow.color` at
+  distance 0 is a glow; on a translucent pill the halo also tints the
+  interior, so tune the fill alpha together with it.
+- `helpers/hover.lua` (in `sketchybar-port`, shared by the glass theme) is
+  the hover-feedback helper: `hover.pill(bracket, member)` lifts a pill's
+  fill while the pointer is over it, `hover.row(item)` lights a popup row
+  from transparent.
+
 ## Sharing a theme
 
 Publish the theme directory as a git repo, then anyone can:
 
 ```sh
-scripts/ybar-theme install https://github.com/you/my-ybar-theme
+ybar theme install https://github.com/you/my-ybar-theme
 ```
 
 To be listed here, add a row to this table (and an entry to
