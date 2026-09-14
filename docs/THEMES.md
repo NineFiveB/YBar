@@ -19,7 +19,9 @@ re-point a bar at any config (`ybar --reload ~/x/ybarrc.lua`; a bare
 selection on every later start of the default `ybar` instance, after an
 explicit `-c` and before the `~/.config/ybar` search — so drop `-c` from a
 LaunchAgent, or let `ybar autostart enable` write one without it
-([INSTALL.md](INSTALL.md)). Themes are looked up under `$YBAR_THEME_ROOTS`
+([INSTALL.md](INSTALL.md)). When a selection outranks a config of your own at
+the default location, startup says so on stderr and names both files; `ybar
+theme reset` hands the bar back to your `~/.config/ybar/ybarrc.lua`. Themes are looked up under `$YBAR_THEME_ROOTS`
 (colon-separated), the `examples/` beside the binary, the Homebrew keg's
 `share/ybar/examples` and `~/.config/ybar/themes`; from a source checkout,
 `scripts/ybar-theme …` forwards to the binary with the checkout's
