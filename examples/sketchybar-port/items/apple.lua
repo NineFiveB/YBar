@@ -6,8 +6,11 @@ local config_dir = SKETCHYBAR_CONFIG  -- YBAR PORT: helpers live in the original
 local menus_bin = config_dir .. "/helpers/menus/bin/menus"
 
 -- YBAR PORT: replica of the macOS 26 Apple menu (left click); right click
--- opens the real one via the menus helper. Restart/Shut Down confirm with
--- a second click — the scripted actions bypass macOS's own dialogs.
+-- opens the real one via the menus helper when that opt-in build exists
+-- (items/menus.lua probes for it and sets MENUS_HELPER_AVAILABLE; without
+-- it a right click opens the replica too, never a missing binary).
+-- Restart/Shut Down confirm with a second click — the scripted actions
+-- bypass macOS's own dialogs.
 
 local popup_width = 240
 local inset = 12
@@ -169,7 +172,7 @@ apple:subscribe("front_app_switched", function(env)
 end)
 
 local function toggle_popup(env)
-  if env.BUTTON == "right" then
+  if env.BUTTON == "right" and MENUS_HELPER_AVAILABLE then
     -- The real Apple menu, via the sketchybar menus helper.
     sbar.exec("'" .. menus_bin:gsub("'", "'\\''") .. "' -s 0")
     return
