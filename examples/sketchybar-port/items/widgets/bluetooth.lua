@@ -184,13 +184,11 @@ for i = 1, max_devices do
     label = { drawing = false },
   })
   -- A two-line cell is one click target, so both lines light together:
-  -- each row is its own plate, and each also watches its sibling.
-  hover.row(paired_name_rows[i])
-  hover.row(paired_status_rows[i])
-  hover.attachColor(paired_name_rows[i], { paired_status_rows[i] },
-    colors.transparent, colors.row_hover)
-  hover.attachColor(paired_status_rows[i], { paired_name_rows[i] },
-    colors.transparent, colors.row_hover)
+  -- one subscription per row driving both plates. Wiring it as two
+  -- hover.row calls plus a sibling attachColor each way subscribed every
+  -- row to mouse.entered twice, and only the last handler per (item, event)
+  -- survives — each line lit the other.
+  hover.rowGroup({ paired_name_rows[i], paired_status_rows[i] })
 end
 
 -- Nearby Devices: auto-scan on open, spinner beside the header.
