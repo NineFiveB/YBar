@@ -768,3 +768,29 @@ struct HeadlessScene {
         #expect(clicked == ["battery"])
     }
 }
+
+/// A bar with no frame (`--bar height=0`, or a margin at least half the
+/// screen wide) is a config state, not a transient: nothing but a geometry
+/// change can clear it, and every path that changes bar geometry already ends
+/// in setNeedsRender(). The guard must report once and stop, not leave a 1 s
+/// retry re-arming itself forever on an otherwise idle daemon (LIFETIME-1).
+@MainActor
+@Suite(.serialized) struct EmptyBarFrameTests {
+    @Test func anEmptyBarFrameIsNotPolledFor() throws {
+        let manager = try BarManager()
+        // An empty display list keeps the manager from building real panels.
+        manager.settings.displayPolicy = .list([])
+        let screen = try #require(NSScreen.screens.first)
+        let surface = BarSurface(screen: screen, arrangementIndex: 1)
+        var settings = BarSettings()
+        settings.height = 0
+        // hidden keeps the (zero-height) panel out of the window list; the
+        // frame is applied either way.
+        settings.hidden = true
+        surface.apply(settings: settings, screen: screen)
+
+        #expect(surface.barSize.height == 0)
+        #expect(!manager.render(surface: surface))
+        #expect(!manager.retryScheduled)
+    }
+}
