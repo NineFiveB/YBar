@@ -197,8 +197,23 @@ public final class BarManager {
         surfaces.forEach { $0.close() }
         surfaces.removeAll()
 
+        // YBAR_DEBUG: one `[ybar:display]` line per screen on every (re)build
+        // — the geometry a "no bar on my second monitor" or "wrong scale"
+        // report needs, at the moment it was decided.
+        func trace(_ index: Int, _ screen: NSScreen, _ detail: String) {
+            guard DebugTrace.enabled else { return }
+            let frame = screen.frame
+            DebugTrace.log("[ybar:display] \(index) \"\(screen.localizedName)\": "
+                + "screen=\(Int(frame.width))x\(Int(frame.height))@(\(Int(frame.minX)),\(Int(frame.minY))) "
+                + "scale=\(screen.backingScaleFactor) refresh=\(screen.maximumFramesPerSecond)Hz "
+                + "notch=\(Int(BarSurface.physicalNotchWidth(of: screen))) \(detail)")
+        }
+
         for (index, screen) in DisplayManager.screens() {
-            guard settings.includesDisplay(arrangementIndex: index, isMain: index == 1) else { continue }
+            guard settings.includesDisplay(arrangementIndex: index, isMain: index == 1) else {
+                trace(index, screen, "skipped by display policy")
+                continue
+            }
             let surface = BarSurface(screen: screen, arrangementIndex: index)
             surface.hostView.metalLayer.device = device
             surface.onMouse = { [weak self] info, surface in
@@ -206,6 +221,9 @@ public final class BarManager {
             }
             surface.apply(settings: settings, screen: screen)
             surfaces.append(surface)
+            let bar = surface.panelFrame
+            trace(index, screen, "bar=\(Int(bar.width))x\(Int(bar.height))@(\(Int(bar.minX)),\(Int(bar.minY))) "
+                + "panelScale=\(surface.scale)")
         }
         onSurfacesRebuilt?()
         // Fresh surfaces start un-elevated; re-evaluate or a bar rebuilt
