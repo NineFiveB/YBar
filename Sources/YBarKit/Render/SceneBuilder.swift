@@ -360,7 +360,20 @@ public final class SceneBuilder {
             : contentBox.height - 2
         // A bordered plate frames the graph: inset the box by the border
         // width so stroke and fill run inside the frame instead of over it.
-        let inset = item.background.drawing ? CGFloat(max(0, item.background.borderWidth)) : 0
+        // Only a border that actually PAINTS earns the inset. border_width is
+        // inherited wholesale from the --default prototype and the usual way
+        // to switch a plate off is a transparent colour, not a zero width
+        // (examples/sketchybar-port's cpu/battery graphs do exactly that), so
+        // keying on the width alone shrank those graphs by a border on every
+        // side with no frame anywhere to justify it. Clamped to half the box:
+        // a border wider than the graph must not invert it.
+        let borderPaints = item.background.drawing
+            && item.background.borderWidth > 0
+            && item.background.borderColor.alpha > 0
+        let inset = borderPaints
+            ? max(0, min(CGFloat(item.background.borderWidth),
+                         CGFloat(graph.capacity) / 2, height / 2))
+            : 0
         let box = CGRect(
             x: (penX + inset) * scale,
             y: (centerY - height / 2 + inset) * scale,
