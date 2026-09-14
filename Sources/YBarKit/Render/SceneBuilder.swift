@@ -574,6 +574,32 @@ public final class SceneBuilder {
         return quad
     }
 
+    /// The same plate, trimmed to a clip rect (device px) the way
+    /// `glyphInstance` trims a glyph. Quads carry no clip field and the
+    /// pipeline sets no scissor, so the trim is geometric: intersect, and drop
+    /// the radius of every corner sitting on a cut edge so the cut reads as a
+    /// straight edge instead of a rounded bulge mid-item. nil when the clip
+    /// removes the plate entirely.
+    static func clippedQuad(
+        _ background: BackgroundStyle, rect: CGRect, scale: CGFloat, clip: CGRect?
+    ) -> QuadInstance? {
+        var quad = backgroundQuad(background, rect: rect, scale: scale)
+        guard let clip else { return quad }
+        let device = CGRect(x: CGFloat(quad.origin.x), y: CGFloat(quad.origin.y),
+                            width: CGFloat(quad.size.x), height: CGFloat(quad.size.y))
+        let visible = device.intersection(clip)
+        guard !visible.isEmpty else { return nil }
+        guard visible != device else { return quad }
+        // radii is (topLeft, topRight, bottomRight, bottomLeft).
+        if visible.minX > device.minX { quad.radii.x = 0; quad.radii.w = 0 }
+        if visible.maxX < device.maxX { quad.radii.y = 0; quad.radii.z = 0 }
+        if visible.minY > device.minY { quad.radii.x = 0; quad.radii.y = 0 }
+        if visible.maxY < device.maxY { quad.radii.z = 0; quad.radii.w = 0 }
+        quad.origin = SIMD2(Float(visible.minX), Float(visible.minY))
+        quad.size = SIMD2(Float(visible.width), Float(visible.height))
+        return quad
+    }
+
     /// Real Liquid Glass (NSGlassEffectView) exists on macOS 26+: the backdrop
     /// itself refracts and glints, so the shader's painted rim/sheen imitation
     /// stays off there — layered on the true material it reads as a glow
@@ -662,8 +688,12 @@ public final class SceneBuilder {
                 width: (CGFloat(part.customWidth) * scale).rounded(),
                 height: .greatestFiniteMagnitude / 2)
             clip = clip.map { $0.intersection(partBox) } ?? partBox
-            if clip?.isEmpty == true { return }
         }
+        // An empty clip means the whole part is hidden — a collapsed slot, or
+        // a collapsed ITEM (width=0, or any --animate width frame below the
+        // natural content). Return before the plate too: glyphs drop out of
+        // an empty clip on their own, a plate quad would not.
+        if clip?.isEmpty == true { return }
 
         // icon.background / label.background: one plate behind the part's
         // ink, sized from the natural measure plus the plate's own paddings
@@ -681,7 +711,14 @@ public final class SceneBuilder {
                 width: ink.width + CGFloat(part.background.paddingLeft)
                     + CGFloat(part.background.paddingRight),
                 height: height)
-            list.quads.append(SceneBuilder.backgroundQuad(part.background, rect: plate, scale: scale))
+            // The plate obeys the clip the ink obeys: the natural ink it is
+            // sized from can overflow a narrower slot (label.width=N below the
+            // text, a marquee) or a fixed-width item, and an unclipped quad
+            // would paint that overflow over its neighbours.
+            if let quad = SceneBuilder.clippedQuad(
+                part.background, rect: plate, scale: scale, clip: clip) {
+                list.quads.append(quad)
+            }
         }
         penX -= marqueeOffset
 
