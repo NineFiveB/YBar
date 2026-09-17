@@ -111,6 +111,16 @@ bool connectTo(SOCKET socket, const std::string& path) {
 
 bool ensureWinsockInitialized() { return ensureWinsock(); }
 
+bool isListening(const std::string& path) {
+    if (!ensureWinsock()) return false;
+    const SOCKET sock = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (sock == INVALID_SOCKET) return false;
+    setTimeouts(sock, 1.0);
+    const bool connected = connectTo(sock, path);
+    closesocket(sock);
+    return connected;
+}
+
 std::optional<std::string> clientSend(const std::string& path,
                                       const std::vector<std::string>& argv,
                                       double timeoutSeconds) {
@@ -189,9 +199,13 @@ void SocketServer::serve(Handler handler) {
 std::optional<std::string> SocketServer::reserve(const std::string& path) {
     if (!ensureWinsock()) return "[!] could not bind socket at " + path;
 
-    // Instance lock: a live daemon answers --ping; a stale file is deleted.
+    // Instance lock: a live daemon accepts the connect; a stale file is
+    // deleted. isListening, not --ping: a daemon mid-config-run cannot answer
+    // a ping for seconds, and reading that as "stale" would delete a LIVE
+    // daemon's endpoint — it keeps rendering and can never be talked to
+    // again. `ybar start` plus the Run key make the double-start ordinary.
     if (GetFileAttributesA(path.c_str()) != INVALID_FILE_ATTRIBUTES) {
-        if (const auto reply = clientSend(path, {"--ping"}, 1.0); reply && *reply == "pong")
+        if (isListening(path))
             return "[!] another ybar daemon is already running (socket: " + path + ")";
         DeleteFileA(path.c_str());
     }

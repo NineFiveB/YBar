@@ -4,8 +4,8 @@
     "homepage": "https://github.com/NineFiveB/YBar/tree/windows",
     "license": "GPL-3.0-only",
     "notes": [
-        "Start the bar with 'ybar', stop it with 'ybar --exit'.",
-        "Run at login: 'ybar autostart enable'.",
+        "Start the bar with 'ybar start' (no console window), stop it with 'ybar stop'.",
+        "Run at login: 'ybar autostart enable'. 'ybar status' shows what is going on.",
         "Pick a theme: 'ybar theme list' then 'ybar theme use <name>'.",
         "Configs live in ~/.config/ybar (ybarrc.lua, ybar.jsonc, or ybarrc.jsonc)."
     ],
