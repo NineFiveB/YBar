@@ -166,8 +166,19 @@ bool YTileProvider::start() {
 void YTileProvider::stop() {
     if (!running_.exchange(false)) return;
     const auto pipe = pipe_.exchange(-1);
+    if (thread_.joinable()) {
+        // Closing the pipe handle does NOT wake a synchronous ReadFile that
+        // another thread is blocked in — the reader stayed parked until
+        // ytiled next pushed a notification, and this join (on the UI thread,
+        // during `--exit`) stayed parked with it: a bar that kept rendering
+        // and kept accepting connections but never exited. Cancel the read
+        // instead, and keep cancelling until the thread is gone, because the
+        // reader may be between its `running_` check and the next ReadFile.
+        const HANDLE thread = thread_.native_handle();
+        while (WaitForSingleObject(thread, 50) == WAIT_TIMEOUT) CancelSynchronousIo(thread);
+        thread_.join();
+    }
     if (pipe != -1) CloseHandle(reinterpret_cast<HANDLE>(pipe));
-    if (thread_.joinable()) thread_.join();
 }
 
 void YTileProvider::readerLoop() {
