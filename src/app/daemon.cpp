@@ -665,13 +665,21 @@ LRESULT CALLBACK messageWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                 KillTimer(hwnd, kExitTimer);
                 // stop() before clearing (spec 11.4): the reader's reconnect
                 // path re-applies the offset, and must be joined first.
+                // Traced because this runs on the UI thread: a join that
+                // never returns here leaves a bar that still renders and
+                // still accepts connections but never exits.
+                trace("exit: begin");
                 if (g_state && g_state->komorebi) {
                     g_state->komorebi->stop();
+                    trace("exit: komorebi stopped");
                     g_state->komorebi->clearWorkAreaOffset();
+                    trace("exit: komorebi offset cleared");
                 }
                 if (g_state && g_state->ytile) {
                     g_state->ytile->stop();
+                    trace("exit: ytile stopped");
                     g_state->ytile->clearWorkAreaOffset();
+                    trace("exit: ytile offset cleared");
                 }
                 PostQuitMessage(0);
             } else if (wParam == kRenderRetryTimer && g_state) {
@@ -2485,16 +2493,21 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
         // WAIT_OBJECT_0 + 1: new messages arrived — loop back to the drain.
     }
 
+    trace("exit: message loop done");
     if (frontAppHook) UnhookWinEvent(frontAppHook);
     stopInputHookThread(); // unhooks on the installing thread, then joins
+    trace("exit: input hook stopped");
     state.stopAnimationPump(); // join before the window (and state) go away
+    trace("exit: animation pump stopped");
     if (state.frameDue) {
         CloseHandle(state.frameDue);
         state.frameDue = nullptr;
     }
     server.stop();
+    trace("exit: socket released");
     DestroyWindow(state.messageWindow);
     g_state = nullptr;
+    trace("exit: done");
     return 0;
 }
 
