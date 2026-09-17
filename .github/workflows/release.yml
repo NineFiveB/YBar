@@ -64,6 +64,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item build-release/ybar.exe dist/
+          Copy-Item build-release/ybarw.exe dist/
           Copy-Item -Recurse shaders dist/shaders
           Copy-Item -Recurse examples dist/examples
           Copy-Item README.md, LICENSE dist/
@@ -86,7 +87,7 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Sign ybar.exe
+      - name: Sign ybar.exe and ybarw.exe
         if: env.AZURE_CLIENT_ID != ''
         uses: azure/trusted-signing-action@v0
         with:
@@ -105,8 +106,9 @@ jobs:
         id: sign
         run: |
           $sig = Get-AuthenticodeSignature dist/ybar.exe
-          if ($env:AZURE_CLIENT_ID -and $sig.Status -ne 'Valid') {
-            throw "signature status is $($sig.Status)"
+          $sigw = Get-AuthenticodeSignature dist/ybarw.exe
+          if ($env:AZURE_CLIENT_ID -and ($sig.Status -ne 'Valid' -or $sigw.Status -ne 'Valid')) {
+            throw "signature status is $($sig.Status) (ybar.exe), $($sigw.Status) (ybarw.exe)"
           }
           $note = if ($sig.Status -eq 'Valid') {
             "Authenticode-signed: $($sig.SignerCertificate.Subject)"

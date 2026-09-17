@@ -55,6 +55,7 @@ runtime, the shipped themes, and an app-local `d3dcompiler_47.dll`:
 
 ```
 ybar.exe
+ybarw.exe
 shaders\ybar.hlsl
 examples\<theme>\ybarrc.lua or ybarrc.jsonc
 d3dcompiler_47.dll
@@ -66,17 +67,30 @@ For a manual install, put the folder on your `PATH` so config scripts can
 call `ybar` back (Scoop's shim already covers this). Then:
 
 ```powershell
-ybar autostart enable    # HKCU Run entry; shows up in Task Manager > Startup apps
-                         # (`autostart disable` removes it, `autostart status` reports it)
-ybar                     # start the daemon
+ybar start               # launch the bar in the background — no console window
+ybar autostart enable    # start it at every login (HKCU Run entry; shows up in
+                         # Task Manager > Startup apps; `autostart disable` removes
+                         # it, `autostart status` reports it)
+ybar status              # bar, config and autostart state
+ybar stop                # stop it; `ybar restart [-c <path>]` stops and relaunches
 ```
+
+`ybar.exe` is a console program, so a shell waits for it and sees its exit
+code — which is also why Explorer or the Run key would give it a console
+window. `ybarw.exe` beside it is the windowless way in: double-click it, or
+point a shortcut or scheduler at it, and it runs `ybar start` with no window
+(`w` as in `pythonw`). Double-clicking `ybar.exe` itself works too: it hands
+the bar to a detached copy and closes its console. A bar started this way
+writes its stderr to `%LOCALAPPDATA%\ybar\stderr.log` (rotated at 1 MB), which
+`ybar status` names. Bare `ybar` in a terminal still runs the daemon in that
+terminal, for watching it.
 
 Release binaries are Authenticode-signed (Azure Trusted Signing). SmartScreen
 may still warn until the certificate accrues reputation.
 
 ## Quick start
 
-`ybar` with no arguments starts the daemon and loads the first config it finds
+`ybar start` (or bare `ybar`, in the foreground) loads the first config it finds
 in `%XDG_CONFIG_HOME%\ybar\` (when set), then `%USERPROFILE%\.config\ybar\`:
 `ybarrc.lua`, then `ybarrc`, then `ybarrc.jsonc`, then `ybar.jsonc`, falling
 back to `~\.ybarrc.lua` / `~\.ybarrc`. A theme recorded with `ybar theme use`
@@ -100,8 +114,11 @@ The daemon verbs are sketchybar's: `--bar`, `--default`,
 `--reload [path]`, `--hotload on|off`, `--ping`, and `--exit`. Windows adds
 `--komorebi`, `--volume`, `--tray`, `--window`, and
 `--query windows|tray|audio` (see below). `ybar --help` (`-h`) and
-`ybar --version` (`-v`) print locally, as do the `theme` and `autostart`
-subcommands; `--config` is the long form of `-c`.
+`ybar --version` (`-v`) print locally, as do the `start`/`stop`/`restart`/
+`status`, `theme` and `autostart` subcommands; `--config` is the long form of
+`-c`. Exit codes: 0 success (idempotent no-ops included — `stop` when nothing
+runs), 1 the operation failed or the daemon rejected a message, 2 the
+invocation was wrong.
 
 ## Themes
 
