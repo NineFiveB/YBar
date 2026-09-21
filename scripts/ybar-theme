@@ -5,11 +5,13 @@
 #   ybar-theme use <name>           switch the running bar to a theme
 #   ybar-theme current              show the active theme
 #   ybar-theme install <git-url>    clone a community theme into ~/.config/ybar/themes
+#   ybar-theme reset                forget the recorded theme
 #
 # A theme is any directory containing a ybarrc.lua (or ybar.jsonc). Shipped
 # themes live in the repo's examples/; installed ones in ~/.config/ybar/themes.
-# `use` records the choice in ~/.config/ybar/current-theme and relaunches the
-# app bundle so the daemon keeps its TCC identity.
+# `use` records the choice in ~/.config/ybar/current-theme and then runs
+# `ybar restart`, which rereads it: the bar keeps its TCC identity, and a
+# launchd-managed one stays managed.
 set -e
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
@@ -55,13 +57,57 @@ use)
     entry=$(collect | awk -F '\t' -v n="$2" '$1 == n { print $2; exit }')
     [ -n "$entry" ] || { echo "unknown theme: $2 (try: ybar-theme list)" >&2; exit 1; }
     app=$(find_app) || { echo "YBar.app not found (make app, or brew install)" >&2; exit 1; }
+    ybar="$app/Contents/MacOS/ybar"
     mkdir -p "$(dirname "$state_file")"
     echo "$2" > "$state_file"
-    pkill -f "YBar.app/Contents" 2>/dev/null || true
-    sleep 1
-    rm -f "/tmp/ybar_$(whoami).socket"
-    open -g "$app" --args -c "$entry"
-    echo "switched to $2 ($entry)"
+
+    # A login job written with `-c` pins that config: `restart` kickstarts the
+    # job, which re-executes its own ProgramArguments, so the bar would come
+    # back on the pinned file and the theme would never appear. `ybar status`
+    # cannot show this - its config line is what a FRESH start would pick, which
+    # is the theme we just recorded - so ask the job itself.
+    if "$ybar" autostart status 2>/dev/null | grep -q "pins that config"; then
+        echo "the login job pins its own config, so $2 will not take effect." >&2
+        echo "Re-run \`ybar autostart enable\` with no -c, then try again." >&2
+        exit 1
+    fi
+
+    # The state file is what config discovery reads when no config is named, but
+    # it only resolves names under ~/.config/ybar/themes and the Homebrew
+    # share/ybar/examples prefixes. A theme run straight out of a clone is on
+    # neither, so a plain restart would come back on the OLD config while this
+    # script claimed success. That one gets an explicit -c, which applies for
+    # the session only.
+    case "$entry" in
+        "$themes_dir/$2/"*)                            on_search_path=yes ;;
+        "/opt/homebrew/share/ybar/examples/$2/"*)      on_search_path=yes ;;
+        "/usr/local/share/ybar/examples/$2/"*)         on_search_path=yes ;;
+        *)                                             on_search_path=no ;;
+    esac
+
+    if [ "$on_search_path" = yes ]; then
+        # No -c: the state file alone switches it, and a launchd-managed bar
+        # stays managed because `restart` kickstarts the job rather than
+        # replacing it with an unmanaged copy. (The old pkill + sleep 1 + open
+        # lost that race often enough to reactivate the previous bar and
+        # silently drop everything after --args.)
+        "$ybar" restart || exit 1
+        echo "switched to $2 ($entry)"
+    else
+        "$ybar" restart -c "$entry" || exit 1
+        echo "switched to $2 ($entry) - this session only"
+        echo "note: $2 is not on the daemon's theme search path, so it will not" >&2
+        echo "      survive a logout. Copy it into $themes_dir to keep it." >&2
+    fi
+    ;;
+reset)
+    # The recorded name outranks ~/.config/ybar/ybarrc.lua for every start that
+    # names no config, including the login job, so forgetting it is the only way
+    # back to plain discovery.
+    rm -f "$state_file"
+    app=$(find_app) || { echo "YBar.app not found (make app, or brew install)" >&2; exit 1; }
+    "$app/Contents/MacOS/ybar" restart || exit 1
+    echo "theme reset - back to normal config discovery"
     ;;
 install)
     [ -n "$2" ] || { echo "usage: ybar-theme install <git-url>" >&2; exit 2; }
@@ -73,7 +119,7 @@ install)
     echo "installed $name — activate with: ybar-theme use $name"
     ;;
 *)
-    echo "usage: ybar-theme [list|current|use <name>|install <git-url>]" >&2
+    echo "usage: ybar-theme [list|current|use <name>|install <git-url>|reset]" >&2
     exit 2
     ;;
 esac

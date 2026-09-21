@@ -90,6 +90,9 @@ macOS counterpart: a notification-area `tray` widget and a `volume` bridge.
 - `make app` builds a minimal **app bundle** so the daemon owns its TCC identity —
   Bluetooth, Calendar, and Apple Events prompts attribute to YBar instead of your
   terminal, and grants cover every helper the daemon spawns
+- `ybar start|stop|restart|status` drive that bundle from the command line, and
+  `ybar autostart enable` installs a launchd agent that starts the bar at login
+  and brings it back after a crash
 
 ## Where to start
 

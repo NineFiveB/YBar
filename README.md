@@ -18,7 +18,7 @@ Network names in this recording are placeholders.*
 
 
 ```sh
-ybar                                  # start the daemon
+ybar start                            # launch the bar (ybar stop, ybar restart)
 ybar --bar height=32 color=0xdd1e1e2e topmost=on
 ybar --add item hello left \
      --set hello icon=sf:sparkles label="YBar is alive" \
@@ -49,7 +49,7 @@ brew install ybar           # latest tagged release; --HEAD builds current main
 (Recent Homebrew asks you to confirm trusting a third-party tap on first
 install — that prompt is expected; `brew trust NineFiveB/ybar` pre-approves it.)
 
-See [docs/INSTALL.md](docs/INSTALL.md) for the release-zip route, first-run privacy-permission walkthrough, stable local signing (keeps TCC grants across rebuilds), and login autostart.
+See [docs/INSTALL.md](docs/INSTALL.md) for the release-zip route, first-run privacy-permission walkthrough, stable local signing (keeps TCC grants across rebuilds), and `ybar autostart enable` (starts the bar at login, restarts it after a crash).
 
 (Windows users: see [Windows](#windows) below.)
 
@@ -65,8 +65,14 @@ required.
 make build       # swift build (scratch path outside iCloud-synced dirs)
 make test
 make app         # ~/Applications/YBar.app — the recommended way to run the daemon
-open -g ~/Applications/YBar.app --args -c <your ybarrc.lua>
+make start       # launch it in the background (also: make restart, make stop)
 ```
+
+Once `ybar` is on your PATH, the bar is driven by name rather than by path:
+`ybar start`, `ybar stop`, `ybar restart`, `ybar status`, and
+`ybar autostart enable` to have it come up at every login. The ones that launch anything
+launch YBar.app rather than the bare binary, which is what keeps privacy prompts
+attributed to YBar; the rest talk to the running bar or just report on it.
 
 ## Windows
 

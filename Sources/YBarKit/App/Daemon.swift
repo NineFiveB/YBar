@@ -94,6 +94,13 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
             try socketServer.start()
         } catch {
             FileHandle.standardError.write(Data("[!] \(error)\n".utf8))
+            // Drop the server before terminating: applicationWillTerminate runs
+            // on the way out, and a server that never bound must not be given
+            // the chance to tear down the socket file the LIVE daemon owns.
+            // SocketServer.stop() guards this too; this is the belt to that
+            // brace, because autostart makes the double-start ordinary — launchd
+            // starts one, the user starts another.
+            socketServer = nil
             NSApp.terminate(nil)
             return
         }

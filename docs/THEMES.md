@@ -7,7 +7,23 @@ Switch between them with the selector:
 scripts/ybar-theme list           # shipped + installed themes
 scripts/ybar-theme use darxk      # relaunch the bar with a theme
 scripts/ybar-theme install <git-url>   # add a community theme
+scripts/ybar-theme reset          # forget the recorded theme
 ```
+
+`use` records the choice in `~/.config/ybar/current-theme`, and config
+discovery reads that file whenever no `-c` was given — so a bar started by
+`ybar start`, or by the login agent `ybar autostart enable` installs, comes up
+in the theme you last selected. That resolution covers themes installed under
+`~/.config/ybar/themes` and the ones Homebrew ships under
+`share/ybar/examples`; a theme run straight out of a git clone is not on that
+search path, so from a clone keep passing `-c examples/<name>/ybarrc.lua`.
+A theme off that search path still applies for the session — `use` passes it
+explicitly and tells you it will not survive a logout. Deleting a theme is safe
+either way: a name that no longer resolves falls through to
+`~/.config/ybar/ybarrc.lua`, and `ybar-theme reset` forgets the recorded name
+outright. One exception: a login job created with `ybar autostart enable -c
+<path>` pins that config and ignores the recorded theme, so `use` refuses
+rather than reporting a switch that will not happen.
 
 ## Shipped themes
 

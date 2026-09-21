@@ -1,0 +1,640 @@
+import Foundation
+import Testing
+@testable import YBarKit
+
+// The process-control verbs (`ybar start|stop|restart|status|autostart`) reach
+// launchctl, LaunchServices and the user's real ~/Library/LaunchAgents, so what
+// is exercised here is every decision they make *before* they touch any of
+// that: which bundle to name, what to write into the login job, and how the
+// arguments parse.
+
+private func makeTemporaryDirectory() throws -> URL {
+    let url = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("ybar-tests-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    return url
+}
+
+// MARK: - Finding YBar.app
+
+@Suite struct AppBundleTests {
+    @Test func bundledBinaryResolvesToItsBundle() {
+        let executable = URL(fileURLWithPath: "/Users/me/Applications/YBar.app/Contents/MacOS/ybar")
+        #expect(AppBundle.enclosingBundle(of: executable)?.path
+            == "/Users/me/Applications/YBar.app")
+    }
+
+    @Test func bareBuildProductIsNotInABundle() {
+        let executable = URL(fileURLWithPath: "/Users/me/.cache/ybar-build/debug/ybar")
+        #expect(AppBundle.enclosingBundle(of: executable) == nil)
+    }
+
+    /// The `.app` suffix alone is not enough — a directory a user named
+    /// `notes.app` would otherwise be handed to `open` as a bundle.
+    @Test func appSuffixAloneIsNotABundle() {
+        #expect(AppBundle.enclosingBundle(of: URL(fileURLWithPath: "/Users/me/notes.app/ybar")) == nil)
+        #expect(AppBundle.enclosingBundle(
+            of: URL(fileURLWithPath: "/Users/me/notes.app/Contents/bin/ybar")) == nil)
+    }
+
+    @Test func cellarPathRewritesToTheStableOptPath() throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cellar = root.appendingPathComponent("Cellar/ybar/0.1.0/YBar.app")
+        let opt = root.appendingPathComponent("opt/ybar/YBar.app")
+        try FileManager.default.createDirectory(at: cellar, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: opt, withIntermediateDirectories: true)
+        #expect(AppBundle.stablePath(for: cellar).path == opt.path)
+    }
+
+    /// Without the opt link there is nothing stabler to point at, so the
+    /// versioned path is kept rather than invented.
+    @Test func cellarPathIsKeptWhenNoOptLinkExists() throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cellar = root.appendingPathComponent("Cellar/ybar/0.1.0/YBar.app")
+        try FileManager.default.createDirectory(at: cellar, withIntermediateDirectories: true)
+        #expect(AppBundle.stablePath(for: cellar).path == cellar.path)
+    }
+
+    @Test func nonCellarPathIsUntouched() {
+        let url = URL(fileURLWithPath: "/Users/me/Applications/YBar.app")
+        #expect(AppBundle.stablePath(for: url).path == url.path)
+    }
+
+    /// The bundle we are already running from outranks every installed copy;
+    /// after that it is the two `make app` destinations, then both Homebrew
+    /// prefixes.
+    @Test func searchOrderPrefersTheRunningBundle() {
+        let home = URL(fileURLWithPath: "/Users/me")
+        let executable = URL(fileURLWithPath: "/Applications/YBar.app/Contents/MacOS/ybar")
+        let order = AppBundle.candidates(
+            home: home, executable: executable, environment: [:]).map(\.path)
+        #expect(order.first == "/Applications/YBar.app")
+        #expect(order.contains("/Users/me/Applications/YBar.app"))
+        #expect(order.contains("/opt/homebrew/opt/ybar/YBar.app"))
+        #expect(order.contains("/usr/local/opt/ybar/YBar.app"))
+    }
+
+    @Test func searchOrderStartsAtHomeWhenNotBundled() {
+        let home = URL(fileURLWithPath: "/Users/me")
+        let executable = URL(fileURLWithPath: "/Users/me/.cache/ybar-build/debug/ybar")
+        let order = AppBundle.candidates(
+            home: home, executable: executable, environment: [:]).map(\.path)
+        #expect(order.first == "/Users/me/Applications/YBar.app")
+    }
+
+    /// `brew shellenv` exports the prefix; trust it over the two guesses, so a
+    /// Homebrew installed somewhere non-standard is still found.
+    @Test func exportedHomebrewPrefixIsTriedFirst() {
+        let order = AppBundle.candidates(
+            home: URL(fileURLWithPath: "/Users/me"),
+            executable: URL(fileURLWithPath: "/Users/me/.cache/ybar-build/debug/ybar"),
+            environment: ["HOMEBREW_PREFIX": "/opt/brew"]).map(\.path)
+        let brewEntries = order.filter { $0.contains("/opt/ybar/") }
+        #expect(brewEntries.first == "/opt/brew/opt/ybar/YBar.app")
+        #expect(brewEntries.count == 3)
+    }
+
+    /// A bare directory called `YBar.app` is not an app: `open` would refuse it
+    /// with a LaunchServices diagnostic instead of a useful one.
+    @Test func aDirectoryWithoutAnInfoPlistIsNotABundle() throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bundle = root.appendingPathComponent("YBar.app")
+        try FileManager.default.createDirectory(
+            at: bundle.appendingPathComponent("Contents"), withIntermediateDirectories: true)
+        #expect(!AppBundle.isBundle(bundle))
+        try Data().write(to: bundle.appendingPathComponent("Contents/Info.plist"))
+        #expect(AppBundle.isBundle(bundle))
+    }
+
+    /// The instance name is the binary's basename, so a second bar only has an
+    /// autostartable binary if one was put inside the bundle for it.
+    @Test func daemonBinaryIsNamedForTheInstance() throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bundle = root.appendingPathComponent("YBar.app")
+        let macOS = bundle.appendingPathComponent("Contents/MacOS")
+        try FileManager.default.createDirectory(at: macOS, withIntermediateDirectories: true)
+        try Data().write(to: macOS.appendingPathComponent("ybar"))
+
+        #expect(AppBundle.daemonBinary(in: bundle, instanceName: "ybar")?.path
+            == macOS.appendingPathComponent("ybar").path)
+        #expect(AppBundle.daemonBinary(in: bundle, instanceName: "bar2") == nil)
+    }
+}
+
+// MARK: - The login job
+
+@Suite struct LaunchAgentTests {
+    /// The label docs/INSTALL.md has always told people to `launchctl bootout`.
+    @Test func defaultInstanceKeepsTheDocumentedLabel() {
+        #expect(LaunchAgent.label(instanceName: "ybar") == "com.ybar.YBar")
+    }
+
+    @Test func renamedInstanceGetsItsOwnLabel() {
+        #expect(LaunchAgent.label(instanceName: "bar2") == "com.ybar.bar2")
+    }
+
+    @Test func plistLandsInTheUsersLaunchAgents() {
+        let home = URL(fileURLWithPath: "/Users/me")
+        #expect(LaunchAgent.plistURL(instanceName: "ybar", home: home).path
+            == "/Users/me/Library/LaunchAgents/com.ybar.YBar.plist")
+    }
+
+    @Test func plistCarriesTheKeysLaunchdNeeds() throws {
+        let plist = LaunchAgent.plist(
+            label: "com.ybar.YBar",
+            programArguments: ["/Users/me/Applications/YBar.app/Contents/MacOS/ybar"],
+            standardErrorPath: "/Users/me/Library/Logs/ybar.log")
+        let data = try LaunchAgent.xmlData(plist)
+        // launchd reads binary plists too, but a file users are told to read
+        // and hand-edit has to be the XML one.
+        #expect(String(decoding: data.prefix(5), as: UTF8.self) == "<?xml")
+
+        let decoded = try #require(PropertyListSerialization.propertyList(
+            from: data, options: [], format: nil) as? [String: Any])
+        #expect(decoded["Label"] as? String == "com.ybar.YBar")
+        #expect(decoded["RunAtLoad"] as? Bool == true)
+        #expect(decoded["ProcessType"] as? String == "Interactive")
+        #expect(decoded["StandardErrorPath"] as? String == "/Users/me/Library/Logs/ybar.log")
+        // Only a real GUI session can host a bar that draws windows.
+        #expect(decoded["LimitLoadToSessionType"] as? String == "Aqua")
+        // A daemon that cannot boot at all exits 1, and KeepAlive restarts on
+        // any non-zero code — this interval is what keeps that from becoming a
+        // respawn storm at login.
+        #expect(decoded["ThrottleInterval"] as? Int == 30)
+        // What makes the Login Items row say "YBar" rather than a raw label.
+        #expect(decoded["AssociatedBundleIdentifiers"] as? [String] == ["com.ybar.YBar"])
+        // Restart after a crash, but never after a deliberate `ybar stop`,
+        // which exits 0.
+        let keepAlive = try #require(decoded["KeepAlive"] as? [String: Any])
+        #expect(keepAlive["SuccessfulExit"] as? Bool == false)
+    }
+
+    /// ProgramArguments is an argv array, not a command line, so a config path
+    /// with spaces in it needs no quoting and must survive verbatim.
+    @Test func programArgumentsAreNotQuoted() throws {
+        let config = "/Users/me/My Configs/ybarrc.lua"
+        let plist = LaunchAgent.plist(
+            label: "com.ybar.YBar",
+            programArguments: ["/Users/me/Applications/YBar.app/Contents/MacOS/ybar", "-c", config],
+            standardErrorPath: "/Users/me/Library/Logs/ybar.log")
+        let data = try LaunchAgent.xmlData(plist)
+        let decoded = try #require(PropertyListSerialization.propertyList(
+            from: data, options: [], format: nil) as? [String: Any])
+        #expect((decoded["ProgramArguments"] as? [String])?.last == config)
+    }
+
+    /// `autostart disable` puts the bar back up, and it has to come back on the
+    /// config the login job was using rather than on whatever discovery picks.
+    @Test func theJobsConfigIsRecoverableFromItsProgramArguments() {
+        let withConfig: [String: Any] = [
+            "ProgramArguments": ["/Applications/YBar.app/Contents/MacOS/ybar", "-c", "/a/b.lua"]
+        ]
+        #expect(LaunchAgent.configArgument(in: withConfig) == "/a/b.lua")
+        let withLongFlag: [String: Any] = [
+            "ProgramArguments": ["/Applications/YBar.app/Contents/MacOS/ybar", "--config", "/a/b.lua"]
+        ]
+        #expect(LaunchAgent.configArgument(in: withLongFlag) == "/a/b.lua")
+        let plain: [String: Any] = [
+            "ProgramArguments": ["/Applications/YBar.app/Contents/MacOS/ybar"]
+        ]
+        #expect(LaunchAgent.configArgument(in: plain) == nil)
+        // A hand-edited plist with a dangling flag must not crash the verb.
+        let dangling: [String: Any] = [
+            "ProgramArguments": ["/Applications/YBar.app/Contents/MacOS/ybar", "-c"]
+        ]
+        #expect(LaunchAgent.configArgument(in: dangling) == nil)
+        #expect(LaunchAgent.configArgument(in: ["Label": "com.ybar.YBar"]) == nil)
+    }
+
+    /// No `-c` at all when none was given: that absence is what lets the login
+    /// job follow `current-theme` instead of pinning one config forever.
+    @Test func programArgumentsOmitTheConfigWhenThereIsNone() {
+        let binary = URL(fileURLWithPath: "/Applications/YBar.app/Contents/MacOS/ybar")
+        #expect(LaunchAgent.programArguments(binary: binary, config: nil)
+            == ["/Applications/YBar.app/Contents/MacOS/ybar"])
+        let pinned = LaunchAgent.programArguments(binary: binary, config: "/a/b/../c.lua")
+        #expect(pinned == ["/Applications/YBar.app/Contents/MacOS/ybar", "-c", "/a/c.lua"])
+        // launchd expands no tilde, so it has to be gone by the time it is
+        // written.
+        let expanded = LaunchAgent.programArguments(binary: binary, config: "~/x.lua")
+        #expect(expanded.last?.hasPrefix("/") == true)
+        #expect(expanded.last?.contains("~") == false)
+    }
+
+    /// The login-job label is per-instance, but the app it is attributed to is
+    /// always the one bundle — Login Items has to read "YBar" either way.
+    @Test func attributionStaysTheBundleIdForARenamedInstance() throws {
+        let plist = LaunchAgent.plist(
+            label: LaunchAgent.label(instanceName: "bar2"),
+            programArguments: ["/Applications/YBar.app/Contents/MacOS/bar2"],
+            standardErrorPath: "/Users/me/Library/Logs/bar2.log")
+        let decoded = try #require(PropertyListSerialization.propertyList(
+            from: try LaunchAgent.xmlData(plist), options: [], format: nil) as? [String: Any])
+        #expect(decoded["Label"] as? String == "com.ybar.bar2")
+        #expect(decoded["AssociatedBundleIdentifiers"] as? [String] == ["com.ybar.YBar"])
+    }
+
+    @Test func plistReadsBackFromDisk() throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("com.ybar.YBar.plist")
+        let plist = LaunchAgent.plist(
+            label: "com.ybar.YBar", programArguments: ["/bin/true"],
+            standardErrorPath: "/dev/null")
+        try LaunchAgent.xmlData(plist).write(to: url)
+        #expect(LaunchAgent.read(at: url)?["Label"] as? String == "com.ybar.YBar")
+        #expect(LaunchAgent.read(at: root.appendingPathComponent("absent.plist")) == nil)
+    }
+}
+
+// MARK: - Verb arguments
+
+@Suite struct ProcessVerbArgumentTests {
+    @Test func noOptionMeansNoConfig() {
+        #expect(ConfigArgument.parse([]) == .absent)
+    }
+
+    @Test func bothSpellingsOfTheConfigOptionParse() {
+        #expect(ConfigArgument.parse(["-c", "/a/b.lua"]) == .path("/a/b.lua"))
+        #expect(ConfigArgument.parse(["--config", "/a/b.lua"]) == .path("/a/b.lua"))
+    }
+
+    /// A dangling `-c`, a stray word, or extra tokens have to print usage
+    /// rather than be silently read as "no config".
+    @Test func anythingElseIsMalformed() {
+        #expect(ConfigArgument.parse(["-c"]) == .malformed)
+        #expect(ConfigArgument.parse(["enable"]) == .malformed)
+        #expect(ConfigArgument.parse(["-c", "/a/b.lua", "extra"]) == .malformed)
+    }
+
+    @Test func tildeAndRelativePathsAreMadeAbsolute() {
+        #expect(LocalVerbs.absolutePath("~/x.lua").hasPrefix("/"))
+        #expect(!LocalVerbs.absolutePath("x.lua").contains("/./"))
+        #expect(LocalVerbs.absolutePath("/a/b/../c.lua") == "/a/c.lua")
+    }
+
+    /// Parsing is separated from doing precisely so this suite can cover every
+    /// spelling without ever being one typo away from launching a real bar or
+    /// writing a real login agent. Everything here goes through `parse`, which
+    /// touches nothing.
+    ///
+    /// The message grammar must reach the daemon untouched: only bare verbs are
+    /// claimed here.
+    @Test func messageGrammarIsNotSwallowed() {
+        #expect(LocalVerbs.parse([]) == nil)
+        #expect(LocalVerbs.parse(["--set", "clock", "label=hi"]) == nil)
+        #expect(LocalVerbs.parse(["--query", "bar"]) == nil)
+        #expect(LocalVerbs.parse(["--trigger", "space_change"]) == nil)
+        // `-m` means "this is a message", so it must not be unwrapped here.
+        #expect(LocalVerbs.parse(["-m", "start"]) == nil)
+        // Not a verb, even though it starts with one of their letters.
+        #expect(LocalVerbs.parse(["starting"]) == nil)
+    }
+
+    @Test func wellFormedInvocationsParse() {
+        #expect(LocalVerbs.parse(["start"]) == .start(.absent))
+        #expect(LocalVerbs.parse(["start", "-c", "/a/b.lua"]) == .start(.path("/a/b.lua")))
+        #expect(LocalVerbs.parse(["stop"]) == .stop)
+        #expect(LocalVerbs.parse(["restart"]) == .restart(.absent))
+        #expect(LocalVerbs.parse(["status"]) == .status)
+        #expect(LocalVerbs.parse(["autostart", "enable"]) == .autostartEnable(.absent))
+        #expect(LocalVerbs.parse(["autostart", "disable"]) == .autostartDisable)
+        #expect(LocalVerbs.parse(["autostart", "status"]) == .autostartStatus)
+        // Bare `autostart` reads as the non-destructive one.
+        #expect(LocalVerbs.parse(["autostart"]) == .autostartStatus)
+    }
+
+    /// A wrong invocation is `.usage`, which exits 2 rather than 1 — the one
+    /// distinction a shell wrapper acts on.
+    @Test func malformedInvocationsAreUsageErrors() {
+        func isUsage(_ argv: [String]) -> Bool {
+            // `.usage?` matches through the Optional parse returns.
+            if case .usage? = LocalVerbs.parse(argv) { return true }
+            return false
+        }
+        #expect(isUsage(["stop", "extra"]))
+        #expect(isUsage(["status", "extra"]))
+        #expect(isUsage(["start", "-c"]))
+        #expect(isUsage(["restart", "-c", "a", "b"]))
+        #expect(isUsage(["autostart", "bogus"]))
+        #expect(isUsage(["autostart", "disable", "x"]))
+        #expect(isUsage(["autostart", "status", "x"]))
+        #expect(isUsage(["autostart", "enable", "-c"]))
+    }
+
+    @Test func fieldsLineUp() {
+        #expect(LocalVerbs.field("socket", "/tmp/x") == "  socket     /tmp/x")
+        // A name longer than the column still keeps one separating space.
+        #expect(LocalVerbs.field("autostartness", "x") == "  autostartness x")
+    }
+}
+
+// MARK: - Reading launchctl
+
+@Suite struct LaunchctlClassificationTests {
+    /// launchctl exits with the errno-style number itself; `print`'s own output
+    /// is not officially structured, so only the code may be read.
+    @Test func printStatusMapsToJobState() {
+        #expect(Launchctl.classify(printStatus: 0) == .loaded)
+        #expect(Launchctl.classify(printStatus: 113) == .notLoaded)
+        #expect(Launchctl.classify(printStatus: 112) == .noDomain)
+        #expect(Launchctl.classify(printStatus: 5) == .unknown(5))
+        // -1 is what Spawn.run reports when the spawn itself failed, which is
+        // the code a machine with a deleted cwd actually produces.
+        #expect(Launchctl.classify(printStatus: -1) == .unknown(-1))
+    }
+
+    /// 37 is EALREADY — the job is already loaded, which is the state the caller
+    /// asked for. 5 is launchd's catch-all and must never be read as success.
+    @Test func bootstrapSuccessIncludesAlreadyLoaded() {
+        #expect(Launchctl.bootstrapSucceeded(0))
+        #expect(Launchctl.bootstrapSucceeded(37))
+        #expect(!Launchctl.bootstrapSucceeded(5))
+        #expect(!Launchctl.bootstrapSucceeded(112))
+        #expect(!Launchctl.bootstrapSucceeded(134))
+    }
+
+    /// Nothing to remove is the end state a caller wanted, and 36 is cosmetic —
+    /// the job does go away.
+    @Test func bootoutSuccessIncludesNothingToRemove() {
+        #expect(Launchctl.bootoutSucceeded(0))
+        #expect(Launchctl.bootoutSucceeded(3))
+        #expect(Launchctl.bootoutSucceeded(36))
+        #expect(Launchctl.bootoutSucceeded(113))
+        #expect(!Launchctl.bootoutSucceeded(5))
+        #expect(!Launchctl.bootoutSucceeded(112))
+    }
+
+    @Test func autostartSummaryCoversEveryCombination() {
+        let label = "com.ybar.YBar"
+        #expect(LocalVerbs.autostartSummary(label: label, hasPlist: true, state: .loaded)
+            .hasPrefix("enabled"))
+        #expect(LocalVerbs.autostartSummary(label: label, hasPlist: true, state: .notLoaded)
+            .contains("next login"))
+        // A job loaded from a plist that has since been deleted survives until
+        // the user logs out — reporting it as plain "disabled" would be a lie.
+        #expect(LocalVerbs.autostartSummary(label: label, hasPlist: false, state: .loaded)
+            .contains("still loaded"))
+        #expect(LocalVerbs.autostartSummary(label: label, hasPlist: false, state: .notLoaded)
+            == "disabled")
+        // Over ssh or under sudo there is no GUI domain to ask, and claiming
+        // "disabled" would send the user chasing a problem they do not have.
+        #expect(LocalVerbs.autostartSummary(label: label, hasPlist: true, state: .noDomain)
+            .hasPrefix("unknown"))
+        // An unexplained launchctl failure must not read the same as a machine
+        // that genuinely has no agent — an opaque "disabled" with nowhere to
+        // look is the exact failure this verb exists to prevent.
+        #expect(LocalVerbs.autostartSummary(label: label, hasPlist: true, state: .unknown(5))
+            .hasPrefix("unknown"))
+        #expect(LocalVerbs.autostartSummary(label: label, hasPlist: false, state: .unknown(-1))
+            .hasPrefix("unknown"))
+    }
+
+    /// launchd never rotates what it captures, and one failing Lua callback
+    /// writes a line per tick forever under a job nobody is watching.
+    @Test func theLogIsRolledOnlyOnceItIsBig() throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let log = root.appendingPathComponent("ybar.log")
+        let rolled = root.appendingPathComponent("ybar.log.1")
+
+        try Data(repeating: 0x61, count: 1024).write(to: log)
+        LocalVerbs.rotateLog(at: log)
+        #expect(FileManager.default.fileExists(atPath: log.path))
+        #expect(!FileManager.default.fileExists(atPath: rolled.path))
+
+        try Data(repeating: 0x61, count: 2 * 1024 * 1024).write(to: log)
+        LocalVerbs.rotateLog(at: log)
+        #expect(!FileManager.default.fileExists(atPath: log.path))
+        #expect(FileManager.default.fileExists(atPath: rolled.path))
+
+        // A second roll replaces the previous .1 rather than failing on it.
+        try Data(repeating: 0x62, count: 2 * 1024 * 1024).write(to: log)
+        LocalVerbs.rotateLog(at: log)
+        #expect(FileManager.default.fileExists(atPath: rolled.path))
+        #expect(!FileManager.default.fileExists(atPath: log.path))
+    }
+
+    /// A `-c` the user typed is an assertion about a file. Nothing downstream
+    /// catches a missing one: the daemon logs a line, keeps running with the
+    /// socket bound, and the bar comes up empty — which `autostart enable`
+    /// would then freeze into every login.
+    @Test func aConfigThatIsNotThereIsRejected() throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let present = root.appendingPathComponent("ybarrc.lua")
+        try Data().write(to: present)
+
+        #expect(LocalVerbs.configExists(.absent))
+        #expect(LocalVerbs.configExists(.path(present.path)))
+        #expect(!LocalVerbs.configExists(.path(root.appendingPathComponent("typo.lua").path)))
+    }
+}
+
+// MARK: - Help text
+
+@Suite struct HelpTextTests {
+    /// The help text is the only place the verbs are advertised, and it lives in
+    /// a different file from the dispatch table — so it is exactly the thing
+    /// that drifts.
+    @Test func helpMentionsEveryVerb() {
+        for verb in LocalVerbs.verbs {
+            #expect(CLIClient.helpText.contains("ybar \(verb)"),
+                    "help text never mentions `ybar \(verb)`")
+        }
+    }
+}
+
+// MARK: - Config discovery
+
+@Suite struct ThemeDiscoveryTests {
+    /// Writes a theme directory with an entry file and returns the entry path.
+    private func makeTheme(in root: URL, named name: String,
+                           entry: String = "ybarrc.lua") throws -> URL {
+        let directory = root.appendingPathComponent(name)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent(entry)
+        try Data().write(to: file)
+        return file
+    }
+
+    /// The whole point: a bar started with no `-c` — by the login agent, or by
+    /// `ybar start` — picks up the theme the user selected.
+    @Test func recordedThemeBeatsTheDefaultConfig() throws {
+        let home = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let configDirectory = home.appendingPathComponent(".config/ybar")
+        try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+        try Data().write(to: configDirectory.appendingPathComponent("ybarrc.lua"))
+        let entry = try makeTheme(in: configDirectory.appendingPathComponent("themes"), named: "darxk")
+        try "darxk\n".write(to: configDirectory.appendingPathComponent("current-theme"),
+                            atomically: true, encoding: .utf8)
+
+        let found = ConfigLocator.locate(
+            explicitPath: nil, instanceName: "ybar", home: home, environment: [:])
+        #expect(found?.path == entry.path)
+    }
+
+    @Test func jsoncThemesResolveToo() throws {
+        let home = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let configDirectory = home.appendingPathComponent(".config/ybar")
+        try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+        let entry = try makeTheme(in: configDirectory.appendingPathComponent("themes"),
+                                  named: "jsonc-demo", entry: "ybar.jsonc")
+        try "jsonc-demo".write(to: configDirectory.appendingPathComponent("current-theme"),
+                               atomically: true, encoding: .utf8)
+
+        let found = ConfigLocator.locate(
+            explicitPath: nil, instanceName: "ybar", home: home, environment: [:])
+        #expect(found?.path == entry.path)
+    }
+
+    /// A theme the user deleted must not leave the bar configless.
+    @Test func staleThemeNameFallsThroughToDiscovery() throws {
+        let home = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let configDirectory = home.appendingPathComponent(".config/ybar")
+        try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+        let fallback = configDirectory.appendingPathComponent("ybarrc.lua")
+        try Data().write(to: fallback)
+        try "deleted-theme".write(to: configDirectory.appendingPathComponent("current-theme"),
+                                  atomically: true, encoding: .utf8)
+
+        let found = ConfigLocator.locate(
+            explicitPath: nil, instanceName: "ybar", home: home, environment: [:])
+        #expect(found?.path == fallback.path)
+    }
+
+    /// A renamed binary is an independent bar; it must not be hijacked into
+    /// ybar's theme.
+    @Test func renamedInstanceIgnoresTheDefaultInstancesTheme() throws {
+        let home = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let ybarDirectory = home.appendingPathComponent(".config/ybar")
+        try FileManager.default.createDirectory(at: ybarDirectory, withIntermediateDirectories: true)
+        _ = try makeTheme(in: ybarDirectory.appendingPathComponent("themes"), named: "darxk")
+        try "darxk".write(to: ybarDirectory.appendingPathComponent("current-theme"),
+                          atomically: true, encoding: .utf8)
+        let otherDirectory = home.appendingPathComponent(".config/bar2")
+        try FileManager.default.createDirectory(at: otherDirectory, withIntermediateDirectories: true)
+        let own = otherDirectory.appendingPathComponent("bar2rc.lua")
+        try Data().write(to: own)
+
+        let found = ConfigLocator.locate(
+            explicitPath: nil, instanceName: "bar2", home: home, environment: [:])
+        #expect(found?.path == own.path)
+    }
+
+    /// `-c` is still the last word on which config runs.
+    @Test func explicitPathOutranksTheRecordedTheme() throws {
+        let home = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let configDirectory = home.appendingPathComponent(".config/ybar")
+        try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+        _ = try makeTheme(in: configDirectory.appendingPathComponent("themes"), named: "darxk")
+        try "darxk".write(to: configDirectory.appendingPathComponent("current-theme"),
+                          atomically: true, encoding: .utf8)
+        let explicit = home.appendingPathComponent("explicit.lua")
+        try Data().write(to: explicit)
+
+        let found = ConfigLocator.locate(
+            explicitPath: explicit.path, instanceName: "ybar", home: home, environment: [:])
+        #expect(found?.path == explicit.path)
+    }
+
+    /// A hand-edited state file naming `../..` must not walk out of the theme
+    /// roots.
+    @Test func themeNameCannotEscapeItsRoot() throws {
+        let home = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let configDirectory = home.appendingPathComponent(".config/ybar")
+        try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+        let fallback = configDirectory.appendingPathComponent("ybarrc.lua")
+        try Data().write(to: fallback)
+        try "../..".write(to: configDirectory.appendingPathComponent("current-theme"),
+                          atomically: true, encoding: .utf8)
+
+        #expect(ConfigLocator.currentTheme(home: home) == nil)
+        let found = ConfigLocator.locate(
+            explicitPath: nil, instanceName: "ybar", home: home, environment: [:])
+        #expect(found?.path == fallback.path)
+    }
+
+    /// The two remaining escape shapes. `/` is covered above; these are the
+    /// ones a hand-edited state file reaches.
+    @Test func dotAndDotDotAreRejectedAsThemeNames() throws {
+        let home = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let configDirectory = home.appendingPathComponent(".config/ybar")
+        try FileManager.default.createDirectory(
+            at: configDirectory, withIntermediateDirectories: true)
+        let state = configDirectory.appendingPathComponent("current-theme")
+        for name in [".", "..", "  ", ""] {
+            try name.write(to: state, atomically: true, encoding: .utf8)
+            #expect(ConfigLocator.recordedThemeName(home: home) == nil)
+            #expect(ConfigLocator.currentTheme(home: home) == nil)
+        }
+    }
+
+    /// The tiers the theme tier was inserted ahead of. They were untested
+    /// before this change and are exactly what a regression would land on.
+    @Test func theSketchybarDiscoveryOrderStillHolds() throws {
+        let home = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let configDirectory = home.appendingPathComponent(".config/ybar")
+        let xdgDirectory = home.appendingPathComponent("xdg/ybar")
+        try FileManager.default.createDirectory(
+            at: configDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: xdgDirectory, withIntermediateDirectories: true)
+
+        // Home dot-file only.
+        let dotfile = home.appendingPathComponent(".ybarrc")
+        try Data().write(to: dotfile)
+        #expect(ConfigLocator.locate(explicitPath: nil, instanceName: "ybar",
+                                     home: home, environment: [:])?.path == dotfile.path)
+
+        // ~/.config beats the home dot-file, and .lua beats the bare script.
+        let bare = configDirectory.appendingPathComponent("ybarrc")
+        try Data().write(to: bare)
+        #expect(ConfigLocator.locate(explicitPath: nil, instanceName: "ybar",
+                                     home: home, environment: [:])?.path == bare.path)
+        let lua = configDirectory.appendingPathComponent("ybarrc.lua")
+        try Data().write(to: lua)
+        #expect(ConfigLocator.locate(explicitPath: nil, instanceName: "ybar",
+                                     home: home, environment: [:])?.path == lua.path)
+
+        // XDG_CONFIG_HOME outranks both.
+        let xdg = xdgDirectory.appendingPathComponent("ybarrc.lua")
+        try Data().write(to: xdg)
+        #expect(ConfigLocator.locate(
+            explicitPath: nil, instanceName: "ybar", home: home,
+            environment: ["XDG_CONFIG_HOME": home.appendingPathComponent("xdg").path]
+        )?.path == xdg.path)
+
+        // An explicit path that does not exist resolves to nothing rather than
+        // falling through — the daemon reports it instead of running a config
+        // the user did not ask for.
+        #expect(ConfigLocator.locate(explicitPath: "/nope/ybarrc.lua", instanceName: "ybar",
+                                     home: home, environment: [:]) == nil)
+    }
+
+    @Test func noStateFileMeansNormalDiscovery() throws {
+        let home = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let configDirectory = home.appendingPathComponent(".config/ybar")
+        try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+        let fallback = configDirectory.appendingPathComponent("ybarrc.lua")
+        try Data().write(to: fallback)
+
+        #expect(ConfigLocator.currentTheme(home: home) == nil)
+        let found = ConfigLocator.locate(
+            explicitPath: nil, instanceName: "ybar", home: home, environment: [:])
+        #expect(found?.path == fallback.path)
+    }
+}

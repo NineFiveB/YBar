@@ -1,18 +1,35 @@
 import Foundation
 
 /// Config discovery, sketchybar-compatible search order with a Lua twist:
-/// `-c <path>` → per directory, `<name>rc.lua` (embedded YbarLua) is preferred
-/// over the executable `<name>rc` shell script:
+/// `-c <path>` → the theme recorded by `ybar-theme use` → per directory,
+/// `<name>rc.lua` (embedded YbarLua) is preferred over the executable
+/// `<name>rc` shell script:
 /// `$XDG_CONFIG_HOME/<name>/` → `~/.config/<name>/` → `~/.{<name>rc.lua,<name>rc}`.
 public enum ConfigLocator {
-    public static func locate(explicitPath: String?, instanceName: String) -> URL? {
-        let fileManager = FileManager.default
+    public static func locate(
+        explicitPath: String?,
+        instanceName: String,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        fileManager: FileManager = .default
+    ) -> URL? {
         if let explicitPath {
             let url = URL(fileURLWithPath: (explicitPath as NSString).expandingTildeInPath)
             return fileManager.fileExists(atPath: url.path) ? url : nil
         }
+
+        // A theme chosen with `ybar-theme use` has to survive a start that
+        // carries no `-c` — which is exactly how the login agent starts the
+        // bar, and how `ybar start` starts it. Only the default instance reads
+        // the file: a renamed binary is an independent bar and must not be
+        // hijacked into ybar's theme (the Windows port fixed the same hole,
+        // docs/WINDOWS-PORT.md section 5).
+        if instanceName == "ybar",
+           let themed = currentTheme(home: home, fileManager: fileManager) {
+            return themed
+        }
+
         var candidates: [URL] = []
-        let environment = ProcessInfo.processInfo.environment
 
         func addDirectory(_ directory: URL) {
             candidates.append(directory.appendingPathComponent("\(instanceName)rc.lua"))
@@ -22,11 +39,49 @@ public enum ConfigLocator {
         if let xdg = environment["XDG_CONFIG_HOME"], !xdg.isEmpty {
             addDirectory(URL(fileURLWithPath: xdg).appendingPathComponent(instanceName))
         }
-        let home = fileManager.homeDirectoryForCurrentUser
         addDirectory(home.appendingPathComponent(".config/\(instanceName)"))
         candidates.append(home.appendingPathComponent(".\(instanceName)rc.lua"))
         candidates.append(home.appendingPathComponent(".\(instanceName)rc"))
         return candidates.first { fileManager.fileExists(atPath: $0.path) }
+    }
+
+    /// A theme directory is any directory holding one of these, in this order —
+    /// the same rule `scripts/ybar-theme` applies.
+    static let themeEntryNames = ["ybarrc.lua", "ybar.jsonc", "ybarrc.jsonc"]
+
+    /// The name in `~/.config/ybar/current-theme`, validated. A name carrying a
+    /// path separator, or `.`/`..`, would escape the theme roots, so it is
+    /// rejected rather than resolved.
+    static func recordedThemeName(home: URL) -> String? {
+        let stateFile = home.appendingPathComponent(".config/ybar/current-theme")
+        guard let recorded = try? String(contentsOf: stateFile, encoding: .utf8) else { return nil }
+        let name = recorded.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, !name.contains("/"), name != ".", name != ".." else { return nil }
+        return name
+    }
+
+    /// The entry file of the theme named in `~/.config/ybar/current-theme`, or
+    /// nil when nothing is recorded or the name no longer resolves — a stale
+    /// name falls through to normal discovery rather than leaving the bar
+    /// configless.
+    static func currentTheme(home: URL, fileManager: FileManager = .default) -> URL? {
+        guard let name = recordedThemeName(home: home) else { return nil }
+
+        var roots = [home.appendingPathComponent(".config/ybar/themes")]
+        // Homebrew stages the shipped themes under share/ybar/examples; both
+        // prefixes are tried because the CLI cannot know which one installed it
+        // (Apple silicon vs Intel).
+        for prefix in ["/opt/homebrew", "/usr/local"] {
+            roots.append(URL(fileURLWithPath: "\(prefix)/share/ybar/examples"))
+        }
+        for root in roots {
+            let directory = root.appendingPathComponent(name)
+            for entry in themeEntryNames {
+                let candidate = directory.appendingPathComponent(entry)
+                if fileManager.fileExists(atPath: candidate.path) { return candidate }
+            }
+        }
+        return nil
     }
 }
 

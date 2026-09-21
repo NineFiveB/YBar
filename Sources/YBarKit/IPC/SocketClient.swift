@@ -60,9 +60,55 @@ public enum SocketClient {
         return String(decoding: payload, as: UTF8.self)
     }
 
-    /// Probe whether a daemon is alive behind the socket.
+    /// Probe whether a daemon ANSWERS COMMANDS. This is a full round trip, and
+    /// the reply can only be produced from the daemon's main thread — so a live
+    /// bar that is busy (running a cold Lua config, servicing a `--reload`) says
+    /// "no" here for seconds at a time. Use it to wait for readiness, never to
+    /// decide whether a daemon exists.
     public static func ping(socketPath: String) -> Bool {
         (try? send(arguments: ["--ping"], socketPath: socketPath, timeout: 1.0)) != nil
+    }
+
+    /// Probe whether anything is LISTENING on the path, without needing a reply.
+    /// The kernel completes the connect from the listen backlog even while the
+    /// daemon's main thread is parked, so this separates "a stale socket file"
+    /// (connect refused) from "a daemon that is simply busy" — a distinction
+    /// `ping` cannot make, and the one that decides whether it is safe to unlink
+    /// the file or to launch a second instance.
+    public static func isListening(socketPath: String) -> Bool {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        // Non-blocking: with the accept loop parked and the backlog full,
+        // connect() would otherwise block with no timeout to rescue it.
+        let flags = fcntl(fd, F_GETFL, 0)
+        if flags >= 0 { _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK) }
+
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let pathBytes = socketPath.utf8CString
+        guard pathBytes.count <= MemoryLayout.size(ofValue: address.sun_path) else { return false }
+        withUnsafeMutableBytes(of: &address.sun_path) { raw in
+            pathBytes.withUnsafeBytes { src in
+                raw.copyMemory(from: UnsafeRawBufferPointer(rebasing: src.prefix(raw.count)))
+            }
+        }
+        let result = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                connect(fd, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        if result == 0 { return true }
+        // Darwin completes an AF_UNIX connect synchronously, so these are all
+        // but unreachable and are kept only as a non-negative. Note what is NOT
+        // here: a full listen backlog is refused with ECONNREFUSED, which is
+        // indistinguishable from a stale socket file. So never poll this in a
+        // tight loop — each probe parks a connection on the listener until the
+        // accept loop takes it, and enough of them manufacture that refusal.
+        // (The structural fix is to stop the accept loop blocking on the main
+        // thread; a bigger backlog and a file-based wait are what bound it
+        // here.)
+        return errno == EAGAIN || errno == EINPROGRESS
     }
 
     static func writeAll(fd: Int32, data: Data) -> Bool {
@@ -109,6 +155,15 @@ public enum CLIClient {
             return nil
         default:
             break
+        }
+
+        // Process-control verbs (`start`, `stop`, `restart`, `status`,
+        // `autostart`) are bare words that manage the daemon rather than talk
+        // to it, so they are answered here, before anything is put on the wire.
+        // They are checked ahead of the `-m` strip so that `ybar -m start`
+        // still means "send the word start to the daemon".
+        if let exit = LocalVerbs.run(arguments: arguments, instanceName: Version.instanceName) {
+            return exit
         }
 
         // `-m/--message` is accepted for sketchybar muscle-memory; it is implicit otherwise.
@@ -167,16 +222,30 @@ public enum CLIClient {
     ybar — a Metal-rendered, scriptable status bar for macOS.
 
     Usage:
-      ybar                          start the daemon
-      ybar -c <path>                start the daemon with an explicit config script
-      ybar <domain>...              send commands to the running daemon, e.g.:
+      ybar                          run the daemon in this terminal
+      ybar -c <path>                run the daemon with an explicit config script
 
+    Process control — these drive YBar.app rather than the bare binary, which is
+    what keeps privacy prompts attributed to YBar (docs/INSTALL.md):
+      ybar start [-c <path>]        launch the bar in the background
+      ybar stop                     stop the running bar
+      ybar restart [-c <path>]      stop it and launch it again
+      ybar status                   bar, config and autostart state
+      ybar autostart enable         start the bar at every login (a launchd agent)
+      ybar autostart disable        stop starting it at login
+      ybar autostart status         where the login job is and what it runs
+
+    Messages to a running daemon:
       ybar --bar height=32 color=0xcc1e1e2e
       ybar --add item clock right
       ybar --set clock label="12:00" icon=sf:clock label.color=0xffffffff
       ybar --subscribe clock system_woke
       ybar --animate tanh 30 --set clock label.color=0xffff0000
       ybar --query bar
+
+    Process-control exit codes: 0 success, 1 the operation failed, 2 the
+    invocation was wrong. A rejected message is an [!] reply and exits 1.
+    `ybar --ping` is the scriptable liveness probe.
 
     See docs/ARCHITECTURE.md for the full command grammar.
     """

@@ -21,6 +21,8 @@ public final class SocketServer: @unchecked Sendable {
     public let path: String
     private let handler: @MainActor ([String]) -> String
     private var listenFD: Int32 = -1
+    /// Whether this server is the one that owns the socket file on disk.
+    private var bound = false
     private var thread: Thread?
 
     public init(path: String, handler: @escaping @MainActor ([String]) -> String) {
@@ -31,7 +33,12 @@ public final class SocketServer: @unchecked Sendable {
     /// Bind + listen; refuses to start when a live daemon already owns the socket.
     public func start() throws {
         if FileManager.default.fileExists(atPath: path) {
-            if SocketClient.ping(socketPath: path) {
+            // isListening, not ping: a daemon that is mid-config-run cannot
+            // answer a --ping for seconds, and reading that as "the file is
+            // stale" would unlink a LIVE daemon's endpoint. The survivor keeps
+            // its listening fd on an unnamed inode and can never be talked to
+            // again.
+            if SocketClient.isListening(socketPath: path) {
                 throw ServerError.alreadyRunning(path)
             }
             unlink(path)
@@ -57,12 +64,19 @@ public final class SocketServer: @unchecked Sendable {
                 bind(fd, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
-        guard bindResult == 0, listen(fd, 16) == 0 else {
+        // 128, the kern.ipc.somaxconn default, not 16. A connection sits on
+        // the accept queue until the accept loop takes it, and that loop is
+        // blocked for as long as the main thread is (a cold Lua config, a
+        // --reload). Once the queue is full Darwin REFUSES further connects
+        // with ECONNREFUSED — indistinguishable from a stale socket file, which
+        // is how a live daemon gets declared dead and its socket unlinked.
+        guard bindResult == 0, listen(fd, 128) == 0 else {
             close(fd)
             throw ServerError.bindFailed(path)
         }
         chmod(path, 0o600)
         listenFD = fd
+        bound = true
 
         let thread = Thread { [weak self] in
             self?.acceptLoop()
@@ -77,6 +91,22 @@ public final class SocketServer: @unchecked Sendable {
             close(listenFD)
             listenFD = -1
         }
+        // Known residual: check-unlink-bind is not atomic, so two daemons that
+        // both see "nothing listening" in the same instant can both bind and
+        // both set `bound`, after which the first to exit unlinks the second's
+        // file. Closing it properly means holding an exclusive flock on a
+        // sibling .lock across the whole sequence; the window is microseconds
+        // and is not what the guard below is for.
+        //
+        // Only the server that actually bound may remove the socket file. A
+        // second daemon that lost the instance race throws .alreadyRunning out
+        // of start(), and AppKit still runs applicationWillTerminate on its way
+        // out — an unconditional unlink there deletes the LIVE daemon's socket,
+        // leaving a bar that renders fine and can never be talked to again.
+        // Autostart makes that race ordinary: launchd starts one, the user
+        // starts another.
+        guard bound else { return }
+        bound = false
         unlink(path)
     }
 

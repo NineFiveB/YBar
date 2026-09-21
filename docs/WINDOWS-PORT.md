@@ -381,6 +381,22 @@ independent instance.
   → thin client (strip a leading `-m/--message`, fold `AEROSPACE_*`/`YABAI_*`/
   `KOMOREBI_*` env on `--trigger`, serialize argv → socket → print reply; `[!]`
   replies go to stderr, exit 1).
+- Not yet ported: the reference's `start`/`stop`/`restart`/`status`
+  process-control verbs. On Windows `ybar` already starts the daemon directly
+  and `--exit` stops it, so the gap is ergonomic rather than load-bearing, but
+  `stop`/`restart`/`status` should land for grammar parity — `start` would have
+  to detach from the console, which `open -g` does for the reference. Two
+  parity contracts come with them: exit codes are **0** success (including
+  every idempotent no-op), **1** the operation failed, **2** the invocation was
+  wrong — message-grammar errors stay at 1; and the verbs that launch or write
+  something (`start`, `restart`, `autostart enable|disable`) refuse to run
+  elevated, while the read-only ones do not. The macOS login agent also carries
+  `LimitLoadToSessionType`, `AssociatedBundleIdentifiers` and
+  `ThrottleInterval` — all three are launchd concepts with no Run-key
+  equivalent, so the Windows side mirrors none of them; a Task Scheduler recipe
+  would be where restart-after-crash lands. `StandardErrorPath` is the one new
+  key that does have an analogue: it is the only reason a failure at login is
+  visible at all, and ybar-win has no equivalent today.
 - Daemon boot order (mirrors `Daemon.swift`): `CoInitializeEx` (STA) → create
   hidden message-only window → bind socket (instance lock, before any shared
   state is touched) → renderer + per-display bar windows (headless if the GPU
@@ -403,11 +419,12 @@ independent instance.
 - COM: UI thread is STA (`RO_INIT_SINGLETHREADED` /
   `CoInitializeEx(COINIT_APARTMENTTHREADED)`); audio/media callbacks arrive on
   MTA worker threads and marshal to the UI thread.
-- Config discovery, reference order plus two ybar-win additions, with `<name>`
+- Config discovery, reference order plus one ybar-win addition, with `<name>`
   = instance name: `-c <path>` (with `~` → `%USERPROFILE%` expansion; a
   missing file runs configless rather than falling through) → `current-theme`
   (default `ybar` instance only, resolved to the theme's entry file; a stale
-  name falls through; `ybar theme reset` clears it) → `%XDG_CONFIG_HOME%\<name>\`
+  name falls through; `ybar theme reset` clears it — the reference adopted this
+  tier too, for `ybar start` and the login agent) → `%XDG_CONFIG_HOME%\<name>\`
   → `~/.config/<name>/` → `~/.<name>rc(.lua)`; per directory `<name>rc.lua` →
   `<name>rc` → `<name>rc.jsonc` → `<name>.jsonc` (JSONC entries are first-class
   on ybar-win; the home dot-file tier is `.lua`/bare only). `~/.config` works
@@ -450,7 +467,10 @@ list|current|use <name>|reset` subcommand (no `.ps1`; `install <git-url>` is
 not ported, `reset` is new). `use` records `current-theme` and sends
 `--reload <entry>` over the same socket, falling back to "recorded; start ybar
 to apply" when no daemon answers (the next start picks it up through config
-discovery, §5). The `~/.config/ybar/themes/` + `current-theme` state file
+discovery, §5). The reference has since adopted the same `current-theme` tier,
+and `scripts/ybar-theme` grew a `reset` to match this one; what it still lacks
+is a built-in `theme` verb, so the POSIX script remains the macOS entry point.
+The `~/.config/ybar/themes/` + `current-theme` state file
 layout is preserved; shipped themes are found in `examples/` or `themes/`
 beside the exe (or `../examples` from a build tree).
 

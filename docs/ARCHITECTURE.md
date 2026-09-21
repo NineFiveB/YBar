@@ -24,10 +24,11 @@ Key departures from sketchybar, each justified by research:
 
 ## 2. Process model & lifecycle
 
-- `main.swift`: if argv has domain args → `CLIClient.send(argv)` → print reply, exit (`[!]`-prefixed reply → stderr, exit 1 — sketchybar convention). Else daemon.
-- Daemon boot: acquire instance lock (bind the socket; `EADDRINUSE` + live ping = already running), `NSApplication` with `.accessory` policy, start `DisplayManager` → `BarManager` (bar per display), start `EventBus` + always-on providers, start `IPCServer`, exec config, `NSApp.run()`.
+- `main.swift` hands argv straight to `CLIClient.runIfClient` — there is no branching ahead of it. That one call answers `--help`/`--version` itself, returns nil for empty argv and for `-c <path>` so the daemon boots, then dispatches the process-control verbs (`start`, `stop`, `restart`, `status`, `autostart`) to `LocalVerbs`, which decides them in the client (the only traffic they generate is the `--exit` that `stop` sends and the `--ping` the readiness waits use), and otherwise sends argv over the socket → print reply, exit (`[!]`-prefixed reply → stderr, exit 1 — sketchybar convention).
+- Process control (`LocalVerbs`): `start` launches YBar.app through `open -n -g` so the daemon keeps the bundle's TCC identity (`-n` because LaunchServices otherwise reactivates an existing instance and silently drops everything after `--args`); `stop` sends `--exit` and waits; `restart` on a launchd-owned bar asks it to quit cleanly first and then `launchctl kickstart`s the job, keeping `-k` (a SIGKILL) for a bar that refused; `autostart enable|disable|status` writes, boots and reports a `~/Library/LaunchAgents/com.ybar.YBar.plist` agent (`RunAtLoad`, `KeepAlive.SuccessfulExit=false`, `ProcessType=Interactive`, `LimitLoadToSessionType=Aqua`, `AssociatedBundleIdentifiers`, `ThrottleInterval=30`). Every verb that launches, writes or stops something — `start`, `stop`, `restart`, `autostart enable|disable` — refuses to run as root, because the socket path and `~/Library/LaunchAgents` are both keyed on the invoking user and root's are not yours. The two `status` verbs are read-only, run as whoever invokes them, and say so when that is root. `launchctl disable` is never issued — it writes a persistent override that survives reinstalling the plist, so the verbs only ever clear one. The Windows port carries the same `autostart` verb in `src/app/local_verbs.cpp`.
+- Daemon boot: acquire the instance lock — if the socket file exists it is probed with the connect-only `SocketClient.isListening`; a refused connect means a stale file, which is unlinked before binding, and a completed one means a live daemon, so the boot aborts with `.alreadyRunning`. (A connect, not a `--ping`: the reply needs the daemon's main thread, so a bar busy running its config would read as dead and have its socket taken.) Then `NSApplication` with `.accessory` policy, start `DisplayManager` → `BarManager` (bar per display), start `EventBus` + always-on providers, start `IPCServer`, exec config, `NSApp.run()`.
 - **All state mutation is main-thread serialized** (sketchybar's `dispatch_sync`-to-main model, kept deliberately): IPC commands, provider callbacks, and mouse events all hop to `@MainActor`. No locks in the model layer.
-- Config discovery (sketchybar-compatible): `-c <path>`, else `$XDG_CONFIG_HOME/ybar/ybarrc`, else `~/.config/ybar/ybarrc`, else `~/.ybarrc`. The config is an **executable script** run with `CONFIG_DIR` set and cwd = config dir; it configures everything through the CLI. `--reload` / FSEvents hotload (0.5 s latency, ~1 s rate limit) = full teardown + re-exec, no diffing.
+- Config discovery (sketchybar-compatible): `-c <path>`, else the theme named in `~/.config/ybar/current-theme` (default instance only — a renamed bar is independent; a stale name falls through), else `$XDG_CONFIG_HOME/ybar/ybarrc`, else `~/.config/ybar/ybarrc`, else `~/.ybarrc`. The config is an **executable script** run with `CONFIG_DIR` set and cwd = config dir; it configures everything through the CLI. `--reload` / FSEvents hotload (0.5 s latency, ~1 s rate limit) = full teardown + re-exec, no diffing.
 - Instance naming: `ybar` binary name → socket `/tmp/ybar_<user>.socket`, env `BAR_NAME=ybar`. A renamed binary is an independent instance (sketchybar behavior).
 
 ## 3. Windowing
@@ -108,6 +109,15 @@ sketchybar's UX (message-scoped `--animate <curve> <duration>`, duration in 60th
 --reload [path]                 --hotload <on|off>
 ```
 
+**Process-control verbs** (bare words, never `--`-prefixed, so they cannot collide with the message grammar; handled entirely in the client):
+
+```
+ybar start [-c <path>]          ybar stop           ybar restart [-c <path>]
+ybar status                     ybar autostart enable|disable|status
+```
+
+**Exit codes** (the process-control verbs above): `0` success, including every idempotent no-op ("already running", "autostart is already disabled"); `1` the operation failed; `2` the invocation was wrong. Message-grammar errors — an unknown `--domain`, a malformed `key=value` — come back as `[!]` replies and exit 1. `ybar --ping` is the scriptable liveness probe (0 alive, 1 not); `ybar status` is for humans and always exits 0.
+
 v1.5: `--add graph|slider|bracket`, `--push`, `--clone/--rename/--move/--reorder`, regex item targeting, `--load-font`. Deferred: `alias` (ScreenCaptureKit route, opt-in Screen Recording), `space` component (via WM adapters first), mach-helper fast path (YBar equivalent: a socket event-push subscription for SbarLua-style bindings).
 
 **`--query` output**: JSON matching sketchybar's key names (scripts pipe it to `jq`; keep `name`, `geometry`, `icon`, `label`, `scripting`, `bounding_rects` shapes) via `Codable` with explicit keys.
@@ -145,7 +155,7 @@ Package.swift                     — swift-tools 6.0, macOS 14+, exec `ybar` + 
 Sources/ybar/main.swift           — argv → client | daemon
 Sources/CLua/                     — vendored Lua 5.4 (C), the embedded runtime's interpreter
 Sources/YBarKit/
-  App/        Daemon (lifecycle, provider wiring, config exec + hotload), JSONCConfig
+  App/        Daemon (lifecycle, provider wiring, config exec + hotload), JSONCConfig, LocalVerbs (start/stop/restart/status/autostart, app-bundle discovery, the LaunchAgent)
   Bar/        BarManager, BarSurface, PopupSurface, BarSettings, BarPropertySetter, DisplayManager
   Items/      Item, Style, Components (graph/slider/gauge/image), Layout, PropertySetter (dotted paths), Serialize (query JSON)
   Render/     MetalHostView, Renderer, SceneBuilder, GlyphAtlas, FontCache, Instances, Shaders/YBar.metal
@@ -154,8 +164,8 @@ Sources/YBarKit/
   Events/     EventBus, ScriptRunner
   Providers/  Workspace, Power, Audio, Network, SystemStats, Media, Alias
   Lua/        LuaRuntime (the `ybar.*` API and the sketchybar compat shim)
-  Config/     Config (discovery + hotload)
-Tests/YBarKitTests/               — layout, wire format, property parsing, curves, command grammar, components, clipping, JSONC, Lua
+  Config/     Config (discovery incl. the recorded theme + hotload)
+Tests/YBarKitTests/               — layout, wire format, property parsing, curves, command grammar, components, clipping, JSONC, Lua, process control (bundle discovery, the LaunchAgent plist, theme discovery)
 ```
 
 Concurrency: Swift 6 language mode; model layer is `@MainActor`; providers hop callbacks to main; renderer encodes on main (bar frames are microseconds), presents async.
