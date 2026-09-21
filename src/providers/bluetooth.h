@@ -43,6 +43,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -146,10 +147,11 @@ public:
 
     // MESSAGE THREAD. Queues a ConfirmOnly pairing attempt for one discovered
     // id and returns immediately — the answer arrives later on
-    // onPairingResult. Returns false if the provider is not armed or another
-    // pairing is already in flight (Windows would answer
-    // OperationAlreadyInProgress anyway).
-    bool pair(const std::string& deviceId);
+    // onPairingResult. nullopt means accepted; otherwise a human-readable
+    // reason ("bluetooth is not available", "pairing already in progress",
+    // "usage: …") so the CLI does not collapse every failure into "no such
+    // device". Self-heals after a worker crash the way startDiscovery does.
+    std::optional<std::string> pair(const std::string& deviceId);
 
     // MESSAGE THREAD. Snapshot BY VALUE of the discovery cache: the caller's
     // read must not race the WinRT threads that mutate it.

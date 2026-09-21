@@ -60,7 +60,12 @@ public:
     void stop();
 
     // Work-area reservation per YTile monitor, physical pixels (top strip).
-    void applyWorkAreaOffset(int barHeightPhysical);
+    // Returns false unless every monitor's reserve was accepted. ytiled never
+    // calls back about a reservation, so this return is the only signal that
+    // the strip is actually held; a caller that latches "already applied" on a
+    // send which silently failed leaves the bar drawing over tiled windows
+    // with nothing left to correct it.
+    bool applyWorkAreaOffset(int barHeightPhysical);
     void clearWorkAreaOffset();
 
     // Forced re-query (spec 11.3 boot-population idiom).

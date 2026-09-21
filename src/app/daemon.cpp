@@ -1988,9 +1988,16 @@ void DaemonState::renderAll() {
                                  ? 0
                                  : static_cast<int>((settings.height + settings.yOffset) * scale + 0.5);
         if (physical != appliedOffsetPhysical) {
-            appliedOffsetPhysical = physical;
+            // Latch only what actually landed. This used to be committed
+            // BEFORE the send, so a reserve that never reached ytiled was
+            // still recorded as applied — and since this guard is the only
+            // thing that re-sends, the strip then stayed lost until something
+            // unrelated happened to reset the latch. Leaving it at -1 on
+            // failure makes the next renderAll() try again.
+            bool applied = true;
             if (komorebi) komorebi->applyWorkAreaOffset(physical);
-            if (ytile) ytile->applyWorkAreaOffset(physical);
+            if (ytile) applied = ytile->applyWorkAreaOffset(physical);
+            appliedOffsetPhysical = applied ? physical : -1;
         }
     }
 }
@@ -2435,7 +2442,10 @@ int runDaemon(const std::string& instance, const std::string& configPath) {
         }
         // pair: fire and forget. The outcome lands on onPairingResult seconds
         // later, so a synchronous reply here could only ever be "accepted".
-        if (!state.bluetooth->pair(argument)) return "[!] no such device: " + argument;
+        // pair() returns a distinct reason when it refuses — "already in
+        // progress", "not available", bad usage — rather than collapsing every
+        // failure into "no such device".
+        if (const auto error = state.bluetooth->pair(argument)) return "[!] " + *error;
         return {};
     };
     state.handler = std::make_unique<ybar::ipc::CommandHandler>(state.store, state.settings,
