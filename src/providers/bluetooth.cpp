@@ -18,6 +18,7 @@
 #include <deque>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -277,7 +278,10 @@ public:
     std::atomic<int32_t> requestedCeremony{0};
     HANDLE stopEvent = nullptr; // manual-reset
     HANDLE wakeEvent = nullptr; // auto-reset; a command was queued
-    bool running = false;       // message thread only
+    // Atomic: the message thread arms/disarms it, and the worker clears it on
+    // crash exit so start()/pair()/startDiscovery() can self-heal without a
+    // data race against a late read on the message thread.
+    std::atomic<bool> running{false};
 
     std::mutex queueMutex;
     std::deque<Request> queue;
@@ -555,7 +559,12 @@ public:
         PairingOutcome outcome;
         outcome.id = id;
         if (stopping) {
-            pairInFlight = false; // never strand the one-at-a-time latch
+            // IPC already accepted the request; the widget waits on
+            // bluetooth_pair. Publish a terminal outcome so it does not hang,
+            // and clear the latch so a later start() can pair again.
+            outcome.status = "cancelled";
+            pairInFlight = false;
+            publishPairing(outcome);
             return;
         }
 
@@ -819,6 +828,21 @@ bool BluetoothProvider::start() {
         } catch (const winrt::hresult_error&) {
             // An exception leaving a thread function is std::terminate.
         }
+        // A WinRT crash (or any exit that did not go through stop()) used to
+        // leave `running` set: start() then returned true forever, discovery
+        // posts were accepted into a dead queue, and a mid-pair crash stranded
+        // pairInFlight. Clear both before dropping workerLive so start() can
+        // respawn and pair()/startDiscovery() stop lying about being armed.
+        // If IPC already accepted a pair, publish a terminal outcome so the
+        // flyout does not hang on bluetooth_pair (stop() cleared the callback
+        // first, so this is a no-op on a clean teardown).
+        if (impl->pairInFlight.exchange(false)) {
+            PairingOutcome outcome;
+            outcome.id = impl->pairId;
+            outcome.status = "unavailable";
+            impl->publishPairing(outcome);
+        }
+        impl->running = false;
         // Drop every reference this thread owns BEFORE tearing the apartment
         // down: releasing the last one runs ~BluetoothProviderImpl, and that
         // must not happen inside an apartment that no longer exists.
@@ -861,7 +885,10 @@ void BluetoothProvider::stop() {
 }
 
 bool BluetoothProvider::startDiscovery() {
-    if (!impl_ || !impl_->running) return false;
+    if (!impl_) return false;
+    // Self-heal after a worker crash: running was cleared on the way out, and
+    // start() is idempotent while a live worker is up.
+    if (!impl_->running && !start()) return false;
     impl_->post(Command::StartDiscovery);
     return true;
 }
@@ -873,14 +900,17 @@ void BluetoothProvider::stopDiscovery() {
 
 bool BluetoothProvider::discovering() const { return impl_ && impl_->scanning; }
 
-bool BluetoothProvider::pair(const std::string& deviceId) {
-    if (!impl_ || !impl_->running || deviceId.empty()) return false;
+std::optional<std::string> BluetoothProvider::pair(const std::string& deviceId) {
+    if (!impl_) return std::string("bluetooth is not available");
+    if (deviceId.empty()) return std::string("usage: --bluetooth pair <id>");
+    if (!impl_->running && !start()) return std::string("bluetooth is not available");
     bool expected = false;
     // One at a time: Windows answers OperationAlreadyInProgress otherwise, and
     // the impl holds exactly one pairing registration.
-    if (!impl_->pairInFlight.compare_exchange_strong(expected, true)) return false;
+    if (!impl_->pairInFlight.compare_exchange_strong(expected, true))
+        return std::string("pairing already in progress");
     impl_->post(Command::Pair, deviceId);
-    return true;
+    return std::nullopt;
 }
 
 std::vector<NearbyDevice> BluetoothProvider::nearby() const {
