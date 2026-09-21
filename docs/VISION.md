@@ -18,7 +18,7 @@
    - *Level 1:* shell/any-language plugin scripts via events + CLI (sketchybar model).
    - *Level 2:* embedded Lua API (SbarLua-style) for rich programmatic configs.
    - *Level 3:* native Swift plugin protocol for custom scene-graph nodes / shaders.
-5. **Good citizen.** Public APIs first; private SkyLight/CGS usage isolated behind a protocol with graceful degradation per macOS release. Low idle CPU (<0.1%), low memory, instant hot-reload.
+5. **Good citizen.** Public APIs only: the engine and every shipped binary link and dlsym-resolve nothing private — no SkyLight/CGS symbols — so a capability that needs one is not built and an OS release cannot break the bar. The single exception in the repo is an opt-in example helper, `examples/sketchybar-port/helpers/menus` (app-menu swap), which links SkyLight, is built only by `make helpers` from a clone, and ships in no install — see [its README](../examples/sketchybar-port/README.md). Low idle CPU (<0.1%), low memory, instant hot-reload.
 
 ## v1 module targets
 
@@ -45,7 +45,7 @@ Item, text run (font fallback, SF Symbols, emoji), image, rounded-rect/squircle 
 - Linux support. Windows was a v1 non-goal too, and no longer is: a native
   Windows 11 port ships as a separate C++ engine on the orphan `windows`
   branch, sharing the command grammar, IPC wire format and Lua API rather than
-  any Swift code.
+  any Swift code (see the README).
 - Replacing menu bar *extras* hosting (NSStatusItem tray). The narrower
   alias/capture of individual extras has since shipped (`--add alias`, via
   ScreenCaptureKit).

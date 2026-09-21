@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Executes parsed command batches against the live object model.
@@ -24,6 +25,30 @@ public final class CommandHandler {
     public var onForcedUpdate: (() -> Void)?
     /// Lua-first item dispatch (wired by the daemon; falls back to shell scripts).
     public var dispatchItem: ((Item, [String: String]) -> Void)?
+    /// `--volume`: the daemon points this at AudioProvider (nil headless, so a
+    /// test can never touch the real output device). Returns false when the
+    /// device refused the write.
+    public var onVolume: ((VolumeRequest) -> Bool)?
+
+    /// What `--volume <token>` asks for. Absolute levels are the Windows port's
+    /// grammar; the signed step form replaces the one thing themes still shelled
+    /// `osascript` for — `set volume output volume ((output volume of (get
+    /// volume settings)) + 4)` — without a read round trip through Lua.
+    public enum VolumeRequest: Equatable {
+        case absolute(Int)
+        case step(Int)
+    }
+
+    /// Pure: `"50"` / `"50.6"` (rounded) → absolute 0...100; `"+4"` / `"-4"` →
+    /// step. Anything else (out of range, non-numeric, empty) is nil.
+    static func parseVolume(_ token: String) -> VolumeRequest? {
+        if let sign = token.first, sign == "+" || sign == "-" {
+            guard let delta = Int(token.dropFirst()) else { return nil }
+            return .step(sign == "-" ? -delta : delta)
+        }
+        guard let level = Double(token), level.isFinite, level >= 0, level <= 100 else { return nil }
+        return .absolute(Int(level.rounded()))
+    }
 
     public init(barManager: BarManager, eventBus: EventBus,
                 scriptRunner: ScriptRunner, scheduler: AnimationScheduler) {
@@ -191,6 +216,7 @@ public final class CommandHandler {
                     emit("[!] no item matching \(name)")
                 }
                 for item in targets {
+                    scheduler.cancel(prefix: "item.\(item.id).")
                     _ = barManager.store.remove(name: item.name)
                 }
                 barManager.setNeedsRender()
@@ -247,6 +273,42 @@ public final class CommandHandler {
                 }
                 onHotloadToggle?(flag)
 
+            case "volume":
+                // ybar extension, mirrored from the Windows port: the daemon
+                // already holds the output device, so a slider drag is one
+                // call instead of an osascript spawn. The port's optional
+                // second token routes to an app's audio session; macOS has
+                // no per-app volume API, so it is refused by name.
+                guard batch.args.count == 1 || batch.args.count == 2 else {
+                    emit("[!] usage: --volume <0-100|+N|-N>")
+                    continue
+                }
+                if batch.args.count == 2 {
+                    emit("[!] per-app volume is not available on macOS")
+                    continue
+                }
+                guard let request = CommandHandler.parseVolume(batch.args[0]) else {
+                    emit("[!] invalid volume: \(batch.args[0])")
+                    continue
+                }
+                guard let onVolume else {
+                    emit("[!] volume control is not available")
+                    continue
+                }
+                if !onVolume(request) {
+                    emit("[!] the output device refused the volume change")
+                }
+
+            case "app":
+                // The permission-free level of app control, paired with
+                // `--query apps`: NSRunningApplication by pid or bundle id,
+                // no window titles, no Accessibility, no Screen Recording.
+                guard batch.args.count == 2 else {
+                    emit("[!] usage: --app <pid|bundle-id> activate|hide|quit|kill")
+                    continue
+                }
+                emit(AppControl.perform(batch.args[1], on: batch.args[0]))
+
             case "exit":
                 onExit?()
 
@@ -296,7 +358,7 @@ public final class CommandHandler {
             return nil
 
         case "slider":
-            guard args.count >= 4, let width = Float(args[3]), width > 0 else {
+            guard args.count >= 4, let width = Float(args[3]), width.isFinite, width > 0 else {
                 return "[!] usage: --add slider <name> <position> <width>"
             }
             guard let item = addItem(name: args[1], positionToken: args[2]) else {
@@ -329,6 +391,43 @@ public final class CommandHandler {
 
         default:
             return "[!] unknown --add type: \(kind) (supported: item, graph, slider, bracket, event)"
+        }
+    }
+
+    /// `--app`: the action is validated before the target is resolved, so a
+    /// typo never reaches an application, and a bundle id may match several
+    /// processes (two copies of one app) — the action goes to each.
+    enum AppControl {
+        static let actions = ["activate", "hide", "quit", "kill"]
+
+        static func perform(_ action: String, on target: String) -> String? {
+            guard actions.contains(action) else {
+                return "[!] unknown --app action: \(action) (activate|hide|quit|kill)"
+            }
+            let apps = resolve(target)
+            guard !apps.isEmpty else { return "[!] no running app matching \(target)" }
+            for app in apps {
+                let sent: Bool
+                switch action {
+                case "activate":
+                    // macOS 14 cooperative activation: the daemon yields
+                    // explicitly instead of relying on the deprecated
+                    // ignoringOtherApps flag, which no longer does anything.
+                    sent = app.activate(from: .current, options: [.activateAllWindows])
+                case "hide": sent = app.hide()
+                case "quit": sent = app.terminate()
+                default: sent = app.forceTerminate()
+                }
+                if !sent { return "[!] could not \(action) \(app.localizedName ?? target)" }
+            }
+            return nil
+        }
+
+        static func resolve(_ target: String) -> [NSRunningApplication] {
+            if let pid = pid_t(target) {
+                return NSRunningApplication(processIdentifier: pid).map { [$0] } ?? []
+            }
+            return NSRunningApplication.runningApplications(withBundleIdentifier: target)
         }
     }
 

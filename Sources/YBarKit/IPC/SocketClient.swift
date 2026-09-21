@@ -148,7 +148,7 @@ public enum CLIClient {
             print(helpText)
             return 0
         case "--version", "-v":
-            print("ybar \(Version.current)")
+            print("ybar \(Version.display)")
             return 0
         case "--config", "-c":
             // `ybar -c <path>` boots the daemon with an explicit config.
@@ -172,33 +172,7 @@ public enum CLIClient {
             argv.removeFirst()
         }
 
-        // AeroSpace hook fast path: `exec-on-workspace-change` exports its
-        // payload as environment variables. Folding them into the trigger here
-        // lets the hook invoke ybar directly — no shell wrapper needed for
-        // `$AEROSPACE_FOCUSED_WORKSPACE` interpolation (one fewer process
-        // spawn on every workspace switch).
-        if argv.first == "--trigger",
-           !argv.contains(where: { $0.hasPrefix("FOCUSED_WORKSPACE=") }),
-           let focused = ProcessInfo.processInfo.environment["AEROSPACE_FOCUSED_WORKSPACE"] {
-            argv.append("FOCUSED_WORKSPACE=\(focused)")
-            if let previous = ProcessInfo.processInfo.environment["AEROSPACE_PREV_WORKSPACE"] {
-                argv.append("PREV_WORKSPACE=\(previous)")
-            }
-        }
-
-        // Same fast path for yabai signals: `yabai -m signal --add ...
-        // action="ybar --trigger yabai_space_change"` exports its payload as
-        // $YABAI_* environment variables — fold every one into the trigger so
-        // signal actions need no shell wrapper for interpolation.
-        if argv.first == "--trigger" {
-            for (key, value) in ProcessInfo.processInfo.environment
-            where key.hasPrefix("YABAI_") {
-                let name = String(key.dropFirst("YABAI_".count))
-                if !argv.contains(where: { $0.hasPrefix("\(name)=") }) {
-                    argv.append("\(name)=\(value)")
-                }
-            }
-        }
+        argv = foldTriggerEnvironment(into: argv, environment: ProcessInfo.processInfo.environment)
 
         let instanceName = Version.instanceName
         let socketPath = WireFormat.socketPath(instanceName: instanceName)
@@ -218,12 +192,46 @@ public enum CLIClient {
         }
     }
 
+    /// Workspace-hook fast path. AeroSpace's `exec-on-workspace-change` and
+    /// yabai's signal actions export their payload as environment variables;
+    /// folding them into a `--trigger` message here lets the hook invoke ybar
+    /// directly, with no shell wrapper for `$AEROSPACE_FOCUSED_WORKSPACE` or
+    /// `$YABAI_*` interpolation (one fewer process spawn per workspace
+    /// switch). Explicit `KEY=value` tokens always win over the environment;
+    /// every other message passes through untouched.
+    static func foldTriggerEnvironment(into argv: [String],
+                                       environment: [String: String]) -> [String] {
+        guard argv.first == "--trigger" else { return argv }
+        var argv = argv
+        func fold(_ name: String, _ value: String) {
+            guard !argv.contains(where: { $0.hasPrefix("\(name)=") }) else { return }
+            argv.append("\(name)=\(value)")
+        }
+        if let focused = environment["AEROSPACE_FOCUSED_WORKSPACE"] {
+            fold("FOCUSED_WORKSPACE", focused)
+        }
+        if let previous = environment["AEROSPACE_PREV_WORKSPACE"] {
+            fold("PREV_WORKSPACE", previous)
+        }
+        // Sorted so the folded tail is deterministic (dictionary order is not).
+        for (key, value) in environment.sorted(by: { $0.key < $1.key })
+        where key.hasPrefix("YABAI_") {
+            fold(String(key.dropFirst("YABAI_".count)), value)
+        }
+        return argv
+    }
+
     static let helpText = """
     ybar — a Metal-rendered, scriptable status bar for macOS.
 
     Usage:
-      ybar                          run the daemon in this terminal
-      ybar -c <path>                run the daemon with an explicit config script
+      ybar                          run the daemon in this terminal; config is discovered:
+                                    selected theme, then ~/.config/ybar/ybarrc.lua,
+                                    ybarrc, ybarrc.jsonc, ybar.jsonc, ~/.ybarrc.lua, ~/.ybarrc
+      ybar -c <path>                run the daemon with an explicit config
+      ybar <domain>...              send commands to the running daemon (below)
+      ybar --help | -h              this text
+      ybar --version | -v           version, plus the build's commit from an app bundle
 
     Process control — these drive YBar.app rather than the bare binary, which is
     what keeps privacy prompts attributed to YBar (docs/INSTALL.md):
@@ -231,28 +239,71 @@ public enum CLIClient {
       ybar stop                     stop the running bar
       ybar restart [-c <path>]      stop it and launch it again
       ybar status                   bar, config and autostart state
-      ybar autostart enable         start the bar at every login (a launchd agent)
-      ybar autostart disable        stop starting it at login
-      ybar autostart status         where the login job is and what it runs
 
-    Messages to a running daemon:
+    Local verbs (no daemon needed):
+      ybar theme list|current|use <name>|reset|install <git-url>
+                                    select a theme; a running bar reloads in place,
+                                    otherwise YBar.app is started with it
+      ybar autostart enable [-c <config>]|disable|status
+                                    manage the com.ybar.YBar LaunchAgent (KeepAlive,
+                                    config discovered at each start unless pinned)
+
+    Daemon verbs (sketchybar's grammar; several --domains batch in one message):
+      --bar <prop>=<val>...                 --default <prop>=<val>... | reset
+      --add item <name> <position>          --add event <name> [notification]
+      --add graph|slider <name> <position> <width>
+      --add bracket <name> <member>...      --add alias "Owner[,Window]" <position>
+      --set <name> <prop>=<val>...          --remove <name>
+      --subscribe <name> <event>...         --trigger <event> [KEY=VAL...]
+      --animate <curve> <frames>            --update
+      --push <graph> <value>...             --query bar|defaults|events|displays|apps|<item>
+      --move <name> before|after <anchor>   --reorder <name>...
+      --rename <old> <new>                  --clone <new> <source> [before|after]
+      --reload [path]                       --hotload on|off
+      --volume <0-100|+N|-N>                --app <pid|bundle-id> activate|hide|quit|kill
+      --ping                                --exit
+      (<name> in --set and --remove may be a /regex/ matching several items)
+
+    Examples:
       ybar --bar height=32 color=0xcc1e1e2e
       ybar --add item clock right
       ybar --set clock label="12:00" icon=sf:clock label.color=0xffffffff
       ybar --subscribe clock system_woke
       ybar --animate tanh 30 --set clock label.color=0xffff0000
       ybar --query bar
+      ybar --volume 40                (or +4 / -4 to step the output volume)
+      ybar --query apps               running apps: name, bundle_id, pid, active, hidden
+      ybar --app com.apple.Safari activate      (or hide | quit | kill; a pid works too)
 
     Process-control exit codes: 0 success, 1 the operation failed, 2 the
     invocation was wrong. A rejected message is an [!] reply and exits 1.
     `ybar --ping` is the scriptable liveness probe.
 
-    See docs/ARCHITECTURE.md for the full command grammar.
+    Property keys, events and the Lua API: docs/EXTENDING.md. Install, config and
+    themes: README.md. The engine design and the full grammar: docs/ARCHITECTURE.md.
     """
 }
 
 public enum Version {
     public static let current = "0.1.0"
+    /// The enclosing bundle's CFBundleVersion: the short commit hash that
+    /// `make app`, `make release` and a `--HEAD` formula install stamp at
+    /// assembly time, or the release build number the committed plist
+    /// carries. Nil for a bare executable (`make run`, the test host).
+    public static var build: String? {
+        guard let value = Bundle.main.infoDictionary?["CFBundleVersion"] as? String,
+              !value.isEmpty else { return nil }
+        return value
+    }
+    /// What `--version` prints after "ybar ".
+    public static var display: String { display(current: current, build: build) }
+
+    /// `0.1.0 (a1b2c3d)` from a bundle, the bare `0.1.0` otherwise, so a bug
+    /// report from a dev build names its commit (SECURITY.md asks for either).
+    static func display(current: String, build: String?) -> String {
+        guard let build else { return current }
+        return "\(current) (\(build))"
+    }
     /// Instance name is the binary basename: renaming the binary yields an
     /// independent bar instance with its own socket and config (sketchybar behavior).
     public static var instanceName: String {

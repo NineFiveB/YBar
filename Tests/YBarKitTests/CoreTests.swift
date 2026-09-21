@@ -101,6 +101,24 @@ import Testing
     }
 }
 
+// MARK: - Scheduler
+
+@MainActor
+@Suite struct AnimationCancelPrefixTests {
+    @Test func cancelPrefixDropsOnlyThatNamespace() {
+        let scheduler = AnimationScheduler()
+        for key in ["item.1.width", "item.1.icon.color", "item.12.width"] {
+            scheduler.animate(key: key, from: .float(0), to: .float(1),
+                              durationFrames: 60, curve: .linear) { _ in }
+        }
+        scheduler.cancel(prefix: "item.1.")
+        // The trailing dot keeps item 12 out of item 1's namespace.
+        #expect(scheduler.isAnimating)
+        scheduler.cancel(prefix: "item.12.")
+        #expect(!scheduler.isAnimating)
+    }
+}
+
 // MARK: - Fonts & positions
 
 @Suite struct StyleParsingTests {
@@ -117,11 +135,314 @@ import Testing
         #expect(font.size == 14.0)
     }
 
+    @Test func fontSpecKeepsSizeOnUnusableValues() {
+        var font = FontSpec()
+        font.apply("Hack:Bold:14")
+        for spec in ["Hack:Bold:inf", "Hack:Bold:nan", "Hack:Bold:0", "Hack:Bold:-3"] {
+            font.apply(spec)
+            #expect(font.size == 14, "\(spec)")
+        }
+        #expect(font.family == "Hack")
+    }
+
     @Test func positionParsing() {
         #expect(ItemPosition.parse("left") == .left)
         #expect(ItemPosition.parse("q") == .centerLeft)
         #expect(ItemPosition.parse("center_right") == .centerRight)
         #expect(ItemPosition.parse("bogus") == nil)
+    }
+}
+
+// MARK: - Script PATH
+
+@Suite struct ScriptPATHTests {
+    @Test func selfDirectoryLeadsAnInheritedPATH() {
+        let selfDir = "/Applications/YBar.app/Contents/MacOS"
+        // A LaunchAgent PATH that lists a bin dir holding another `ybar`.
+        let path = ScriptRunner.augmentedPATH("/opt/homebrew/bin:/usr/bin:/bin", selfDir: selfDir)
+        #expect(path == "\(selfDir):/opt/homebrew/bin:/usr/bin:/bin:/usr/local/bin")
+    }
+
+    @Test func inheritedPATHAlreadyListingSelfIsUntouched() {
+        let selfDir = "/opt/homebrew/opt/ybar/YBar.app/Contents/MacOS"
+        let path = ScriptRunner.augmentedPATH("/usr/bin:\(selfDir):/bin", selfDir: selfDir)
+        #expect(path == "/usr/bin:\(selfDir):/bin:/opt/homebrew/bin:/usr/local/bin")
+    }
+
+    @Test func missingPATHGetsTheLaunchdDefault() {
+        let path = ScriptRunner.augmentedPATH(nil, selfDir: "/x")
+        #expect(path == "/x:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin")
+    }
+}
+
+// MARK: - Script watchdog
+
+@Suite struct ScriptWatchdogTests {
+    /// The shell writes `$$` (its pid, and as group leader its pgid) here so
+    /// the test can ask the kernel whether anything in the group is left.
+    private func launch(_ runner: ScriptRunner, _ script: String) throws -> pid_t {
+        let marker = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ybar-pgid-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: marker) }
+        runner.run(script: "echo $$ > '\(marker.path)'; " + script, environment: [:])
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            if let text = try? String(contentsOf: marker, encoding: .utf8),
+               let pgid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return pgid
+            }
+            usleep(20_000)
+        }
+        throw CocoaError(.fileNoSuchFile)
+    }
+
+    private func groupIsGone(_ pgid: pid_t, within seconds: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if killpg(pgid, 0) != 0, errno == ESRCH { return true }
+            usleep(50_000)
+        }
+        return false
+    }
+
+    @Test func watchdogReapsBackgroundedHelpers() throws {
+        let runner = ScriptRunner()
+        runner.timeout = 0.3
+        let pgid = try launch(runner, "sleep 300 & sleep 300")
+        #expect(killpg(pgid, 0) == 0)
+        #expect(groupIsGone(pgid, within: 5))
+    }
+
+    @Test func watchdogEscalatesToKillWhenTermIsIgnored() throws {
+        let runner = ScriptRunner()
+        runner.timeout = 0.3
+        runner.killGrace = 0.3
+        // The ignored disposition is inherited, so the whole group shrugs off
+        // SIGTERM; only the escalation can end it.
+        let pgid = try launch(runner, "trap '' TERM; sleep 300 & sleep 300")
+        #expect(killpg(pgid, 0) == 0)
+        #expect(groupIsGone(pgid, within: 5))
+    }
+}
+
+// MARK: - Config discovery
+
+@Suite struct ConfigLocatorTests {
+    private func scratchHome() throws -> URL {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ybar-config-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: home.appendingPathComponent(".config/ybar"), withIntermediateDirectories: true)
+        return home
+    }
+
+    @Test func everyEntryPointIsDiscoveredInPriorityOrder() throws {
+        let home = try scratchHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let directory = home.appendingPathComponent(".config/ybar")
+        // Lowest priority first: each new file must win over the ones before it.
+        for name in ["ybar.jsonc", "ybarrc.jsonc", "ybarrc", "ybarrc.lua"] {
+            FileManager.default.createFile(atPath: directory.appendingPathComponent(name).path, contents: nil)
+            let found = ConfigLocator.locate(
+                explicitPath: nil, instanceName: "ybar", environment: [:], home: home)
+            #expect(found?.lastPathComponent == name, "\(name)")
+        }
+    }
+
+    @Test func xdgDirectoryWinsOverHome() throws {
+        let home = try scratchHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let xdg = home.appendingPathComponent("xdg")
+        try FileManager.default.createDirectory(
+            at: xdg.appendingPathComponent("ybar"), withIntermediateDirectories: true)
+        FileManager.default.createFile(
+            atPath: home.appendingPathComponent(".config/ybar/ybarrc.lua").path, contents: nil)
+        FileManager.default.createFile(
+            atPath: xdg.appendingPathComponent("ybar/ybar.jsonc").path, contents: nil)
+        let found = ConfigLocator.locate(
+            explicitPath: nil, instanceName: "ybar",
+            environment: ["XDG_CONFIG_HOME": xdg.path], home: home)
+        #expect(found?.path == xdg.appendingPathComponent("ybar/ybar.jsonc").path)
+    }
+
+    /// `ybar theme use` records a NAME in ~/.config/ybar/current-theme. For the
+    /// default instance it beats the ordinary search; an explicit -c still
+    /// wins; a stale name (theme deleted) falls back; and a renamed instance
+    /// is never hijacked by it — the port's config.cpp rules.
+    @Test func currentThemeWinsForTheDefaultInstanceOnly() throws {
+        let home = try scratchHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let config = home.appendingPathComponent(".config/ybar")
+        FileManager.default.createFile(atPath: config.appendingPathComponent("ybarrc.lua").path, contents: nil)
+        let theme = config.appendingPathComponent("themes/glass")
+        try FileManager.default.createDirectory(at: theme, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: theme.appendingPathComponent("ybar.jsonc").path, contents: nil)
+        try "glass\n".write(to: config.appendingPathComponent("current-theme"), atomically: true, encoding: .utf8)
+        let other = home.appendingPathComponent(".config/other")
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: other.appendingPathComponent("otherrc.lua").path, contents: nil)
+
+        func locate(_ instance: String, explicit: String? = nil) -> URL? {
+            ConfigLocator.locate(explicitPath: explicit, instanceName: instance,
+                                 environment: [:], home: home, executable: nil)
+        }
+        #expect(locate("ybar")?.path == theme.appendingPathComponent("ybar.jsonc").path)
+        #expect(locate("other")?.lastPathComponent == "otherrc.lua")
+        #expect(locate("ybar", explicit: config.appendingPathComponent("ybarrc.lua").path)?
+            .lastPathComponent == "ybarrc.lua")
+        try "gone\n".write(to: config.appendingPathComponent("current-theme"), atomically: true, encoding: .utf8)
+        #expect(locate("ybar")?.lastPathComponent == "ybarrc.lua")
+    }
+
+    /// The theme wins, but the user's own rc must not vanish silently: a
+    /// `current-theme` left behind by the pre-1.0 `ybar-theme` script (which
+    /// wrote it unconditionally while nothing read it) can outrank a config
+    /// written long afterwards, so `resolve` reports what was shadowed and the
+    /// daemon prints it.
+    @Test func resolveReportsTheConfigAThemeShadows() throws {
+        let home = try scratchHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let config = home.appendingPathComponent(".config/ybar")
+        let theme = config.appendingPathComponent("themes/glass")
+        try FileManager.default.createDirectory(at: theme, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: theme.appendingPathComponent("ybar.jsonc").path, contents: nil)
+        try "glass\n".write(to: config.appendingPathComponent("current-theme"), atomically: true, encoding: .utf8)
+
+        func resolve(explicit: String? = nil) -> ConfigLocator.Resolution? {
+            ConfigLocator.resolve(explicitPath: explicit, instanceName: "ybar",
+                                  environment: [:], home: home, executable: nil)
+        }
+        // No user config yet: the theme loads and shadows nothing.
+        #expect(resolve()?.theme == "glass")
+        #expect(resolve()?.shadowed == nil)
+        // The user writes their own rc afterwards — still the theme, now with
+        // the file it displaced named.
+        let rc = config.appendingPathComponent("ybarrc.lua")
+        FileManager.default.createFile(atPath: rc.path, contents: nil)
+        #expect(resolve()?.url.lastPathComponent == "ybar.jsonc")
+        #expect(resolve()?.shadowed?.path == rc.path)
+        // -c and `theme reset` both take the report away with the override.
+        #expect(resolve(explicit: rc.path)?.shadowed == nil)
+        #expect(resolve(explicit: rc.path)?.theme == nil)
+        try FileManager.default.removeItem(at: config.appendingPathComponent("current-theme"))
+        #expect(resolve()?.url.path == rc.path)
+        #expect(resolve()?.theme == nil)
+    }
+}
+
+// MARK: - Local verbs
+
+@Suite struct LocalVerbsTests {
+    @Test func launchAgentPlistOmitsConfigUnlessPinned() throws {
+        let binary = "/Users/me/Applications/YBar.app/Contents/MacOS/ybar"
+        let discovered = LaunchAgent.plist(binary: binary, configPath: nil)
+        #expect(discovered["Label"] as? String == "com.ybar.YBar")
+        #expect(discovered["ProgramArguments"] as? [String] == [binary])
+        #expect(discovered["RunAtLoad"] as? Bool == true)
+        #expect((discovered["KeepAlive"] as? [String: Bool])?["SuccessfulExit"] == false)
+        let pinned = LaunchAgent.plist(binary: binary, configPath: "/Users/me/.config/ybar/ybarrc.lua")
+        #expect(pinned["ProgramArguments"] as? [String] == [binary, "-c", "/Users/me/.config/ybar/ybarrc.lua"])
+        // launchd reads XML plists; the round trip must preserve the shape.
+        let back = try PropertyListSerialization.propertyList(
+            from: LaunchAgent.plistData(pinned), format: nil) as? [String: Any]
+        #expect(back?["ProgramArguments"] as? [String] == pinned["ProgramArguments"] as? [String])
+        #expect((back?["KeepAlive"] as? [String: Bool])?["SuccessfulExit"] == false)
+    }
+
+    @Test func bundleDetectionAndHomebrewOptPath() {
+        #expect(AppBundle.bundleURL(containing: URL(
+            fileURLWithPath: "/Users/me/Applications/YBar.app/Contents/MacOS/ybar"))?.path
+            == "/Users/me/Applications/YBar.app")
+        #expect(AppBundle.bundleURL(containing: URL(
+            fileURLWithPath: "/Users/me/.cache/ybar-build/debug/ybar")) == nil)
+        #expect(AppBundle.homebrewOptPath(
+            for: "/opt/homebrew/Cellar/ybar/0.1.0/YBar.app/Contents/MacOS/ybar")
+            == "/opt/homebrew/opt/ybar/YBar.app/Contents/MacOS/ybar")
+        #expect(AppBundle.homebrewOptPath(for: "/Users/me/Applications/YBar.app/Contents/MacOS/ybar") == nil)
+    }
+
+    @Test func themeCatalogFirstRootWinsAndStaleSelectionIsNil() throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ybar-themes-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let shipped = home.appendingPathComponent("shipped")
+        let user = home.appendingPathComponent(".config/ybar/themes")
+        for (root, name, entry) in [
+            (shipped, "a", "ybarrc.lua"), (user, "a", "ybar.jsonc"),
+            (user, "b", "ybarrc.jsonc"), (user, "c", "README.md"),
+        ] {
+            let directory = root.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: directory.appendingPathComponent(entry).path, contents: nil)
+        }
+        let roots = ThemeCatalog.roots(home: home, executable: nil, environment: ["YBAR_THEME_ROOTS": shipped.path])
+        let themes = ThemeCatalog.collect(roots: roots)
+        #expect(themes.map(\.name) == ["a", "b"])
+        #expect(themes.first?.entry.path == shipped.appendingPathComponent("a/ybarrc.lua").path)
+
+        try "b\n".write(to: ThemeCatalog.stateFile(home: home), atomically: true, encoding: .utf8)
+        #expect(ThemeCatalog.currentEntry(home: home, roots: roots)?.path
+            == user.appendingPathComponent("b/ybarrc.jsonc").path)
+        try "zzz\n".write(to: ThemeCatalog.stateFile(home: home), atomically: true, encoding: .utf8)
+        #expect(ThemeCatalog.currentEntry(home: home, roots: roots) == nil)
+    }
+
+    /// Only `theme` and `autostart` are local; everything else must fall
+    /// through to the socket client untouched.
+    @Test func onlyThemeAndAutostartAreLocal() {
+        #expect(LocalVerbs.run(arguments: [], instanceName: "ybar") == nil)
+        #expect(LocalVerbs.run(arguments: ["--query", "bar"], instanceName: "ybar") == nil)
+        #expect(LocalVerbs.run(arguments: ["--theme"], instanceName: "ybar") == nil)
+        // Bad sub-verbs are usage errors, and touch nothing.
+        #expect(LocalVerbs.run(arguments: ["theme", "bogus"], instanceName: "ybar") == 1)
+        #expect(LocalVerbs.run(arguments: ["theme", "use"], instanceName: "ybar") == 1)
+        #expect(LocalVerbs.run(arguments: ["autostart", "bogus"], instanceName: "ybar") == 1)
+        #expect(LocalVerbs.run(arguments: ["autostart", "enable", "extra"], instanceName: "ybar") == 1)
+    }
+}
+
+// MARK: - Boolean leaves
+
+@MainActor
+@Suite struct BooleanToggleTests {
+    /// Every boolean leaf in the item namespace.
+    private static let leaves = [
+        "drawing", "scroll_texts",
+        "icon.drawing", "icon.highlight", "label.drawing", "label.highlight",
+        "icon.shadow", "icon.shadow.drawing", "label.background.drawing",
+        "background.drawing", "background.glass", "background.image.drawing",
+        "background.shadow.drawing", "image.drawing", "slider.knob.drawing",
+        "popup.drawing", "popup.horizontal", "popup.auto_close", "popup.background.glass",
+    ]
+
+    @Test func toggleFlipsEveryBooleanLeaf() {
+        let item = Item(name: "t", position: .left)
+        item.slider = SliderState(width: 10)
+        let ctx = PropertyContext(scheduler: AnimationScheduler(), invalidate: {})
+        // The leaves that used to reject the word outright, read back directly.
+        let read: [String: () -> Bool] = [
+            "scroll_texts": { item.scrollTexts },
+            "background.glass": { item.background.glass },
+            "background.image.drawing": { item.background.imageDrawing },
+            "image.drawing": { item.image?.drawing ?? false },
+            "slider.knob.drawing": { item.slider?.knob.drawing ?? false },
+            "popup.drawing": { item.popup.isOpen },
+            "popup.horizontal": { item.popup.horizontal },
+            "popup.auto_close": { item.popup.autoClose },
+            "popup.background.glass": { item.popup.background.glass },
+        ]
+        for leaf in Self.leaves {
+            func set(_ value: String) -> String? {
+                PropertySetter.set(item: item, property: leaf, value: value, context: ctx)
+            }
+            #expect(set("off") == nil, "\(leaf)=off")
+            #expect(set("toggle") == nil, "\(leaf)=toggle")
+            if let read = read[leaf] { #expect(read(), "\(leaf) after toggle") }
+            // Case-insensitive like every other boolean spelling.
+            #expect(set("TOGGLE") == nil, "\(leaf)=TOGGLE")
+            if let read = read[leaf] { #expect(!read(), "\(leaf) after TOGGLE") }
+            #expect(set("maybe") != nil, "\(leaf)=maybe")
+        }
     }
 }
 

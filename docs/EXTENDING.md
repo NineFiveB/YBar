@@ -10,9 +10,7 @@ are live objects driven over IPC, addressed by name, with a stable property
 namespace and event model. Anything you can express in a shell script you can
 express in Lua (in-process) or over the CLI — see [Config](../README.md#config)
 for the three surfaces. The same contract holds on the [Windows
-port](WINDOWS-PORT.md), with a short list of deliberate divergences beyond the
-OS-facing providers and glyph fonts: no `alias` items, a `tray` widget and a
-`--volume` verb instead, and a few extra property keys.
+port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
 
 ## Rendering & layout
 
@@ -22,18 +20,16 @@ OS-facing providers and glyph fonts: no `alias` items, a `tray` widget and a
 - `fullscreen_show=on` keeps the bar visible over **native-fullscreen Spaces** —
   auto-raises above the fullscreen window, restores on regular Spaces (public
   APIs; no SkyLight needed)
+- `fullscreen_hide=on` (opt-in) keeps the bar, popups and tooltips **off**
+  native-fullscreen Spaces entirely — the WindowServer hides them there, no
+  polling; wins over `fullscreen_show`, and without it `topmost=on` still draws
+  over fullscreen; `--query bar` reports both flags
 - SDF rounded rects (per-corner radii, borders, gradients, shadows), glyph atlas
   with font fallback, color emoji, tinted SF Symbols (`icon=sf:wifi`), ink-precise
   text metrics matching sketchybar's pixel behavior
-- **Material backdrops** — `background.glass` on an item, `popup.background.glass`
-  on a panel: a real system material composed *under* it, tinted by that
-  background's own translucent fill, with a lit rim built from the SDF surface
-  normal on top. `NSGlassEffectView` Liquid Glass on macOS 26+ (an in-shader
-  approximation below it); a Mica blurred-wallpaper visual on Windows 11.
-  `background.blur_radius` asks for the same material by radius. Bar-level
-  `glass` is a different thing — the whole strip's backdrop
-  (`NSGlassEffectView` on macOS 26+, `NSVisualEffectView` before that; DWM
-  Acrylic on Windows)
+- `background.shadow.blur` (points, animatable) softens a plate's shadow into a
+  falloff; a light shadow colour at distance 0 with a blur is a glow (brackets
+  and slider tracks included)
 - Five-cursor item layout (`left right center q e`, notch-aware), fixed widths
   with align slack and clipping, `--default` prototypes
 - Per-setup notch handling: the `q`/`e` dead zone exists only on physically
@@ -44,18 +40,28 @@ OS-facing providers and glyph fonts: no `alias` items, a `tray` widget and a
 ## Components
 
 - Brackets, anchored popups (auto-close, alignment), graphs, draggable sliders —
-  interactive on the bar and inside popups (click + drag deliver `PERCENTAGE`)
+  interactive on the bar and inside popups (click + drag deliver `PERCENTAGE`);
+  `slider.interactive=off` makes a slider a read-only fill meter (a press is an
+  ordinary click; sets still apply)
 - **Alias items** — live ScreenCaptureKit captures of other apps' menu bar items
-  (`--add alias "App[,Window]"`)
+  (`--add alias "App[,Window]"`, Screen Recording); a click on an alias with no
+  script or Lua handler is forwarded to the captured item (Accessibility —
+  macOS may prompt on the first click)
 - **Marquee text** (`scroll_texts`), **hover tooltips**, `background.image` +
   `background.clip` cutouts, **idle inhibitor**
 - **Arc gauges** — speedometer-style rings with the label centered in the dial
   (`gauge.*`)
 - **Images** — `image.string` renders real app icons (`app.<Name>`), SF symbols
   by name (`sf.<symbol>`, immune to PUA codepoint drift), or image files, through
-  the atlas color page
+  the atlas color page; `image.desaturate=on` greys one out in the shader and
+  `image.y_offset` (animatable) nudges it vertically
 - **Popup flow layout** — `popup.wrap_width` wraps members into grids (calendar
   month grids, tile dashboards); blank rows collapse into slim separators
+- **Popup fades** — `popup.fade_in` / `popup.fade_out` (frames at 60 Hz, 0 = hard
+  cut) ramp the panel's opacity on the window server on open and close: a
+  closing panel ignores the mouse, a reopen mid-fade restarts the ramp from 0,
+  tooltips keep the hard cut; inherited through `--default popup.*` and
+  reported by `--query`; same keys as the Windows port
 
 ## Scripting & events
 
@@ -65,41 +71,55 @@ OS-facing providers and glyph fonts: no `alias` items, a `tray` widget and a
 - Message-scoped `--animate <curve> <frames>` (`linear sin quadratic tanh exp
   circ bounce overshoot`), per-channel color lerp in linear space, `width=dynamic`
   sentinel animation
-- Events: mouse enter/exit/click/scroll (+ global enter/exit),
-  `front_app_switched`, `space_change`, `display_change`, wake/sleep,
-  `power_source_change`, `battery_change`, `volume_change`, `wifi_change`,
-  `system_stats`, **`modifier_change`** (live ⌥-held UX),
+- Events: mouse enter/exit/click/scroll (+ global exit), `front_app_switched`,
+  `space_change`, wake/sleep, `power_source_change`, `volume_change`,
+  `wifi_change`, `system_stats`, **`modifier_change`** (live ⌥-held UX),
   **`app_launched` / `app_terminated`**, **`media_change`** (Music/Spotify
   now-playing via distributed notifications — no private MediaRemote; state seeded
-  at startup, from a running player over Apple Events, so a bar launched
-  mid-song shows it immediately once Automation is granted)
+  at startup so a bar launched mid-song shows it immediately)
 - Native providers: NSWorkspace, IOKit battery, CoreAudio volume, NWPathMonitor,
   in-process CPU/memory stats
+- Output volume write path: `ybar --volume <0-100|+N|-N>` / `ybar.volume(pct)`
+  (in-process CoreAudio; 0 mutes keeping the level, `"+4"`/`"-4"` step from the
+  level the device holds — muted included, so a scroll up resumes where it was
+  muted — no more `osascript` per slider tick); in Lua a number is
+  absolute and a signed string relative, and the call returns nil or a `[!]`
+  string. A number is *always* absolute: `ybar.volume(current - 10)` saturates
+  into 0-100 (so an undershoot mutes) and never becomes a step — only the
+  string form `"-10"` steps
+- Running apps, permission-free: `ybar --query apps` → `[{name, bundle_id, pid,
+  active, hidden}]` (also `ybar.query_table("apps")` as a Lua table; `apps` is a
+  reserved query target like `bar`/`displays`, so it shadows an item of that
+  name when you query BY NAME — an item handle's `handle:query()` always
+  describes its own item, and `ybar.query_table(name, true)` asks for the item
+  explicitly) and `ybar --app <pid|bundle-id>
+  activate|hide|quit|kill` — no window titles, so no Screen Recording grant
 - AeroSpace integration: the workspace-change hook can invoke `ybar --trigger`
   directly (the CLI folds `$AEROSPACE_FOCUSED_WORKSPACE` from its environment),
   with debounced, generation-guarded refreshes for rapid switching
 
 On Windows the event and provider set maps one-to-one to native equivalents
-(WASAPI for audio, GSMTC for media, `wlanapi` plus connectivity-hint
-notifications for network, komorebi/YTile for workspaces) — see
-[WINDOWS-PORT.md](WINDOWS-PORT.md). That port adds two trampolines with no
-macOS counterpart: a notification-area `tray` widget and a `volume` bridge.
+(WASAPI, GSMTC, `netsh`/WinRT, komorebi/YTile for workspaces) — see
+[WINDOWS-PORT.md](WINDOWS-PORT.md).
 
 ## Packaging & privacy
 
 - `make app` builds a minimal **app bundle** so the daemon owns its TCC identity —
   Bluetooth, Calendar, and Apple Events prompts attribute to YBar instead of your
   terminal, and grants cover every helper the daemon spawns
-- `ybar start|stop|restart|status` drive that bundle from the command line, and
-  `ybar autostart enable` installs a launchd agent that starts the bar at login
-  and brings it back after a crash
+- `ybar start|stop|restart|status` drive that bundle from the command line
+  (exit codes 0/1/2), and `ybar autostart enable [-c <config>]|disable|status`
+  writes and bootstraps the `com.ybar.YBar` LaunchAgent (bundle binary,
+  KeepAlive on crash only, config discovered at each start unless pinned)
+- Themes ship as selectable presets: `ybar theme list|current|use <name>|reset|
+  install <git-url>` (a running bar reloads in place; the choice is honoured by
+  config discovery on every start) — see [THEMES.md](THEMES.md)
 
 ## Where to start
 
 - Read a real config end to end: [`examples/`](../examples) — the flagship
   `sketchybar-glass` theme, a `yabai-skhd` setup, and a declarative
   `jsonc-demo`.
-- Themes ship as selectable presets: `scripts/ybar-theme list|use <name>|install
-  <git-url>` — see [THEMES.md](THEMES.md) to publish your own.
+- Themes: [THEMES.md](THEMES.md) to publish your own.
 - The engine internals (how items, layout, and rendering fit together) are in
   [ARCHITECTURE.md](ARCHITECTURE.md).

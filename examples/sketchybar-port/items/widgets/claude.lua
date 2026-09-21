@@ -29,9 +29,11 @@ local claude = sbar.add("item", "widgets.claude", {
   padding_right = 2,
 })
 
-sbar.add("bracket", "widgets.claude.bracket", { claude.name }, {
+local claude_bracket = sbar.add("bracket", "widgets.claude.bracket", { claude.name }, {
   background = { color = colors.bg1 },
 })
+
+require("helpers.hover").pill(claude_bracket, claude)
 
 local claude_padding = sbar.add("item", "widgets.claude.padding", {
   position = "right",

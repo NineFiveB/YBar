@@ -112,10 +112,8 @@ public final class BarSurface {
         panel.setFrame(frame, display: true)
         panel.level = elevated ? .statusBar : settings.level.windowLevel
         panel.hasShadow = settings.shadow
-        // sticky=off pins the bar to the space it was created on.
-        panel.collectionBehavior = settings.sticky
-            ? [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
-            : [.moveToActiveSpace, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        panel.collectionBehavior = BarSurface.collectionBehavior(
+            sticky: settings.sticky, policy: settings.fullscreenPolicy)
         #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
             effectView.isHidden = settings.blurRadius <= 0
@@ -155,6 +153,21 @@ public final class BarSurface {
     public func close() {
         panel.orderOut(nil)
         panel.close()
+    }
+
+    /// Collection behavior for a bar or popup panel. sticky=off pins the bar
+    /// to the space it was created on. The hide policy leaves out
+    /// fullScreenAuxiliary, the flag that carries a panel onto fullscreen
+    /// Spaces: without it the WindowServer keeps the panel off them by
+    /// itself — no polling, no private API — and shows it again on the way
+    /// out. Every other policy keeps the flag, so the raise-only default is
+    /// untouched.
+    static func collectionBehavior(sticky: Bool, policy: FullscreenPolicy) -> NSWindow.CollectionBehavior {
+        var behavior: NSWindow.CollectionBehavior = sticky
+            ? [.canJoinAllSpaces, .stationary, .ignoresCycle]
+            : [.moveToActiveSpace, .stationary, .ignoresCycle]
+        if policy != .hide { behavior.insert(.fullScreenAuxiliary) }
+        return behavior
     }
 
     /// Raise to status level (over a fullscreen window) or restore the

@@ -67,6 +67,8 @@ local media_bracket = sbar.add("bracket", "widgets.media.bracket", { media.name 
   popup = { align = "center", wrap_width = popup_width, auto_close = false },
 })
 
+require("helpers.hover").pill(media_bracket, media)
+
 local popup_pos = "popup." .. media_bracket.name
 
 local media_padding = sbar.add("item", "widgets.media.padding", {
@@ -135,9 +137,7 @@ local subtitle_row = sbar.add("item", "widgets.media.subtitle", {
 })
 
 -- 4. Progress: elapsed | track | total. The time labels ride the slider item
---    itself (icon leads the track, label trails it). The icon keeps its
---    natural width — the engine's slider hit-test assumes padding + measured
---    ink for a leading icon, so a fixed icon width would skew seek clicks.
+--    itself (icon leads the track, label trails it).
 local seek_track_w = 200
 local seek = sbar.add("slider", "widgets.media.seek", seek_track_w, {
   position = popup_pos,
@@ -607,10 +607,17 @@ media:subscribe("media_change", function(env)
   -- Pill: unchanged from the pre-popup widget.
   local text = (artist ~= "" and (artist .. " — ") or "") .. title
   local color = playing and colors.white or colors.grey
+  -- Marquee pace: the engine scrolls ONE cycle (ink + 24pt) per
+  -- scroll_duration/60 s, so a fixed duration makes long titles whip past
+  -- faster than short ones. Scale the duration with the text length instead,
+  -- for a constant ~45pt/s reading pace at any title length (utf8.len so
+  -- multi-byte chars like the em dash don't inflate the estimate).
+  local chars = utf8.len(text) or #text
+  local scroll_frames = math.max(240, math.floor(chars * 7.7 + 32))
   media:set({
     drawing = show,
     icon = { color = color },
-    label = { string = text, color = color },
+    label = { string = text, color = color, scroll_duration = scroll_frames },
   })
   media_padding:set({ drawing = show })
 
@@ -657,23 +664,6 @@ media:subscribe("media_change", function(env)
   end
 
   play_btn:set({ icon = { string = playing and glyph_pause or glyph_play } })
-end)
-
--- Music/Spotify post no final playback notification when they QUIT — only
--- on playback changes — so without this the pill and popup would linger
--- showing the dead app's last track until the next media_change. INFO is
--- the terminated app's localizedName; on a non-English macOS Music's
--- display name is localized and won't match, which degrades to exactly the
--- old lingering behavior, never a false positive... unless the localized
--- name happens to equal the other player's, which cannot happen for the
--- two whitelisted apps.
-media:subscribe("app_terminated", function(env)
-  if current_app and env.INFO == current_app then
-    current_app, current_key, current_art_path = nil, nil, nil
-    media:set({ drawing = false })
-    media_padding:set({ drawing = false })
-    hide_popup()
-  end
 end)
 
 media:subscribe("mouse.clicked", toggle_popup)
@@ -764,6 +754,8 @@ repeat_btn:subscribe("mouse.clicked", function()
   sbar.exec(app_cmd(app, body))
   sbar.delay(0.3, status_once)
 end)
+
+require("helpers.hover").row(source_row)
 
 source_row:subscribe("mouse.clicked", function()
   local app = current_app

@@ -1,35 +1,261 @@
 import AppKit
 import Foundation
 
-// The process-control half of the CLI: verbs that manage the ybar process
-// itself instead of talking to a running daemon. They are bare words, not
-// `--`-prefixed domains, so they can never collide with the sketchybar message
-// grammar. Of the five, only `autostart` is verbatim a verb the Windows port
-// already answers to (`src/app/local_verbs.cpp`); `start`/`stop`/`restart`/
-// `status` are new here, and are recorded as parity debt in
-// docs/WINDOWS-PORT.md.
-//
-// Exit codes: 0 success, including every idempotent no-op ("already running",
-// "already disabled"); 1 the operation failed; 2 the invocation was wrong.
-// `scripts/ybar-theme` already used that split; the Swift binary adopts it here.
+// MARK: - Themes
+
+/// Where themes live and which one is selected. A theme is any directory
+/// carrying an entry-point file; the selection is the theme NAME in
+/// `~/.config/ybar/current-theme` (the same file the shell script wrote, so
+/// an existing selection carries over), resolved against the roots at every
+/// start. ConfigLocator honours it for the default instance.
+public enum ThemeCatalog {
+    /// The port's order (spec 12).
+    public static let entryNames = ["ybarrc.lua", "ybar.jsonc", "ybarrc.jsonc"]
+
+    public static func entry(in directory: URL) -> URL? {
+        for name in entryNames {
+            let candidate = directory.appendingPathComponent(name)
+            if FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+        }
+        return nil
+    }
+
+    /// Search roots, in priority order: `$YBAR_THEME_ROOTS` (colon-separated;
+    /// the compatibility shim points it at a checkout's examples/), the
+    /// shipped examples beside the executable or one level up (the port's
+    /// layout), the Homebrew keg's share/ybar/examples (it sits beside
+    /// YBar.app inside the keg), then the user's own ~/.config/ybar/themes.
+    public static func roots(
+        home: URL, executable: URL?, environment: [String: String]
+    ) -> [URL] {
+        var roots: [URL] = []
+        if let extra = environment["YBAR_THEME_ROOTS"] {
+            roots += extra.split(separator: ":").map { URL(fileURLWithPath: String($0)) }
+        }
+        if let executable {
+            let directory = executable.deletingLastPathComponent()
+            roots.append(directory.appendingPathComponent("examples"))
+            roots.append(directory.deletingLastPathComponent().appendingPathComponent("examples"))
+            if let bundle = AppBundle.bundleURL(containing: executable) {
+                roots.append(bundle.deletingLastPathComponent()
+                    .appendingPathComponent("share/ybar/examples"))
+            }
+        }
+        roots.append(home.appendingPathComponent(".config/ybar/themes"))
+        return roots
+    }
+
+    /// Every theme under the roots, sorted by name. First root wins for a
+    /// duplicate name: a user copy shadows nothing, but a name must not list
+    /// twice.
+    public static func collect(roots: [URL]) -> [(name: String, entry: URL)] {
+        let fileManager = FileManager.default
+        var themes: [(name: String, entry: URL)] = []
+        for root in roots {
+            // Names, not URLs: the URL enumerator resolves symlinks in the
+            // root (/var → /private/var), and an entry path should read
+            // under the root the user configured.
+            guard let names = try? fileManager.contentsOfDirectory(atPath: root.path) else { continue }
+            for name in names where !name.hasPrefix(".") {
+                let child = root.appendingPathComponent(name)
+                var isDirectory: ObjCBool = false
+                guard fileManager.fileExists(atPath: child.path, isDirectory: &isDirectory),
+                      isDirectory.boolValue, let entry = entry(in: child)
+                else { continue }
+                if !themes.contains(where: { $0.name == name }) {
+                    themes.append((name, entry))
+                }
+            }
+        }
+        return themes.sorted { $0.name < $1.name }
+    }
+
+    public static func stateFile(home: URL) -> URL {
+        home.appendingPathComponent(".config/ybar/current-theme")
+    }
+
+    public static func currentName(home: URL) -> String? {
+        guard let text = try? String(contentsOf: stateFile(home: home), encoding: .utf8) else {
+            return nil
+        }
+        let name = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : name
+    }
+
+    /// The selected theme's entry file; nil when nothing is selected or the
+    /// name went stale (theme deleted), so ordinary discovery applies.
+    public static func currentEntry(home: URL, roots: [URL]) -> URL? {
+        guard let name = currentName(home: home) else { return nil }
+        return collect(roots: roots).first { $0.name == name }?.entry
+    }
+}
+
+/// Process-control compatibility names retained after theme discovery moved
+/// into ThemeCatalog.
+public extension ConfigLocator {
+    static func recordedThemeName(home: URL) -> String? {
+        guard let name = ThemeCatalog.currentName(home: home),
+              name != ".", name != "..",
+              !name.contains("/"), !name.contains("\\")
+        else { return nil }
+        return name
+    }
+
+    static func currentTheme(
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        executable: URL? = AppBundle.executableURL()
+    ) -> URL? {
+        guard let name = recordedThemeName(home: home) else { return nil }
+        let roots = ThemeCatalog.roots(
+            home: home, executable: executable, environment: environment)
+        return ThemeCatalog.collect(roots: roots).first { $0.name == name }?.entry
+    }
+}
+
+enum ThemeVerbs {
+    static let usage = "[!] usage: ybar theme list|current|use <name>|reset|install <git-url>"
+
+    static func run(_ args: [String], instanceName: String) -> Int32 {
+        switch args.first ?? "list" {
+        case "list": return list()
+        case "current":
+            print(ThemeCatalog.currentName(home: home) ?? "no theme selected")
+            return 0
+        case "reset":
+            try? FileManager.default.removeItem(at: ThemeCatalog.stateFile(home: home))
+            print("theme selection cleared; the default config discovery applies")
+            return 0
+        case "use":
+            guard args.count >= 2 else { return fail("[!] usage: ybar theme use <name>") }
+            return use(args[1], instanceName: instanceName)
+        case "install":
+            guard args.count >= 2 else { return fail("[!] usage: ybar theme install <git-url>") }
+            return install(args[1])
+        default:
+            return fail(usage)
+        }
+    }
+
+    static var home: URL { FileManager.default.homeDirectoryForCurrentUser }
+
+    static var roots: [URL] {
+        ThemeCatalog.roots(home: home, executable: AppBundle.executableURL(),
+                           environment: ProcessInfo.processInfo.environment)
+    }
+
+    static func list() -> Int32 {
+        let themes = ThemeCatalog.collect(roots: roots)
+        guard !themes.isEmpty else {
+            // None of the roots exists — the shape a `make app` bundle has,
+            // since the shipped examples/ sit in the checkout, not the
+            // bundle. Name the way out rather than leaving the user to find
+            // docs/THEMES.md.
+            print("""
+                no themes found. Set YBAR_THEME_ROOTS=<dir of themes> and run \
+                `ybar theme list`; from a source checkout, `scripts/ybar-theme list` \
+                sets the checkout's examples/ root for you.
+                """)
+            return 0
+        }
+        let active = ThemeCatalog.currentName(home: home)
+        for theme in themes {
+            let name = theme.name.padding(toLength: max(24, theme.name.count), withPad: " ", startingAt: 0)
+            print("\(theme.name == active ? "*" : " ") \(name) \(theme.entry.path)")
+        }
+        return 0
+    }
+
+    static func use(_ name: String, instanceName: String) -> Int32 {
+        guard let match = ThemeCatalog.collect(roots: roots).first(where: { $0.name == name }) else {
+            return fail("[!] no theme named \(name) (try `ybar theme list`)")
+        }
+        let state = ThemeCatalog.stateFile(home: home)
+        do {
+            try FileManager.default.createDirectory(
+                at: state.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try (name + "\n").write(to: state, atomically: true, encoding: .utf8)
+        } catch {
+            return fail("[!] could not write \(state.path): \(error)")
+        }
+
+        // A running daemon re-points at the entry file over the socket — the
+        // reload path it already has — instead of being killed out from under
+        // launchd's KeepAlive, which respawned the OLD config (the wedge the
+        // shell script used to cause).
+        let socketPath = WireFormat.socketPath(instanceName: instanceName)
+        if SocketClient.ping(socketPath: socketPath) {
+            do {
+                let reply = try SocketClient.send(
+                    arguments: ["--reload", match.entry.path], socketPath: socketPath)
+                if reply.hasPrefix(WireFormat.errorPrefix) { return fail(reply) }
+            } catch {
+                return fail("[!] \(error)")
+            }
+            print("theme: \(name)")
+            return 0
+        }
+
+        // No daemon: use the process-control start path. It locates an
+        // installed YBar.app even when this command came from a Homebrew
+        // symlink or a bare build product, and preserves the bundle's TCC
+        // identity while passing the selected entry as one argv element.
+        let started = LocalVerbs.run(
+            arguments: ["start", "-c", match.entry.path], instanceName: instanceName) ?? 1
+        guard started == 0 else {
+            FileHandle.standardError.write(
+                Data("note: theme \(name) was recorded but could not be started\n".utf8))
+            return started
+        }
+        print("theme: \(name)")
+        return started
+    }
+
+    static func install(_ gitURL: String) -> Int32 {
+        let themes = home.appendingPathComponent(".config/ybar/themes")
+        try? FileManager.default.createDirectory(at: themes, withIntermediateDirectories: true)
+        var name = URL(fileURLWithPath: gitURL).lastPathComponent
+        if name.hasSuffix(".git") { name.removeLast(4) }
+        let target = themes.appendingPathComponent(name)
+        let clone = Spawn.run("/usr/bin/git", ["clone", "--depth", "1", gitURL, target.path])
+        guard clone.succeeded else {
+            let detail = clone.output.isEmpty ? "" : ": \(clone.output)"
+            return fail("[!] git clone failed for \(gitURL)\(detail)")
+        }
+        if !clone.output.isEmpty { print(clone.output) }
+        if ThemeCatalog.entry(in: target) == nil {
+            FileHandle.standardError.write(Data("warning: no ybarrc.lua found in \(name)\n".utf8))
+        }
+        print("installed \(name) — activate with: ybar theme use \(name)")
+        return 0
+    }
+
+    private static func fail(_ message: String) -> Int32 {
+        let line = message.hasPrefix("[!]") ? message : "[!] \(message)"
+        FileHandle.standardError.write(Data((line + "\n").utf8))
+        return 1
+    }
+}
 
 // MARK: - App bundle discovery
 
-/// Finding YBar.app from the CLI. Every verb below hangs off this: a daemon
-/// started from the bare SwiftPM binary loses the bundle's TCC identity, so its
-/// privacy prompts get attributed to whatever terminal spawned it and its helper
-/// processes are killed instead of prompted (docs/INSTALL.md). Guessing wrong
-/// here is not cosmetic.
+/// Where this binary lives, and whether that is inside YBar.app. TCC identity
+/// belongs to the bundle — prompts and grants attribute to com.ybar.YBar only
+/// when the daemon runs from Contents/MacOS — so anything that starts a
+/// daemon on the user's behalf must know the difference.
 public enum AppBundle {
     public static let bundleName = "YBar.app"
 
-    /// The running binary with symlinks resolved. Homebrew puts `ybar` on the
-    /// PATH as a symlink into the Cellar, so the unresolved path names no bundle
-    /// at all. A wrong answer here is never fatal — the installed-path
-    /// candidates below are the real resolution.
-    public static func runningExecutable() -> URL {
+    /// realpath of the running binary: Homebrew's bin/ybar is a symlink into
+    /// the keg, and launchd/open need the real location.
+    public static func executableURL() -> URL {
         let raw = Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])
         return raw.resolvingSymlinksInPath()
+    }
+
+    /// Process-control compatibility name for the resolved executable.
+    public static func runningExecutable() -> URL {
+        executableURL()
     }
 
     /// `<bundle>/Contents/MacOS/<tool>` -> `<bundle>`; nil for a bare build
@@ -47,6 +273,11 @@ public enum AppBundle {
         return bundle
     }
 
+    /// Theme-catalog compatibility name for the enclosing app bundle.
+    public static func bundleURL(containing executable: URL) -> URL? {
+        enclosingBundle(of: executable)
+    }
+
     /// Homebrew installs into `<prefix>/Cellar/ybar/<version>/YBar.app` and
     /// points `<prefix>/opt/ybar` at the current version. A login job naming the
     /// Cellar path dies on the next `brew upgrade`; the opt path survives it,
@@ -61,6 +292,18 @@ public enum AppBundle {
         var rebuilt = URL(fileURLWithPath: "/")
         for part in parts.dropFirst() { rebuilt.appendPathComponent(part) }
         return fileManager.fileExists(atPath: rebuilt.path) ? rebuilt : url
+    }
+
+    /// Pure string form of the Homebrew Cellar-to-opt rewrite used by theme
+    /// and packaging callers that do not need to probe the filesystem.
+    public static func homebrewOptPath(for resolved: String) -> String? {
+        let parts = resolved.split(
+            separator: "/", omittingEmptySubsequences: false).map(String.init)
+        guard let cellar = parts.firstIndex(of: "Cellar"), parts.count > cellar + 3,
+              parts[cellar + 1] == "ybar"
+        else { return nil }
+        return (parts[..<cellar] + ["opt", "ybar"] + parts[(cellar + 3)...])
+            .joined(separator: "/")
     }
 
     /// Search order, most specific first: the bundle we are running from, then
@@ -94,7 +337,7 @@ public enum AppBundle {
     /// A candidate only counts if it really is a bundle. A bare directory named
     /// `YBar.app` would otherwise be handed to `open`, which refuses it with a
     /// LaunchServices diagnostic instead of a useful one.
-    static func isBundle(_ url: URL, fileManager: FileManager = .default) -> Bool {
+    public static func isBundle(_ url: URL, fileManager: FileManager = .default) -> Bool {
         fileManager.fileExists(atPath: url.appendingPathComponent("Contents/Info.plist").path)
     }
 
@@ -208,6 +451,17 @@ public enum LaunchAgent {
         // script it spawns receives.
     }
 
+    /// Compatibility overload for the original single-instance API. The
+    /// per-instance builder above remains the source of the plist shape.
+    public static func plist(binary: String, configPath: String?) -> [String: Any] {
+        var arguments = [binary]
+        if let configPath { arguments.append(contentsOf: ["-c", configPath]) }
+        return plist(
+            label: bundleIdentifier,
+            programArguments: arguments,
+            standardErrorPath: "/dev/null")
+    }
+
     /// argv for the job. With no config there is no `-c` at all — that absence
     /// is what lets a login job follow `current-theme` across logins instead of
     /// pinning whatever was selected on the day autostart was enabled.
@@ -221,6 +475,11 @@ public enum LaunchAgent {
 
     public static func xmlData(_ plist: [String: Any]) throws -> Data {
         try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+    }
+
+    /// Compatibility name for callers predating the per-instance LaunchAgent.
+    public static func plistData(_ plist: [String: Any]) throws -> Data {
+        try xmlData(plist)
     }
 
     /// Reads a plist back for `autostart status`, so what is reported is what is
@@ -427,7 +686,7 @@ public enum LocalVerbs {
 
         case "autostart":
             // Bare `autostart` reads as `autostart status`, matching
-            // `ybar-theme`'s bare-word default: never destructive.
+            // the theme namespace's bare-word default: never destructive.
             let action = rest.first ?? "status"
             let tail = Array(rest.dropFirst())
             switch action {
@@ -449,10 +708,14 @@ public enum LocalVerbs {
         }
     }
 
-    /// Runs `arguments` if they name a process-control verb; returns nil when
-    /// they do not, so the caller falls through to the message grammar.
+    /// Runs process-control verbs first, then the local theme namespace.
+    /// Unknown arguments return nil so the caller can use the message grammar.
     public static func run(arguments: [String], instanceName: String) -> Int32? {
-        guard let verb = parse(arguments) else { return nil }
+        guard let verb = parse(arguments) else {
+            guard arguments.first == "theme" else { return nil }
+            return ThemeVerbs.run(
+                Array(arguments.dropFirst()), instanceName: instanceName)
+        }
         switch verb {
         case .usage(let invocation):
             return usage("\(instanceName) \(invocation)")
@@ -1121,7 +1384,7 @@ public enum LocalVerbs {
             print(field("log", log))
         }
         if LaunchAgent.configArgument(in: plist) != nil {
-            print("the job pins that config — `ybar-theme use` will not change "
+            print("the job pins that config — `ybar theme use` will not change "
                 + "what starts at login.")
         }
         return 0

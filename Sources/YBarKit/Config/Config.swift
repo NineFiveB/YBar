@@ -1,39 +1,75 @@
 import Foundation
 
 /// Config discovery, sketchybar-compatible search order with a Lua twist:
-/// `-c <path>` → the theme recorded by `ybar-theme use` → per directory,
+/// `-c <path>` → the selected theme (default instance only) → per directory,
 /// `<name>rc.lua` (embedded YbarLua) is preferred over the executable
-/// `<name>rc` shell script:
+/// `<name>rc` shell script, then the declarative `<name>rc.jsonc` / `<name>.jsonc`:
 /// `$XDG_CONFIG_HOME/<name>/` → `~/.config/<name>/` → `~/.{<name>rc.lua,<name>rc}`.
 public enum ConfigLocator {
+    /// What discovery settled on, and why — the daemon needs the "why" to warn
+    /// about the one silent case (see `shadowed`).
+    public struct Resolution: Equatable {
+        /// The config that will be loaded.
+        public let url: URL
+        /// The recorded theme this came from, when it came from one.
+        public let theme: String?
+        /// The config ordinary discovery would have loaded had no theme been
+        /// recorded. Only ever set alongside `theme`, and only when such a file
+        /// exists: `ybar-theme use` (pre-1.0) wrote `current-theme`
+        /// unconditionally while nothing read it, so an upgraded install can
+        /// carry a selection the user has long since replaced with a config of
+        /// their own. The theme still wins — that precedence is documented and
+        /// is what makes a theme survive a restart — but the daemon says so
+        /// instead of letting the user's file disappear without a word.
+        public let shadowed: URL?
+    }
+
     public static func locate(
-        explicitPath: String?,
-        instanceName: String,
-        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        explicitPath: String?, instanceName: String,
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        fileManager: FileManager = .default
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        executable: URL? = AppBundle.executableURL()
     ) -> URL? {
+        resolve(explicitPath: explicitPath, instanceName: instanceName,
+                environment: environment, home: home, executable: executable)?.url
+    }
+
+    public static func resolve(
+        explicitPath: String?, instanceName: String,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        executable: URL? = AppBundle.executableURL()
+    ) -> Resolution? {
+        let fileManager = FileManager.default
         if let explicitPath {
             let url = URL(fileURLWithPath: (explicitPath as NSString).expandingTildeInPath)
-            return fileManager.fileExists(atPath: url.path) ? url : nil
+            guard fileManager.fileExists(atPath: url.path) else { return nil }
+            return Resolution(url: url, theme: nil, shadowed: nil)
         }
-
-        // A theme chosen with `ybar-theme use` has to survive a start that
-        // carries no `-c` — which is exactly how the login agent starts the
-        // bar, and how `ybar start` starts it. Only the default instance reads
-        // the file: a renamed binary is an independent bar and must not be
-        // hijacked into ybar's theme (the Windows port fixed the same hole,
-        // docs/WINDOWS-PORT.md section 5).
-        if instanceName == "ybar",
-           let themed = currentTheme(home: home, fileManager: fileManager) {
-            return themed
+        // `ybar theme use` records a choice in ~/.config/ybar/current-theme;
+        // honouring it here is what makes a theme survive restarts and
+        // autostart — otherwise "recorded; start ybar to apply" would be a
+        // lie. Explicit -c above always wins; `ybar theme reset` clears it.
+        // Gated to the default instance, as the port is (config.cpp): the
+        // state file is not instance-scoped, and a renamed secondary bar
+        // must not be hijacked by the primary's theme.
+        var theme: (name: String, entry: URL)?
+        if instanceName == "ybar", let name = ThemeCatalog.currentName(home: home),
+           let entry = ThemeCatalog.currentEntry(
+               home: home,
+               roots: ThemeCatalog.roots(home: home, executable: executable, environment: environment)) {
+            theme = (name, entry)
         }
-
         var candidates: [URL] = []
 
         func addDirectory(_ directory: URL) {
             candidates.append(directory.appendingPathComponent("\(instanceName)rc.lua"))
             candidates.append(directory.appendingPathComponent("\(instanceName)rc"))
+            // JSONC configs are first-class (THEMES.md, ybar-theme) and the
+            // daemon dispatches them by extension; the Windows port lists the
+            // same two names in the same order.
+            candidates.append(directory.appendingPathComponent("\(instanceName)rc.jsonc"))
+            candidates.append(directory.appendingPathComponent("\(instanceName).jsonc"))
         }
 
         if let xdg = environment["XDG_CONFIG_HOME"], !xdg.isEmpty {
@@ -42,46 +78,12 @@ public enum ConfigLocator {
         addDirectory(home.appendingPathComponent(".config/\(instanceName)"))
         candidates.append(home.appendingPathComponent(".\(instanceName)rc.lua"))
         candidates.append(home.appendingPathComponent(".\(instanceName)rc"))
-        return candidates.first { fileManager.fileExists(atPath: $0.path) }
-    }
-
-    /// A theme directory is any directory holding one of these, in this order —
-    /// the same rule `scripts/ybar-theme` applies.
-    static let themeEntryNames = ["ybarrc.lua", "ybar.jsonc", "ybarrc.jsonc"]
-
-    /// The name in `~/.config/ybar/current-theme`, validated. A name carrying a
-    /// path separator, or `.`/`..`, would escape the theme roots, so it is
-    /// rejected rather than resolved.
-    static func recordedThemeName(home: URL) -> String? {
-        let stateFile = home.appendingPathComponent(".config/ybar/current-theme")
-        guard let recorded = try? String(contentsOf: stateFile, encoding: .utf8) else { return nil }
-        let name = recorded.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, !name.contains("/"), name != ".", name != ".." else { return nil }
-        return name
-    }
-
-    /// The entry file of the theme named in `~/.config/ybar/current-theme`, or
-    /// nil when nothing is recorded or the name no longer resolves — a stale
-    /// name falls through to normal discovery rather than leaving the bar
-    /// configless.
-    static func currentTheme(home: URL, fileManager: FileManager = .default) -> URL? {
-        guard let name = recordedThemeName(home: home) else { return nil }
-
-        var roots = [home.appendingPathComponent(".config/ybar/themes")]
-        // Homebrew stages the shipped themes under share/ybar/examples; both
-        // prefixes are tried because the CLI cannot know which one installed it
-        // (Apple silicon vs Intel).
-        for prefix in ["/opt/homebrew", "/usr/local"] {
-            roots.append(URL(fileURLWithPath: "\(prefix)/share/ybar/examples"))
+        let discovered = candidates.first { fileManager.fileExists(atPath: $0.path) }
+        if let theme {
+            return Resolution(url: theme.entry, theme: theme.name, shadowed: discovered)
         }
-        for root in roots {
-            let directory = root.appendingPathComponent(name)
-            for entry in themeEntryNames {
-                let candidate = directory.appendingPathComponent(entry)
-                if fileManager.fileExists(atPath: candidate.path) { return candidate }
-            }
-        }
-        return nil
+        guard let discovered else { return nil }
+        return Resolution(url: discovered, theme: nil, shadowed: nil)
     }
 }
 

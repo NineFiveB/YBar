@@ -59,6 +59,10 @@ public final class LuaRuntime {
     /// daemon's forced provider re-queries (wired by the daemon; returns true
     /// when the name was handled).
     public var forcedTrigger: ((String) -> Bool)?
+    /// The daemon's command handler, for the verbs that have no object-model
+    /// path of their own (`ybar.volume` → `--volume`, the Windows port's
+    /// handleTokens). Wired by the daemon; nil headless.
+    public var handleCommand: (([String]) -> String)?
     /// Registry refs are small integers scoped to ONE lua_State; a completion
     /// crossing a reload would index the NEW state's registry and invoke an
     /// unrelated callback. Bumped on every state teardown; async completions
@@ -209,6 +213,16 @@ public final class LuaRuntime {
         subscriptions[item.id, default: [:]][event] = ref
         item.hasLuaHandlers = true
         return nil
+    }
+
+    /// Drop a removed item's callback refs; the registry would otherwise
+    /// hold them (and whatever they close over) until the next reload.
+    private func releaseSubscriptions(for item: Item) {
+        guard let refs = subscriptions.removeValue(forKey: item.id) else { return }
+        if let state {
+            for ref in refs.values { luaL_unref(state, registryIndex, ref) }
+        }
+        item.hasLuaHandlers = false
     }
 
     // MARK: - Raw module registration
@@ -416,9 +430,33 @@ public final class LuaRuntime {
         }
         register("query_item") { L in
             MainActor.assumeIsolated {
-                guard let runtime = LuaRuntime.current, let name = argString(L, 1),
-                      let item = runtime.barManager.store.item(named: name)
-                else {
+                guard let runtime = LuaRuntime.current, let name = argString(L, 1) else {
+                    lua_pushnil(L)
+                    return 1
+                }
+                // Querying BY NAME applies the CLI's shadowing rule verbatim: a
+                // reserved target (bar, defaults, events, displays, apps) wins
+                // over an item of that name. That is also how
+                // `ybar.query_table("apps")` hands a widget the app list as a
+                // table instead of a JSON string.
+                //
+                // The handle form passes preferItem, and there the item wins: a
+                // handle describes the item it was created for, so a config
+                // that adds an item named `apps` (or `bar`) can still read its
+                // own item back through `handle:query()` — `apps` only became
+                // reserved in this release, and silently answering a handle
+                // with the app-list array breaks the `:query().popup.drawing`
+                // idiom every popup toggle uses. A handle whose item is gone
+                // still falls through to the reserved table.
+                let preferItem = lua_toboolean(L, 2) != 0
+                let item = runtime.barManager.store.item(named: name)
+                if !(preferItem && item != nil),
+                   let reserved = Serialize.reserved(
+                       target: name, manager: runtime.barManager, eventBus: runtime.eventBus) {
+                    LuaRuntime.push(reserved, to: L)
+                    return 1
+                }
+                guard let item else {
                     lua_pushnil(L)
                     return 1
                 }
@@ -453,11 +491,58 @@ public final class LuaRuntime {
                 return 1
             }
         }
+        // ybar.volume(pct[, app]) — the daemon already holds the output device,
+        // so a slider drag becomes one function call instead of a shell round
+        // trip (the Windows port's Trampolines::volume, token for token: the
+        // reply is nil on success, the `[!]` line otherwise). A Lua number is
+        // an absolute level, saturated into 0...100 — `-4` from arithmetic
+        // must not turn into a step — while a string keeps its sign for the
+        // `"+4"` / `"-4"` form.
+        register("volume") { L in
+            MainActor.assumeIsolated {
+                guard let runtime = LuaRuntime.current else { return 0 }
+                var tokens = ["--volume"]
+                if lua_type(L, 1) == luaTypeNumber {
+                    let level = lua_tonumberx(L, 1, nil)
+                    guard level.isFinite else {
+                        lua_pushstring(L, "[!] volume(percent) expects a number")
+                        return 1
+                    }
+                    // Clamp BEFORE stringifying — that is what makes the number
+                    // form unconditionally absolute. Unclamped, `current - 10`
+                    // at 5 stringifies to "-5" and lands on parseVolume's
+                    // signed-STEP branch (a second decrement the script never
+                    // asked for), and any |level| >= 2^63 traps in
+                    // `Int(_: Double)`, taking the daemon down with it. The
+                    // device write clamps the same way (AudioProvider
+                    // .setVolume), so saturating here is the level the hardware
+                    // would have landed on anyway.
+                    tokens.append(String(Int(min(max(level, 0), 100).rounded())))
+                } else if let pct = argString(L, 1) {
+                    tokens.append(pct)
+                } else {
+                    lua_pushstring(L, "[!] volume(percent) expects a number")
+                    return 1
+                }
+                if lua_type(L, 2) > 0 { // LUA_TNIL = 0, none = -1
+                    guard let app = argString(L, 2) else {
+                        lua_pushstring(L, "[!] volume(percent, app) expects a string app")
+                        return 1
+                    }
+                    tokens.append(app)
+                }
+                let reply = runtime.handleCommand?(tokens) ?? "[!] volume control is not available"
+                pushOptionalError(L, reply.isEmpty ? nil : reply)
+                return 1
+            }
+        }
         register("remove") { L in
             MainActor.assumeIsolated {
                 guard let runtime = LuaRuntime.current else { return 0 }
                 guard let name = argString(L, 1) else { return 0 }
                 for item in runtime.barManager.store.items(matching: name) {
+                    runtime.scheduler.cancel(prefix: "item.\(item.id).")
+                    runtime.releaseSubscriptions(for: item)
                     _ = runtime.barManager.store.remove(name: item.name)
                 }
                 runtime.barManager.setNeedsRender()
@@ -487,13 +572,23 @@ public final class LuaRuntime {
         case "item":
             guard resolve(position) != nil else { return "[!] add failed: \(name) \(position)" }
         case "graph":
+            // Same envelope as `--add graph`: the sketchybar shim forwards
+            // theme widths verbatim, Int(inf) traps, and 1e9 allocates gigabytes.
+            let capacity = width ?? 60
+            guard capacity.isFinite, capacity >= 1, capacity <= 8192 else {
+                return "[!] usage: --add graph <name> <position> <width> (1...8192)"
+            }
             guard let item = resolve(position) else { return "[!] add failed: \(name) \(position)" }
             item.kind = .graph
-            item.graph = GraphState(capacity: Int(width ?? 60))
+            item.graph = GraphState(capacity: Int(capacity))
         case "slider":
+            let sliderWidth = width ?? 100
+            guard sliderWidth.isFinite, sliderWidth > 0 else {
+                return "[!] usage: --add slider <name> <position> <width>"
+            }
             guard let item = resolve(position) else { return "[!] add failed: \(name) \(position)" }
             item.kind = .slider
-            item.slider = SliderState(width: width ?? 100)
+            item.slider = SliderState(width: sliderWidth)
         case "alias":
             guard let item = resolve(position) else { return "[!] add failed: \(name) \(position)" }
             item.kind = .alias
@@ -691,12 +786,16 @@ public final class LuaRuntime {
     end
     function ybar.delay(seconds, fn) raw.delay(seconds, fn) end
     function ybar.update() raw.update() end
-    function ybar.query_table(name) return raw.query_item(name) end
+    -- own = true asks for the ITEM of that name even when the name is a
+    -- reserved target; the compat shim's handles pass it for the same reason
+    -- item_methods:query() does.
+    function ybar.query_table(name, own) return raw.query_item(name, own) end
     function ybar.trigger(event, env) raw.trigger(event, env or {}) end
     function ybar.push(name, values) raw.push(name, values) end
     function ybar.exec(cmd, fn) raw.exec(cmd, fn) end
     function ybar.add_event(name, notification) local e = raw.add_event(name, notification) if e then print(e) end end
     function ybar.query(target) return raw.query(target) end
+    function ybar.volume(pct, app) return raw.volume(pct, app) end
     function ybar.remove(name) raw.remove(name) end
 
     function ybar.animate(curve, frames, fn)
@@ -711,7 +810,10 @@ public final class LuaRuntime {
     function item_methods:set(t) ybar.set(self.name, t) end
     function item_methods:subscribe(event, fn) ybar.subscribe(self.name, event, fn) end
     function item_methods:push(values) ybar.push(self.name, values) end
-    function item_methods:query() return raw.query_item(self.name) end
+    -- true = "this handle's own item first": a reserved query target
+    -- (bar/defaults/events/displays/apps) must not answer for the item the
+    -- handle was created for. ybar.query_table(name) keeps the CLI rule.
+    function item_methods:query() return raw.query_item(self.name, true) end
 
     local function handle(name)
       return setmetatable({ name = name }, item_methods)

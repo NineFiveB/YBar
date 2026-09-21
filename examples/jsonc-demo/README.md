@@ -1,13 +1,17 @@
 # jsonc-demo
 
-The declarative config tier: point `-c` at a `.jsonc` file and get a bar with
-no Lua at all. `ybar.jsonc` here builds a clock and a battery on the right,
-grouped under one bracket background — deliberately small, because its job is
-to show the whole schema rather than to be a theme.
+The declarative config tier: a clock and a battery module in **JSONC** —
+JSON with `//` and `/* */` comments and trailing commas — and no Lua at all.
 
-Every entry translates into the same commands a CLI client sends, so setter
-semantics, the property namespace and the event names are identical to the
-other two surfaces. Nothing is interpreted twice.
+Point `-c` at a `.jsonc` file and the engine translates it through the same
+command layer the CLI uses: `"bar"` → `--bar`, `"defaults"` → `--default`,
+`"events"` → `--add event`, and each item → `--add` / `--set` /
+`--subscribe`. Property keys are the full dotted sketchybar namespace, so
+anything the CLI can set, this can set.
+
+Use it when a bar is a fixed layout plus a few scripts. Reach for Lua
+(`examples/darxk`) once modules need logic, state, or in-process event
+handlers.
 
 ## Schema
 
@@ -21,20 +25,7 @@ ignored, so a misspelled section does not silently produce an empty bar.
 | `events` | `--add event <name>` | array of strings |
 | `items` | see below | array, created in order |
 
-Each entry in `items` needs a `name`, and then either:
-
-- `bracket`: a non-empty array of member names, which emits
-  `--add bracket <name> <members...>`; or
-- `position`, which emits `--add item <name> <position>`. The tokens are
-  `left`, `right`, `center` (or `c`), `q`/`center_left`, `e`/`center_right`,
-  and `popup.<host>` to place the item inside another item's popup. Default
-  `left`.
-
-Both forms also accept `props` (an object, emitted as `--set`) and
-`subscribe` (a non-empty array of event names, emitted as `--subscribe`).
-Unknown keys inside an item warn the same way.
-
-Property keys are the **full dotted sketchybar namespace** — `icon.color`,
+Property keys within items use the full dotted namespace —
 `label.font`, `background.corner_radius`, `icon.color.alpha` — exactly as on
 the command line. Values coerce predictably: strings pass through verbatim
 (colors are `"0xAARRGGBB"` strings, since JSON has no hex literals), booleans
@@ -56,12 +47,14 @@ conditionals, no closures as event handlers. Handlers are shell strings in
 config needs logic, move to `ybarrc.lua` and the Lua tier — the two use the
 same underlying model, so items defined either way behave identically.
 
+## Helpers and permissions
+
+None. `ybar.jsonc` shells out only to `date` for the clock; the battery
+module rides the engine's own `power_source_change` events.
+
 ## Run
 
 ```sh
-ybar -c examples/jsonc-demo/ybar.jsonc      # or: scripts/ybar-theme use jsonc-demo
+ybar -c examples/jsonc-demo/ybar.jsonc
+# or: ybar --config examples/jsonc-demo/ybar.jsonc
 ```
-
-`ybar-theme` treats any directory holding a `ybarrc.lua`, `ybar.jsonc` or
-`ybarrc.jsonc` as a theme, which is why this one is selectable alongside the
-Lua themes.

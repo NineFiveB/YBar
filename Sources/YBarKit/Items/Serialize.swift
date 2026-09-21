@@ -6,11 +6,26 @@ import Foundation
 @MainActor
 public enum Serialize {
     public static func query(target: String, manager: BarManager, eventBus: EventBus) -> String {
+        if let reserved = reserved(target: target, manager: manager, eventBus: eventBus) {
+            return json(reserved)
+        }
+        guard let item = manager.store.item(named: target) else {
+            return "[!] no item named \(target)"
+        }
+        return json(itemDictionary(item, boundingRects: manager.boundingRects(for: item)))
+    }
+
+    /// The reserved query targets. They shadow an item of the same name,
+    /// sketchybar-style (`--query bar` is the bar even if an item is called
+    /// "bar"), and `apps` joins the list under that same rule rather than
+    /// being matched after item lookup — one rule for the CLI and for Lua's
+    /// `query_table`. Nil for anything else (an item name).
+    public static func reserved(target: String, manager: BarManager, eventBus: EventBus) -> Any? {
         switch target {
         case "bar":
-            return json(barDictionary(manager: manager))
+            return barDictionary(manager: manager)
         case "defaults":
-            return json(itemDictionary(manager.store.defaults))
+            return itemDictionary(manager.store.defaults)
         case "events":
             var events: [String: Any] = [:]
             for definition in eventBus.definitions {
@@ -19,15 +34,32 @@ public enum Serialize {
                     "notification": definition.notificationName ?? "(null)",
                 ]
             }
-            return json(events)
+            return events
         case "displays":
-            return json(displaysArray())
+            return displaysArray()
+        case "apps":
+            return appsArray()
         default:
-            guard let item = manager.store.item(named: target) else {
-                return "[!] no item named \(target)"
-            }
-            return json(itemDictionary(item, boundingRects: manager.boundingRects(for: item)))
+            return nil
         }
+    }
+
+    /// The permission-free app level: every Dock-visible app, in launch order
+    /// (the order a taskbar widget wants to keep stable). No window titles —
+    /// those need Screen Recording — and no CGWindowList; `--app` acts on the
+    /// same pid / bundle id these rows carry.
+    static func appsArray() -> [[String: Any]] {
+        NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular }
+            .map { app in
+                [
+                    "name": app.localizedName ?? "",
+                    "bundle_id": app.bundleIdentifier ?? "",
+                    "pid": Int(app.processIdentifier),
+                    "active": app.isActive,
+                    "hidden": app.isHidden,
+                ]
+            }
     }
 
     static func barDictionary(manager: BarManager) -> [String: Any] {
@@ -47,6 +79,8 @@ public enum Serialize {
             "hidden": settings.hidden,
             "topmost": settings.level.rawValue,
             "sticky": settings.sticky,
+            "fullscreen_show": settings.fullscreenShow,
+            "fullscreen_hide": settings.fullscreenHide,
             "idle_inhibit": settings.idleInhibit,
             "notch_width": settings.notchWidth,
             "notch_offset": settings.notchOffset,
@@ -98,6 +132,7 @@ public enum Serialize {
                 "percentage": slider.percentage,
                 "width": slider.width,
                 "highlight_color": hex(slider.highlightColor),
+                "interactive": slider.interactive ? "on" : "off",
             ] as [String: Any]
         }
         if let image = item.image {
@@ -105,6 +140,8 @@ public enum Serialize {
                 "string": image.source,
                 "size": image.size,
                 "drawing": image.drawing ? "on" : "off",
+                "y_offset": image.yOffset,
+                "desaturate": image.desaturate ? "on" : "off",
             ] as [String: Any]
         }
         if let gauge = item.gauge {
@@ -122,6 +159,12 @@ public enum Serialize {
             "wrap_width": item.popup.wrapWidth,
             "height": item.popup.cellHeight,
             "auto_close": item.popup.autoClose,
+            "align": String(item.popup.align),
+            "y_offset": item.popup.yOffset,
+            "blur_radius": item.popup.blurRadius,
+            "fade_in": item.popup.fadeInFrames,
+            "fade_out": item.popup.fadeOutFrames,
+            "background": backgroundDictionary(item.popup.background),
         ] as [String: Any]
         if item.position == .popup {
             dictionary["popup_host"] = item.popupHost ?? ""
@@ -142,6 +185,17 @@ public enum Serialize {
             "y_offset": part.yOffset,
             "max_chars": part.maxChars,
             "background": backgroundDictionary(part.background),
+            "shadow": shadowDictionary(part.shadow),
+        ]
+    }
+
+    static func shadowDictionary(_ shadow: ShadowStyle) -> [String: Any] {
+        [
+            "drawing": shadow.drawing ? "on" : "off",
+            "color": hex(shadow.color),
+            "distance": shadow.distance,
+            "angle": shadow.angle,
+            "blur": shadow.blur,
         ]
     }
 
@@ -157,12 +211,8 @@ public enum Serialize {
             "padding_right": background.paddingRight,
             "x_offset": background.xOffset,
             "y_offset": background.yOffset,
-            "shadow": [
-                "drawing": background.shadow.drawing ? "on" : "off",
-                "color": hex(background.shadow.color),
-                "distance": background.shadow.distance,
-                "angle": background.shadow.angle,
-            ] as [String: Any],
+            "glass": background.glass ? "on" : "off",
+            "shadow": shadowDictionary(background.shadow),
         ]
     }
 

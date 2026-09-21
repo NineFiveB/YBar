@@ -6,10 +6,10 @@ bar of segmented rounded capsules with per-module Catppuccin accents, inverted
 light pills for the active workspace and the focused window, and bold
 monospace type throughout.
 
-It is also the reference theme for learning the Lua API. At just under 400
-lines across six files it is small enough to read end to end, and
-[THEMES.md](../../docs/THEMES.md) points theme authors at it first: bar and
-defaults, capsule brackets, event-driven modules, nothing else.
+It is also the **reference theme for writing your own** — the smallest
+complete Lua theme in the tree (~300–400 lines): bar and defaults, capsule
+brackets, event-driven modules, nothing else.
+[THEMES.md](../../docs/THEMES.md) points theme authors at it first.
 
 It uses the `sketchybar` compat shim, so **`../sketchybar-port` must be
 installed beside it** — `ybarrc.lua` probes for it and falls back to
@@ -28,10 +28,10 @@ installed beside it** — `ybarrc.lua` probes for it and falls back to
   play/pause), a hardware capsule pairing thermal state with battery, and a
   volume capsule.
 
-## Failing soft
+## Helpers and permissions
 
-Every module that shells out hides itself rather than erroring when its
-binary is missing, so one config works across machines:
+None beyond YBar's own. Every module that shells out hides itself rather than
+erroring when its binary is missing, so one config works across machines:
 
 - **Workspaces** need [AeroSpace](https://github.com/nikitabobko/AeroSpace).
   It is probed at `/opt/homebrew/bin`, then `/usr/local/bin`, then `PATH`;
@@ -43,6 +43,9 @@ binary is missing, so one config works across machines:
   draws only when the call succeeds and the count is above zero, so an
   unauthenticated or absent `gh`, or an empty inbox, leaves nothing behind.
 
+Font: JetBrainsMono Nerd Font, Bold (the engine falls back if it is not
+installed).
+
 ## Credits
 
 Design, layout and palette are a replication of the Waybar configuration in
@@ -52,11 +55,9 @@ This is a re-implementation on YBar's item model, not a port of its CSS. The
 credit is also recorded in the repository's
 [THIRD_PARTY.md](../../THIRD_PARTY.md).
 
-Font: JetBrainsMono Nerd Font, Bold (the engine falls back if it is not
-installed).
-
 ## Run
 
 ```sh
-ybar -c examples/darxk/ybarrc.lua      # or: scripts/ybar-theme use darxk
+ybar -c examples/darxk/ybarrc.lua
+# or: ybar --config examples/darxk/ybarrc.lua
 ```

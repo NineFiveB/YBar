@@ -58,6 +58,13 @@ public final class SliderState {
     public var knob = TextPart()
     public var background = BackgroundStyle()
     public var isDragged = false
+    /// A slider used as a READ-ONLY meter (a battery/level gauge) must not
+    /// be scrubbable: without this every mouse-down rewrote `percentage`
+    /// from the pointer x, so a click showed a fabricated value until
+    /// something re-applied the real one. interactive=off keeps the visual
+    /// and drops the drag machinery (no press/drag/PERCENTAGE; a press falls
+    /// through to an ordinary click, and sets always apply).
+    public var interactive = true
 
     public init(width: Float) {
         self.width = max(1, width)
@@ -87,6 +94,14 @@ public final class ImageState {
     public var rotation: Float = 0
     /// "l" (default): image leads the content; "r": image trails the label.
     public var align: String = "l"
+    /// Vertical nudge in points, positive-up like every other y_offset: an
+    /// app icon's optical centre rarely matches the text's, and the text's
+    /// own y_offset cannot close that gap without moving the text.
+    public var yOffset: Float = 0
+    /// Render at luminance (greyed-out icon for a not-running app or a
+    /// disabled row). Done in the shader: no atlas-key dimension, no
+    /// re-rasterization, and the coloured cell stays shared.
+    public var desaturate = false
 
     private var cachedSource: String?
     private var cachedRotation: Float = 0
@@ -100,11 +115,14 @@ public final class ImageState {
     }
 
     public func resolvedImage() -> NSImage? {
-        if cachedSource == source, cachedRotation == rotation { return cachedImage }
+        // Whole degrees, matching the atlas key: a sub-degree step of an
+        // animated spinner would otherwise re-rasterize for a cell it shares.
+        let degrees = rotation.rounded()
+        if cachedSource == source, cachedRotation == degrees { return cachedImage }
         cachedSource = source
-        cachedRotation = rotation
+        cachedRotation = degrees
         let base = ImageState.load(source: source)
-        let turns = rotation.truncatingRemainder(dividingBy: 360)
+        let turns = degrees.truncatingRemainder(dividingBy: 360)
         cachedImage = turns == 0 ? base : base.map { ImageState.rotated($0, degrees: turns) }
         return cachedImage
     }
@@ -260,6 +278,12 @@ public struct PopupState: Sendable {
     public var align: Character = "l"
     /// > 0: blurred system material behind the whole panel.
     public var blurRadius: Float = 0
+    /// Open/close opacity fade, in frames at 60 Hz (Windows-port parity;
+    /// 0 keeps sketchybar's hard cut). The window server runs the ramp, so
+    /// it costs no app frames — unlike animating a property, which would
+    /// re-render every one.
+    public var fadeInFrames: Float = 0
+    public var fadeOutFrames: Float = 0
     public var background = BackgroundStyle()
 
     public init() {
@@ -438,9 +462,20 @@ public enum ComponentGeometry {
         var line: [SIMD2<Float>] = []
         line.reserveCapacity((count - 1) * 6)
         let half = Float(lineWidth) / 2
+        // Line centres stay a half width inside the box: a zero sample sits
+        // ON maxY, which would hang half the stroke below the box and over a
+        // bordered plate's frame. The fill keeps the raw sample so its top
+        // edge and baseline stay exact.
+        let clampPad = min(half, Float(box.height) / 2)
+        let lowY = Float(box.minY) + clampPad
+        let highY = Float(box.maxY) - clampPad
+        func linePoint(_ index: Int) -> SIMD2<Float> {
+            let raw = point(index)
+            return SIMD2(raw.x, min(max(raw.y, lowY), highY))
+        }
         for index in 0..<(count - 1) {
-            let a = point(index)
-            let b = point(index + 1)
+            let a = linePoint(index)
+            let b = linePoint(index + 1)
             let direction = b - a
             let length = max(0.0001, (direction.x * direction.x + direction.y * direction.y).squareRoot())
             let normal = SIMD2(-direction.y / length, direction.x / length) * half

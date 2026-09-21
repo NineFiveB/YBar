@@ -2,6 +2,7 @@ local colors = require("colors")
 local icons = require("icons")
 local settings = require("settings")
 local app_icons = require("helpers.app_icons")
+local shell = require("helpers.shell")
 
 -- AeroSpace integration ------------------------------------------------------
 -- AeroSpace uses virtual workspaces (not native macOS Spaces), so this widget
@@ -9,40 +10,39 @@ local app_icons = require("helpers.app_icons")
 -- `aerospace_workspace_change` event below via exec-on-workspace-change.
 sbar.add("event", "aerospace_workspace_change")
 
--- Discover every workspace AeroSpace knows about (synchronous, runs once at
--- config load). Persistent workspaces that are empty are hidden until they
--- contain a window or become focused (see update_spaces).
--- Absolute path: io.popen at config load runs with the daemon's own PATH,
--- which lacks /opt/homebrew/bin when launched from Finder or a LaunchAgent.
+-- Absolute path: sbar.exec runs with the daemon's own PATH, which lacks
+-- /opt/homebrew/bin when launched from Finder or a LaunchAgent.
 AEROSPACE = "/opt/homebrew/bin/aerospace"
 if not os.execute("test -x " .. AEROSPACE) then
   AEROSPACE = "/usr/local/bin/aerospace"
   if not os.execute("test -x " .. AEROSPACE) then AEROSPACE = "aerospace" end
 end
 
-local function aerospace_workspaces()
-  local list = {}
-  local handle = io.popen(AEROSPACE .. " list-workspaces --all 2>/dev/null")
-  if handle then
-    for line in handle:lines() do
-      local ws = line:match("^%s*(.-)%s*$")
-      if ws ~= "" then list[#list + 1] = ws end
-    end
-    handle:close()
-  end
-  return list
-end
+-- Pills are a FIXED slot set created at load and bound to workspace names on
+-- every reconcile from an async `list-workspaces --all` — the model the
+-- yabai adapter already uses. The previous version discovered the names with
+-- one synchronous query at config load and created a pill per name, so a bar
+-- that came up before AeroSpace answered had no pills to ever reveal
+-- (items/init.lua polled the CLI for up to 30 s to paper over that), and a
+-- workspace summoned at runtime by a name no binding referenced never got
+-- one. Creation order is bar order within a position, so slots created now
+-- keep the strip left of front_app; a set that grew lazily would append
+-- pills after every item loaded since.
+--
+-- Workspaces past MAX_SLOTS get no pill. 36 covers the digit + letter
+-- convention AeroSpace configs tend to follow; raise it if yours is larger.
+local MAX_SLOTS = 36
 
-local workspaces = aerospace_workspaces()
+local spaces = {}    -- slot -> space item
+local brackets = {}  -- slot -> bracket item
+local names = {}     -- slot -> bound workspace name (nil = unbound)
+local slot_of = {}   -- workspace name -> slot
 
-local spaces = {}    -- sid -> space item
-local brackets = {}  -- sid -> bracket item
-
-for _, sid in ipairs(workspaces) do
-  local space = sbar.add("item", "space." .. sid, {
+for i = 1, MAX_SLOTS do
+  local space = sbar.add("item", "space." .. i, {
     icon = {
       font = { family = settings.font.numbers },
-      string = sid,
+      string = "",
       padding_left = 8,
       padding_right = 4,
       color = colors.white,
@@ -68,15 +68,15 @@ for _, sid in ipairs(workspaces) do
       height = 26,
     },
     popup = { background = { border_width = 5, border_color = colors.black } },
-    -- Left click focuses the workspace via AeroSpace.
-    click_script = AEROSPACE .. " workspace " .. sid,
+    -- Left click focuses the workspace via AeroSpace; the command is set
+    -- when a name is bound to the slot (bind_names).
     drawing = false,
   })
 
-  spaces[sid] = space
+  spaces[i] = space
 
   -- Single item bracket for space items to achieve double border on highlight
-  brackets[sid] = sbar.add("bracket", { space.name }, {
+  brackets[i] = sbar.add("bracket", { space.name }, {
     background = {
       color = colors.transparent,
       border_color = colors.bg2,
@@ -90,7 +90,7 @@ for _, sid in ipairs(workspaces) do
   })
 
   -- Padding space (visibility tracks the workspace item).
-  sbar.add("item", "space.padding." .. sid, {
+  sbar.add("item", "space.padding." .. i, {
     script = "",
     width = settings.group_paddings,
     drawing = false,
@@ -103,22 +103,53 @@ end
 -- `shown` tracks which pills are visually present (so only a real
 -- shown->hidden transition animates); `hiding` carries a sequence number so
 -- a reveal landing mid-collapse cancels the delayed drawing=off cleanly.
-local shown = {}     -- sid -> pill currently visible
-local hiding = {}    -- sid -> hide_seq of the in-flight collapse
+-- All three are keyed by SLOT: the binding may move under a slot, and the
+-- reconcile that moved it repaints the slot from the visible set.
+local shown = {}     -- slot -> pill currently visible
+local hiding = {}    -- slot -> hide_seq of the in-flight collapse
 local hide_seq = 0
-local empty = {}     -- sid -> false once windows are seen (nil = unknown/new)
+local empty = {}     -- slot -> false once windows are seen (nil = unknown/new)
+
+-- Bind the ordered workspace list to slots. A slot whose name changes (a
+-- workspace summoned or removed above it) forgets what it knew about the
+-- old one: the name and the click target follow the binding at once, and
+-- the caller's reconcile pass repaints occupancy and visibility. Returns
+-- whether any slot changed hands.
+local function bind_names(list)
+  slot_of = {}
+  local changed = false
+  for i = 1, MAX_SLOTS do
+    local name = list[i]
+    if name then slot_of[name] = i end
+    if name ~= names[i] then
+      changed = true
+      names[i] = name
+      empty[i] = nil
+      spaces[i]:set({
+        icon = { string = name or "" },
+        click_script = name and (AEROSPACE .. " workspace " .. shell.quote(name)) or "",
+      })
+    end
+  end
+  return changed
+end
 
 -- The bracket ring only outlines workspaces that actually hold windows; an
 -- empty/new workspace shows as a bare pill.
-local function bracket_border(sid)
-  return (empty[sid] == false) and 2 or 0
+local function bracket_border(slot)
+  return (empty[slot] == false) and 2 or 0
 end
 
 -- Fetch the app icons for a workspace and render them as the space label.
-local function update_windows(sid)
+local function update_windows(slot)
+  local name = names[slot]
+  if not name then return end
   sbar.exec(
-    AEROSPACE .. " list-windows --workspace " .. sid .. " --format '%{app-name}' 2>/dev/null",
+    AEROSPACE .. " list-windows --workspace " .. shell.quote(name)
+      .. " --format '%{app-name}' 2>/dev/null",
     function(windows)
+      -- The slot may have been rebound while the query was in flight.
+      if names[slot] ~= name then return end
       local icon_line = ""
       local seen = {}
       for raw_app in windows:gmatch("[^\r\n]+") do
@@ -131,12 +162,11 @@ local function update_windows(sid)
         end
       end
 
-      local space = spaces[sid]
-      if not space then return end
-      empty[sid] = (icon_line == "")
+      local space = spaces[slot]
+      empty[slot] = (icon_line == "")
       -- A collapsing pill is animating these exact properties; direct sets
       -- would cancel the animations and snap it back open mid-slide.
-      if hiding[sid] then return end
+      if hiding[slot] then return end
       if icon_line == "" then
         space:set({
           label = { drawing = false },
@@ -148,19 +178,19 @@ local function update_windows(sid)
           icon = { padding_left = 8, padding_right = 4 },
         })
       end
-      brackets[sid]:set({ background = { border_width = bracket_border(sid) } })
+      brackets[slot]:set({ background = { border_width = bracket_border(slot) } })
     end
   )
 end
 
 -- Undo the collapse geometry. Direct sets cancel any in-flight animation on
 -- the same properties, so this doubles as the mid-collapse abort.
-local function restore_pill(sid)
+local function restore_pill(slot)
   -- Park the geometry the pill will actually reveal with: an empty pill is
   -- 12/12 with no label; parking the non-empty 8/4 look makes the reveal
   -- pop wider ~200ms later when update_windows lands.
-  local is_empty = empty[sid] ~= false
-  spaces[sid]:set({
+  local is_empty = empty[slot] ~= false
+  spaces[slot]:set({
     padding_left = 1,
     padding_right = 1,
     icon = {
@@ -170,93 +200,94 @@ local function restore_pill(sid)
     },
     label = { width = "dynamic", padding_left = 4, padding_right = 8, drawing = not is_empty },
   })
-  brackets[sid]:set({ background = { border_width = bracket_border(sid) } })
-  sbar.set("space.padding." .. sid,
+  brackets[slot]:set({ background = { border_width = bracket_border(slot) } })
+  sbar.set("space.padding." .. slot,
     { width = settings.group_paddings, padding_left = 5, padding_right = 5 })
 end
 
 -- drawing=on is set unconditionally: menus.lua hides pills behind our back
 -- with a regex set, so `shown` can be stale when the menus swap away.
-local function reveal_pill(sid)
-  if hiding[sid] then
-    hiding[sid] = nil
-    restore_pill(sid)
-  elseif not shown[sid] and empty[sid] ~= false then
+local function reveal_pill(slot)
+  if hiding[slot] then
+    hiding[slot] = nil
+    restore_pill(slot)
+  elseif not shown[slot] and empty[slot] ~= false then
     -- Believed-empty pill about to appear: paint the empty geometry NOW so
     -- it shows up at final size — update_windows only confirms it later
     -- (items are created 8/4, so the first-ever reveal pops without this).
-    spaces[sid]:set({
+    spaces[slot]:set({
       label = { drawing = false },
       icon = { padding_left = 12, padding_right = 12 },
     })
   end
-  shown[sid] = true
-  spaces[sid]:set({ drawing = true })
-  sbar.set("space.padding." .. sid, { drawing = true })
+  shown[slot] = true
+  spaces[slot]:set({ drawing = true })
+  sbar.set("space.padding." .. slot, { drawing = true })
 end
 
-local function collapse_pill(sid)
+local function collapse_pill(slot)
   hide_seq = hide_seq + 1
   local seq = hide_seq
-  hiding[sid] = seq
+  hiding[slot] = seq
   sbar.animate("tanh", 14, function()
-    spaces[sid]:set({
+    spaces[slot]:set({
       padding_left = 0,
       padding_right = 0,
       icon = { width = 0, padding_left = 0, padding_right = 0 },
       label = { width = 0, padding_left = 0, padding_right = 0 },
     })
-    brackets[sid]:set({ background = { border_width = 0 } })
+    brackets[slot]:set({ background = { border_width = 0 } })
     -- The spacer's full footprint is width + its default 5/5 item paddings;
     -- leaving the paddings un-animated would snap 10pt shut at cleanup.
-    sbar.set("space.padding." .. sid, { width = 0, padding_left = 0, padding_right = 0 })
+    sbar.set("space.padding." .. slot, { width = 0, padding_left = 0, padding_right = 0 })
   end)
   sbar.delay(0.3, function()   -- 14 frames at 60Hz, plus margin
-    if hiding[sid] ~= seq then return end
-    hiding[sid] = nil
-    shown[sid] = nil
-    spaces[sid]:set({ drawing = false })
-    sbar.set("space.padding." .. sid, { drawing = false })
-    restore_pill(sid)          -- park clean geometry for the next reveal
+    if hiding[slot] ~= seq then return end
+    hiding[slot] = nil
+    shown[slot] = nil
+    spaces[slot]:set({ drawing = false })
+    sbar.set("space.padding." .. slot, { drawing = false })
+    restore_pill(slot)          -- park clean geometry for the next reveal
   end)
 end
 
 -- Refresh which workspaces are visible/highlighted. Visible = non-empty OR the
 -- focused workspace; highlighted = focused.
--- YBAR PORT: right after wake (or login) the AeroSpace server can take a few
--- seconds to answer, and an empty reply means "not ready", not "no
--- workspaces" — hiding every space on it would blank the bar until the next
--- manual switch. Retry a few times instead.
 -- Instant phase: the event already names the focused workspace — the
 -- cross-fade and the focused pill's reveal must not wait for the
--- aerospace query round-trip.
-local last_focused
+-- aerospace query round-trip. A name with no slot yet (a workspace seen for
+-- the first time) waits for the reconcile that binds it.
+local last_focused   -- workspace name
 local function apply_focus(focused)
   -- Instant, no animation: switching must feel immediate.
-  for sid, space in pairs(spaces) do
-    local selected = (sid == focused)
-    space:set({
-      icon = { color = colors.white },
-      label = { color = selected and colors.white or colors.grey },
-      background = {
-        color = selected and colors.with_alpha(colors.grey, 0.5) or colors.bg1,
-      },
-    })
-    brackets[sid]:set({
-      background = { border_color = selected and colors.grey or colors.bg2 },
-    })
+  for slot, space in pairs(spaces) do
+    if names[slot] then
+      local selected = (names[slot] == focused)
+      space:set({
+        icon = { color = colors.white },
+        label = { color = selected and colors.white or colors.grey },
+        background = {
+          color = selected and colors.with_alpha(colors.grey, 0.5) or colors.bg1,
+        },
+      })
+      brackets[slot]:set({
+        background = { border_color = selected and colors.grey or colors.bg2 },
+      })
+    end
   end
 
-  if spaces[focused] then reveal_pill(focused) end
+  local slot = slot_of[focused]
+  if slot then reveal_pill(slot) end
 
   -- The workspace being left collapses NOW if it holds no windows — waiting
-  -- for the debounce + aerospace round-trip reads as lag. empty[sid] == nil
+  -- for the debounce + aerospace round-trip reads as lag. empty[slot] == nil
   -- (new, never-inspected workspace) counts as empty; the reconcile pass
   -- corrects the rare miss.
-  if last_focused and last_focused ~= focused and spaces[last_focused]
-      and empty[last_focused] ~= false
-      and shown[last_focused] and not hiding[last_focused] then
-    collapse_pill(last_focused)
+  local last_slot = last_focused and slot_of[last_focused]
+  if last_slot and last_focused ~= focused
+      and empty[last_slot] ~= false
+      and shown[last_slot] and not hiding[last_slot] then
+    collapse_pill(last_slot)
   end
   last_focused = focused
 end
@@ -266,46 +297,75 @@ end
 -- repainting stale state out of order.
 local reconcile_gen = 0
 local reconcile
+local MAX_RETRIES = 5
 
+-- One child shell, two CLI calls: the full workspace list (slot binding)
+-- and the non-empty list (visibility). An empty line separates them — a
+-- workspace name is never empty, so the split is unambiguous.
+-- YBAR PORT: right after wake (or login) the AeroSpace server can take a few
+-- seconds to answer, and an empty reply means "not ready", not "no
+-- workspaces" — hiding every space on it would blank the bar until the next
+-- manual switch. Retry a few times instead.
 reconcile = function(focused, attempt, gen)
-  sbar.exec(AEROSPACE .. " list-workspaces --monitor all --empty no 2>/dev/null", function(nonempty)
-    if gen ~= reconcile_gen then return end
-    -- The menus may have swapped in while this query was in flight; a
-    -- reveal now would draw pills over the open app menus, and nothing
-    -- hides them again until the next swap.
-    if MENUS_VISIBLE then return end
-    local visible = {}
-    for raw_ws in nonempty:gmatch("[^\r\n]+") do
-      local ws = raw_ws:match("^%s*(.-)%s*$")
-      if ws ~= "" then visible[ws] = true end
-    end
-    if next(visible) == nil and (attempt or 0) < 5 then
-      sbar.exec("sleep 2", function()
-        if gen == reconcile_gen then reconcile(focused, (attempt or 0) + 1, gen) end
-      end)
-      return
-    end
-    if focused and focused ~= "" then visible[focused] = true end
-
-    for sid in pairs(spaces) do
-      if visible[sid] then
-        reveal_pill(sid)
-        update_windows(sid)
-      elseif shown[sid] and not hiding[sid] then
-        collapse_pill(sid)
+  sbar.exec(
+    AEROSPACE .. " list-workspaces --all 2>/dev/null; echo; "
+      .. AEROSPACE .. " list-workspaces --monitor all --empty no 2>/dev/null",
+    function(out)
+      if gen ~= reconcile_gen then return end
+      -- The menus may have swapped in while this query was in flight; a
+      -- reveal now would draw pills over the open app menus, and nothing
+      -- hides them again until the next swap.
+      if MENUS_VISIBLE then return end
+      local all, visible, past_break = {}, {}, false
+      for line in (out .. "\n"):gmatch("([^\n]*)\n") do
+        local ws = line:match("^%s*(.-)%s*$")
+        if ws == "" then
+          past_break = true
+        elseif past_break then
+          visible[ws] = true
+        else
+          all[#all + 1] = ws
+        end
       end
-    end
-  end)
+      if #all == 0 and (attempt or 0) < MAX_RETRIES then
+        sbar.exec("sleep 2", function()
+          if gen == reconcile_gen then reconcile(focused, (attempt or 0) + 1, gen) end
+        end)
+        return
+      end
+      -- Retries exhausted on an empty list: AeroSpace is gone. Binding the
+      -- empty list unbinds every slot and the loop below collapses them,
+      -- exactly as the old "no workspaces" path did; the routine poll
+      -- rebinds the moment it answers again.
+      local rebound = bind_names(all)
+      if focused and focused ~= "" then
+        visible[focused] = true
+        -- The instant focus paint went by name; when names just moved under
+        -- the slots (first paint, a summoned or removed workspace) it landed
+        -- on nothing or on the wrong pill, so paint again from the binding.
+        if rebound then apply_focus(focused) end
+      end
+
+      for slot = 1, MAX_SLOTS do
+        local name = names[slot]
+        if name and visible[name] then
+          reveal_pill(slot)
+          update_windows(slot)
+        elseif shown[slot] and not hiding[slot] then
+          collapse_pill(slot)
+        end
+      end
+    end)
 end
 
-local function update_spaces(focused)
+local function update_spaces(focused, attempt)
   if focused and focused ~= "" then
     apply_focus(focused)          -- instant, per switch
   end
   reconcile_gen = reconcile_gen + 1
   local gen = reconcile_gen
   sbar.delay(0.12, function()     -- debounce: one reconcile after a burst
-    if gen == reconcile_gen then reconcile(focused, 0, gen) end
+    if gen == reconcile_gen then reconcile(focused, attempt or 0, gen) end
   end)
 end
 
@@ -325,15 +385,16 @@ end)
 
 -- Query the focused workspace and repaint — used for the initial paint and
 -- the post-wake resync, with retries while AeroSpace is still starting up.
+-- The retry budget is shared with the reconcile that follows.
 local function query_and_update(attempt)
   sbar.exec(AEROSPACE .. " list-workspaces --focused 2>/dev/null", function(focused)
     focused = focused:gsub("%s+", "")
-    if focused == "" and (attempt or 0) < 5 then
+    if focused == "" and (attempt or 0) < MAX_RETRIES then
       sbar.exec("sleep 2", function() query_and_update((attempt or 0) + 1) end)
       return
     end
     if MENUS_VISIBLE then return end
-    update_spaces(focused)
+    update_spaces(focused, attempt)
   end)
 end
 
@@ -354,8 +415,11 @@ space_observer:subscribe({ "app_launched", "app_terminated" }, function()
 end)
 
 -- Minimize/window-close emit no OS-level event at all — a light routine
--- poll reconciles those within seconds.
-space_observer:subscribe("routine", function() query_and_update() end)
+-- poll reconciles those within seconds. It is also what brings the strip
+-- up when AeroSpace starts long after the bar (or is not installed), so it
+-- runs with the retry budget spent: the next tick IS the retry, and a
+-- fresh 2 s sleep chain every 5 s would pile up on a machine with no WM.
+space_observer:subscribe("routine", function() query_and_update(MAX_RETRIES) end)
 
 -- Initial paint at config load.
 query_and_update()
@@ -382,12 +446,18 @@ local spaces_indicator = sbar.add("item", {
   }
 })
 
-spaces_indicator:subscribe("swap_menus_and_spaces", function(env)
-  local currently_on = spaces_indicator:query().icon.value == icons.switch.on
-  spaces_indicator:set({
-    icon = currently_on and icons.switch.off or icons.switch.on
-  })
-end)
+-- YBAR PORT: only when there is a swap to reflect. Without the opt-in menus
+-- helper items/menus.lua registers no handler for this event, so the pills
+-- stay put — flipping the glyph to "off" would advertise a state the bar is
+-- not in (items/init.lua requires items.menus first, so the flag is set).
+if MENUS_HELPER_AVAILABLE then
+  spaces_indicator:subscribe("swap_menus_and_spaces", function(env)
+    local currently_on = spaces_indicator:query().icon.value == icons.switch.on
+    spaces_indicator:set({
+      icon = currently_on and icons.switch.off or icons.switch.on
+    })
+  end)
+end
 
 spaces_indicator:subscribe("mouse.entered", function(env)
   sbar.animate("tanh", 30, function()

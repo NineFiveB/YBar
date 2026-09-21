@@ -19,11 +19,17 @@ APP_DIR := $(HOME)/Applications/YBar.app
 # A stable signature keeps TCC grants (Accessibility, Screen Recording)
 # valid across rebuilds; ad-hoc voids them every time.
 SIGN_ID := $(shell security find-identity -v -p codesigning 2>/dev/null | grep -q "YBar Signing" && echo YBar Signing || echo -)
+# Build stamp: the short commit hash replaces CFBundleVersion when a bundle
+# is assembled, so `ybar --version` on a dev build names the commit it came
+# from. The committed plist keeps the release build number; a tarball build
+# (the formula's tag install) has no git and keeps it too.
+GIT_SHA := $(shell git rev-parse --short HEAD 2>/dev/null)
 
 app: build
 	rm -rf $(APP_DIR)
 	mkdir -p $(APP_DIR)/Contents/MacOS $(APP_DIR)/Contents/Resources
 	cp packaging/Info.plist $(APP_DIR)/Contents/Info.plist
+	[ -z "$(GIT_SHA)" ] || plutil -replace CFBundleVersion -string "$(GIT_SHA)" $(APP_DIR)/Contents/Info.plist
 	cp $(BIN) $(APP_DIR)/Contents/MacOS/ybar
 	cp -R $(SCRATCH)/debug/YBar_YBarKit.bundle $(APP_DIR)/Contents/Resources/
 	codesign --force --sign "$(SIGN_ID)" --identifier com.ybar.YBar $(APP_DIR)
@@ -51,6 +57,7 @@ release:
 	rm -rf $(SCRATCH)/stage
 	mkdir -p $(STAGE)/Contents/MacOS $(STAGE)/Contents/Resources
 	cp packaging/Info.plist $(STAGE)/Contents/Info.plist
+	[ -z "$(GIT_SHA)" ] || plutil -replace CFBundleVersion -string "$(GIT_SHA)" $(STAGE)/Contents/Info.plist
 	cp $(SCRATCH)/release/ybar $(STAGE)/Contents/MacOS/ybar
 	cp -R $(SCRATCH)/release/YBar_YBarKit.bundle $(STAGE)/Contents/Resources/
 	codesign --force --sign "$(SIGN_ID)" --identifier com.ybar.YBar $(STAGE)

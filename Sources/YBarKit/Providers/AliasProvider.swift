@@ -1,10 +1,18 @@
 import AppKit
-import ScreenCaptureKit
+// @preconcurrency: ScreenCaptureKit gained its Sendable annotations after
+// the macOS 15 SDK, so an older toolchain rejects awaiting
+// SCShareableContent from the main actor ("non-sendable result type ...
+// cannot be sent from nonisolated context") and the build fails for
+// anyone on macOS 14/15 - which README still promises to support.
+@preconcurrency import ScreenCaptureKit
 
 /// Capture loop for alias items: finds each alias's source window (another
 /// app's menu bar item) and screenshots it via ScreenCaptureKit on the item's
 /// update_freq cadence (default 2s). Requires Screen Recording permission —
 /// captures fail silently (and the alias renders nothing) until granted.
+/// Clicking an alias that has no click_script and no Lua handler forwards the
+/// click to the captured item as synthetic HID events (Daemon.onItemClicked),
+/// which needs Accessibility; macOS may raise that prompt on the first click.
 @MainActor
 public final class AliasProvider {
     /// All current alias items.

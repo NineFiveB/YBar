@@ -72,13 +72,18 @@ public struct YColor: Equatable, Sendable {
     public static let white = YColor(argb: 0xFFFF_FFFF)
 }
 
-/// Hard-offset silhouette shadow (sketchybar semantics: distance + angle, no blur).
-/// A gaussian soft shadow is a planned extension (`blur` field reserved).
+/// Silhouette shadow: a copy of the plate displaced by distance + angle
+/// (sketchybar semantics). `blur` softens it into a falloff — and a light
+/// colour at distance 0 with a blur makes it a GLOW instead: same quad,
+/// same code path, the only bloom this pipeline has.
 public struct ShadowStyle: Equatable, Sendable {
     public var drawing: Bool = false
     public var color: YColor = YColor(argb: 0xFF00_0000)
     public var distance: Float = 5
     public var angle: Float = 30
+    /// Falloff width in points; 0 keeps the hard offset copy. Background
+    /// shadows only — text shadows are glyph copies and stay hard.
+    public var blur: Float = 0
 
     public init() {}
 
@@ -169,7 +174,7 @@ public struct FontSpec: Equatable, Hashable, Sendable {
         let parts = text.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
         if parts.count >= 1, !parts[0].isEmpty { family = parts[0] }
         if parts.count >= 2, !parts[1].isEmpty { style = parts[1] }
-        if parts.count >= 3, let value = Float(parts[2]) { size = value }
+        if parts.count >= 3, let value = Float(parts[2]), value.isFinite, value > 0 { size = value }
     }
 
     public var description: String { "\(family):\(style):\(String(format: "%.1f", size))" }

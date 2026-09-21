@@ -7,6 +7,7 @@ public final class SocketServer: @unchecked Sendable {
     public enum ServerError: Error, CustomStringConvertible {
         case alreadyRunning(String)
         case bindFailed(String)
+        case foreignNode(String)
 
         public var description: String {
             switch self {
@@ -14,6 +15,8 @@ public final class SocketServer: @unchecked Sendable {
                 return "another ybar daemon is already running (socket: \(path))"
             case .bindFailed(let path):
                 return "could not bind socket at \(path)"
+            case .foreignNode(let path):
+                return "socket path owned by another user: \(path)"
             }
         }
     }
@@ -24,6 +27,8 @@ public final class SocketServer: @unchecked Sendable {
     /// Whether this server is the one that owns the socket file on disk.
     private var bound = false
     private var thread: Thread?
+    /// Set once bind+listen succeeded: only then is the node ours to unlink.
+    private var bound = false
 
     public init(path: String, handler: @escaping @MainActor ([String]) -> String) {
         self.path = path
@@ -41,8 +46,17 @@ public final class SocketServer: @unchecked Sendable {
             if SocketClient.isListening(socketPath: path) {
                 throw ServerError.alreadyRunning(path)
             }
-            unlink(path)
+            // /tmp is sticky: a dead node left by another user is not ours
+            // to recycle, and bind() alone would only say "address in use".
+            if unlink(path) != 0, errno == EPERM {
+                throw ServerError.foreignNode(path)
+            }
         }
+
+        // bind() creates the node under the process umask; the chmod below
+        // narrows it after the fact, so keep the instant before it closed too.
+        let previousMask = umask(0o077)
+        defer { umask(previousMask) }
 
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw ServerError.bindFailed(path) }
@@ -100,14 +114,15 @@ public final class SocketServer: @unchecked Sendable {
         //
         // Only the server that actually bound may remove the socket file. A
         // second daemon that lost the instance race throws .alreadyRunning out
-        // of start(), and AppKit still runs applicationWillTerminate on its way
-        // out — an unconditional unlink there deletes the LIVE daemon's socket,
-        // leaving a bar that renders fine and can never be talked to again.
-        // Autostart makes that race ordinary: launchd starts one, the user
-        // starts another.
-        guard bound else { return }
-        bound = false
-        unlink(path)
+        // of start() (before any bind), and AppKit still runs
+        // applicationWillTerminate on its way out — an unconditional unlink
+        // there deletes the LIVE daemon's socket, leaving a bar that renders
+        // fine and can never be talked to again. Autostart makes that race
+        // ordinary: launchd starts one, the user starts another.
+        if bound {
+            unlink(path)
+            bound = false
+        }
     }
 
     private func acceptLoop() {

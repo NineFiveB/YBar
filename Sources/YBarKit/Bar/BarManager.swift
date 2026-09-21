@@ -32,9 +32,18 @@ public final class BarManager {
     private var popupSurfaces: [Int: PopupSurface] = [:]
     private var atlases: [CGFloat: GlyphAtlas] = [:]
     private var renderScheduled = false
-    private var retryScheduled = false
+    private(set) var retryScheduled = false
+    /// Scales / displays whose no-render condition was already reported —
+    /// the retry runs every second, the stderr line must not.
+    private var reportedAtlasScales: Set<CGFloat> = []
+    private var reportedEmptyDisplays: Set<Int> = []
     /// Item id of a slider currently being dragged.
-    private var draggingSliderID: Int?
+    var draggingSliderID: Int?
+    /// Arrangement index of the display each item was last pressed on, so a
+    /// host's popup opens where it was clicked rather than on the
+    /// lowest-index bar that lays it out. Keyed by display rather than by
+    /// surface object so a rebuild does not invalidate it.
+    private(set) var lastPressSurfaceIndex: [Int: Int] = [:]
     private var outsideClickMonitor: Any?
     private var menuBarObserver: NSObjectProtocol?
 
@@ -58,13 +67,16 @@ public final class BarManager {
     /// The last built scene contains marquee text (drives the display link).
     public var onMarqueeDemand: ((Bool) -> Void)?
     /// Waybar idle_inhibitor analogue: a power-management assertion that
-    /// keeps the display awake while active.
-    private var idleAssertion: IOPMAssertionID = 0
+    /// keeps the display awake while active. The held id, not the settings
+    /// flag, decides whether to create or release: a reload resets the
+    /// settings while the assertion is still held, and keying off the flag
+    /// then leaked one assertion per config save (and made `off` a no-op).
+    private(set) var idleAssertion: IOPMAssertionID = 0
 
     public func setIdleInhibit(_ active: Bool) {
-        guard active != settings.idleInhibit else { return }
-        settings.idleInhibit = active
+        if settings.idleInhibit != active { settings.idleInhibit = active }
         if active {
+            guard idleAssertion == 0 else { return }
             var id = IOPMAssertionID(0)
             let ok = IOPMAssertionCreateWithName(
                 kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
@@ -119,11 +131,13 @@ public final class BarManager {
 
     /// fullscreen_show: raise each surface over the active Space's fullscreen
     /// window, or restore its configured level. Called on active-space changes
-    /// (Daemon) and when the property toggles.
+    /// (Daemon) and when the property toggles. Under fullscreen_hide there is
+    /// nothing to raise — the panel is not on the Space — so the level is
+    /// simply restored; the collection behavior itself is set by apply().
     public func updateFullscreenElevation() {
+        let mayRaise = settings.fullscreenPolicy == .raise
         for surface in surfaces {
-            let raise = settings.fullscreenShow
-                && BarManager.hasFullscreenWindow(on: surface.screen)
+            let raise = mayRaise && BarManager.hasFullscreenWindow(on: surface.screen)
             surface.setElevated(raise, settings: settings)
         }
     }
@@ -161,9 +175,12 @@ public final class BarManager {
     }
 
     public func shutdown() {
+        setIdleInhibit(false)
         displayManager.stop()
+        surfaces.forEach { releaseHover(on: $0) }
         surfaces.forEach { $0.close() }
         surfaces.removeAll()
+        popupSurfaces.values.forEach { releaseHover(in: $0) }
         popupSurfaces.values.forEach { $0.close() }
         popupSurfaces.removeAll()
     }
@@ -176,11 +193,27 @@ public final class BarManager {
         let hadPointer = surfaces.contains { pointerInsideSurfaces.contains(ObjectIdentifier($0)) }
         surfaces.forEach { pointerInsideSurfaces.remove(ObjectIdentifier($0)) }
         if hadPointer { scheduleGlobalExitCheck() }
+        surfaces.forEach { releaseHover(on: $0) }
         surfaces.forEach { $0.close() }
         surfaces.removeAll()
 
+        // YBAR_DEBUG: one `[ybar:display]` line per screen on every (re)build
+        // — the geometry a "no bar on my second monitor" or "wrong scale"
+        // report needs, at the moment it was decided.
+        func trace(_ index: Int, _ screen: NSScreen, _ detail: String) {
+            guard DebugTrace.enabled else { return }
+            let frame = screen.frame
+            DebugTrace.log("[ybar:display] \(index) \"\(screen.localizedName)\": "
+                + "screen=\(Int(frame.width))x\(Int(frame.height))@(\(Int(frame.minX)),\(Int(frame.minY))) "
+                + "scale=\(screen.backingScaleFactor) refresh=\(screen.maximumFramesPerSecond)Hz "
+                + "notch=\(Int(BarSurface.physicalNotchWidth(of: screen))) \(detail)")
+        }
+
         for (index, screen) in DisplayManager.screens() {
-            guard settings.includesDisplay(arrangementIndex: index, isMain: index == 1) else { continue }
+            guard settings.includesDisplay(arrangementIndex: index, isMain: index == 1) else {
+                trace(index, screen, "skipped by display policy")
+                continue
+            }
             let surface = BarSurface(screen: screen, arrangementIndex: index)
             surface.hostView.metalLayer.device = device
             surface.onMouse = { [weak self] info, surface in
@@ -188,6 +221,9 @@ public final class BarManager {
             }
             surface.apply(settings: settings, screen: screen)
             surfaces.append(surface)
+            let bar = surface.panelFrame
+            trace(index, screen, "bar=\(Int(bar.width))x\(Int(bar.height))@(\(Int(bar.minX)),\(Int(bar.minY))) "
+                + "panelScale=\(surface.scale)")
         }
         onSurfacesRebuilt?()
         // Fresh surfaces start un-elevated; re-evaluate or a bar rebuilt
@@ -210,6 +246,9 @@ public final class BarManager {
             if let entry = screens.first(where: { $0.index == surface.arrangementIndex }) {
                 surface.apply(settings: settings, screen: entry.screen)
             }
+            // An ordered-out panel stops tracking; the hovered item must not
+            // wait for a mouseExited that never comes.
+            if settings.hidden { releaseHover(on: surface) }
         }
         setNeedsRender()
     }
@@ -229,25 +268,66 @@ public final class BarManager {
     }
 
     public func renderAll() {
+        // Marquee demand belongs to the whole frame: every bar surface and
+        // every popup panel is accumulated and reported once. Reporting per
+        // surface let whichever scene rendered last decide, and popups never
+        // reported at all, so a display link could be torn down under text
+        // that was still scrolling.
+        var marquee = false
         for surface in surfaces {
-            render(surface: surface)
+            if render(surface: surface) { marquee = true }
         }
-        updatePopups()
+        if updatePopups() { marquee = true }
+        onMarqueeDemand?(marquee)
     }
 
     // MARK: - Popups
 
-    private func updatePopups() {
+    /// Inset a clamped popup keeps from the screen edge: the bar's own edge
+    /// inset, so a clamped popup lines up with one that never needed
+    /// clamping (the rightmost pill already sits that far in). A bar flush
+    /// with the edge falls back to the Windows port's 7 pt.
+    private var popupEdgeMargin: CGFloat {
+        let inset = CGFloat(settings.margin + settings.paddingRight)
+        return inset > 0 ? inset : 7
+    }
+
+    /// The bar surface a host's popup hangs off: the display it was last
+    /// pressed on, else the one holding keyboard focus (a popup opened from
+    /// the CLI or a script has no press behind it), else the first that
+    /// lays the host out.
+    private func surfaceForPopup(host: Item) -> BarSurface? {
+        BarManager.surfaceForPopup(
+            hostID: host.id, surfaces: surfaces,
+            preferredIndex: lastPressSurfaceIndex[host.id], activeScreen: NSScreen.main)
+    }
+
+    static func surfaceForPopup(hostID: Int, surfaces: [BarSurface],
+                                preferredIndex: Int?, activeScreen: NSScreen?) -> BarSurface? {
+        let candidates = surfaces.filter { surface in
+            surface.itemFrames.contains { $0.itemID == hostID && $0.frame != .zero }
+        }
+        if let preferredIndex,
+           let pressed = candidates.first(where: { $0.arrangementIndex == preferredIndex }) {
+            return pressed
+        }
+        if let activeScreen, let active = candidates.first(where: { $0.screen == activeScreen }) {
+            return active
+        }
+        return candidates.first
+    }
+
+    /// Returns whether any presented popup scene carries marquee text.
+    private func updatePopups() -> Bool {
         // A host only counts as live once its scene actually rendered; anything
         // else (closed, hostless, empty, zero-size) tears its panel down —
         // stale, still-clickable panels must never linger.
         var liveHostIDs: Set<Int> = []
+        var marquee = false
         for host in store.items where host.popup.isOpen {
             let members = store.items.filter { $0.position == .popup && $0.popupHost == host.name }
             guard !members.isEmpty,
-                  let surface = surfaces.first(where: { surface in
-                      surface.itemFrames.contains { $0.itemID == host.id && $0.frame != .zero }
-                  }),
+                  let surface = surfaceForPopup(host: host),
                   let hostFrame = surface.itemFrames.first(where: { $0.itemID == host.id })?.frame,
                   let atlas = atlas(for: surface.scale)
             else { continue }
@@ -259,6 +339,7 @@ public final class BarManager {
             let scene = sceneBuilder.buildPopup(
                 host: host, members: members, scale: scale, atlas: atlas)
             guard scene.sizePoints.width > 0, scene.sizePoints.height > 0 else { continue }
+            if scene.hasMarquee { marquee = true }
 
             let popupSurface: PopupSurface
             if let existing = popupSurfaces[host.id] {
@@ -274,6 +355,7 @@ public final class BarManager {
                 popupSurfaces[host.id] = popupSurface
             }
             popupSurface.itemFrames = scene.itemFrames
+            popupSurface.hidesInFullscreen = settings.fullscreenPolicy == .hide
 
             // Host frame (bar-local, y-down) -> global AppKit coords (y-up).
             let barFrame = surface.panelFrame
@@ -290,7 +372,10 @@ public final class BarManager {
                 size: scene.sizePoints,
                 barPosition: settings.position,
                 yOffset: CGFloat(host.popup.yOffset),
-                align: host.popup.align)
+                align: host.popup.align,
+                screen: surface.screen,
+                edgeMargin: popupEdgeMargin,
+                fadeInFrames: CGFloat(host.popup.fadeInFrames))
             if renderer.render(list: scene.list, layer: popupSurface.hostView.metalLayer, atlas: atlas) {
                 liveHostIDs.insert(host.id)
             } else {
@@ -299,16 +384,33 @@ public final class BarManager {
         }
 
         for (hostID, popupSurface) in popupSurfaces where !liveHostIDs.contains(hostID) {
+            // Mid-fade: the entry stays until the ramp's completion drops it,
+            // so a reopen finds the same panel and ramps it back up instead
+            // of stacking a fresh one over the fading ghost.
+            if popupSurface.isClosing { continue }
             if pointerInsideSurfaces.remove(ObjectIdentifier(popupSurface)) != nil {
                 scheduleGlobalExitCheck()
+            }
+            releaseHover(in: popupSurface)
+            let fadeFrames = store.items.first { $0.id == hostID }?.popup.fadeOutFrames ?? 0
+            if fadeFrames > 0, popupSurface.isVisible {
+                // The rows stop answering at once (the panel itself goes deaf
+                // in fadeOut); the ramp orders it out and then the entry goes.
+                popupSurface.itemFrames = []
+                popupSurface.fadeOut(frames: CGFloat(fadeFrames)) { [weak self] in
+                    guard let self, self.popupSurfaces[hostID] === popupSurface else { return }
+                    self.popupSurfaces.removeValue(forKey: hostID)
+                }
+                continue
             }
             popupSurface.close()
             popupSurfaces.removeValue(forKey: hostID)
         }
         updateOutsideClickMonitor()
+        return marquee
     }
 
-    private func handlePopupMouse(_ info: MouseEventInfo, on popup: PopupSurface) {
+    func handlePopupMouse(_ info: MouseEventInfo, on popup: PopupSurface) {
         func member(at point: CGPoint) -> Item? {
             guard let itemID = popup.itemFrames.first(where: { $0.frame.contains(point) })?.itemID
             else { return nil }
@@ -327,26 +429,38 @@ public final class BarManager {
             // Popup members are laid out by the same emit path as bar items,
             // so the shared slider drag machinery works verbatim — only the
             // frame source differs. No closeAutoClosePopups here: a press
-            // inside a popup must never dismiss it.
-            if let item = member(at: info.point), item.slider != nil {
+            // inside a popup must never dismiss it. Same read-only rule as
+            // the bar: interactive=off never enters the drag machinery.
+            if let item = member(at: info.point), let slider = item.slider, slider.interactive {
                 draggingSliderID = item.id
                 onSliderDragStarted?(item)
                 updateSlider(item: item, localX: info.point.x, frames: popup.itemFrames)
             }
         case .dragged:
-            if let id = draggingSliderID,
-               let item = store.items.first(where: { $0.id == id }) {
-                item.slider?.isDragged = true
-                updateSlider(item: item, localX: info.point.x, frames: popup.itemFrames)
+            if let id = draggingSliderID {
+                if let item = store.items.first(where: { $0.id == id }), item.slider != nil {
+                    item.slider?.isDragged = true
+                    updateSlider(item: item, localX: info.point.x, frames: popup.itemFrames)
+                } else {
+                    // The dragged item ceased to exist mid-drag (reload,
+                    // --remove): drop the stale id, or the global-exit check
+                    // it vetoes stays deferred until the next slider press.
+                    draggingSliderID = nil
+                    scheduleGlobalExitCheck()
+                }
             }
         case .clicked:
-            if let id = draggingSliderID,
-               let item = store.items.first(where: { $0.id == id }),
-               let slider = item.slider {
+            if let id = draggingSliderID {
                 draggingSliderID = nil
-                slider.isDragged = false
-                updateSlider(item: item, localX: info.point.x, frames: popup.itemFrames)
-                onSliderChanged?(item, slider.percentage)
+                // The release ends the drag whether or not the item still
+                // exists — an item removed mid-drag must not turn this
+                // release into a click on whatever sits under the cursor.
+                if let item = store.items.first(where: { $0.id == id }),
+                   let slider = item.slider {
+                    slider.isDragged = false
+                    updateSlider(item: item, localX: info.point.x, frames: popup.itemFrames)
+                    onSliderChanged?(item, slider.percentage)
+                }
                 // A drag can end with the pointer outside every surface (the
                 // press view keeps receiving events); the exit that fired
                 // mid-drag was deferred, so re-check now.
@@ -364,11 +478,7 @@ public final class BarManager {
             noteSurfaceEntered(ObjectIdentifier(popup))
             let hovered = member(at: info.point)
             guard popup.hoveredItemID != hovered?.id else { return }
-            if let previousID = popup.hoveredItemID,
-               let previous = store.items.first(where: { $0.id == previousID }) {
-                previous.mouseOver = false
-                onItemHover?(previous, false)
-            }
+            releaseHover(in: popup)
             popup.hoveredItemID = hovered?.id
             if let hovered {
                 hovered.mouseOver = true
@@ -376,14 +486,26 @@ public final class BarManager {
             }
         case .exited:
             pointerInsideSurfaces.remove(ObjectIdentifier(popup))
-            if let previousID = popup.hoveredItemID,
-               let previous = store.items.first(where: { $0.id == previousID }) {
-                previous.mouseOver = false
-                onItemHover?(previous, false)
-            }
-            popup.hoveredItemID = nil
+            releaseHover(in: popup)
             scheduleGlobalExitCheck()
         }
+    }
+
+    /// Forget the popup's hovered row and fire its targeted mouse.exited.
+    /// Every path that ends a panel's life must come through here: a closed
+    /// panel never delivers mouseExited, so a row hovered at teardown would
+    /// otherwise never learn the pointer left it.
+    func releaseHover(in popup: PopupSurface) {
+        guard let previousID = popup.hoveredItemID else { return }
+        popup.hoveredItemID = nil
+        guard let previous = store.items.first(where: { $0.id == previousID }) else { return }
+        previous.mouseOver = false
+        onItemHover?(previous, false)
+    }
+
+    /// Bar-surface counterpart (also cancels the pending tooltip).
+    func releaseHover(on surface: BarSurface) {
+        updateHover(surface: surface, to: nil)
     }
 
     // MARK: - Popup auto-close
@@ -426,11 +548,32 @@ public final class BarManager {
         return created
     }
 
-    private func render(surface: BarSurface) {
+    /// Returns whether the surface's scene carries marquee text.
+    @discardableResult
+    func render(surface: BarSurface) -> Bool {
+        // Both guards used to return silently; say why once. Only the atlas
+        // guard polls: a missing texture is transient. An empty bar frame is
+        // a config state (height=0, margin >= screen width / 2) that no retry
+        // can resolve, and every path that moves a bar frame — applySettings,
+        // rebuildSurfaces, the reframeBars hook — already ends in
+        // setNeedsRender(), so a timer here would poll forever for nothing.
         let barSize = surface.barSize
-        guard barSize.width > 0, barSize.height > 0 else { return }
+        guard barSize.width > 0, barSize.height > 0 else {
+            if reportedEmptyDisplays.insert(surface.arrangementIndex).inserted {
+                FileHandle.standardError.write(Data(
+                    "[!] display \(surface.arrangementIndex): bar frame is empty, nothing to render\n".utf8))
+            }
+            return false
+        }
         let scale = surface.scale
-        guard let atlas = atlas(for: scale) else { return }
+        guard let atlas = atlas(for: scale) else {
+            if reportedAtlasScales.insert(scale).inserted {
+                FileHandle.standardError.write(Data(
+                    "[!] glyph atlas texture at \(scale)x could not be created, retrying\n".utf8))
+            }
+            scheduleRetry()
+            return false
+        }
 
         let items = visibleItems(on: surface)
         // q/e dead zone only where a notch physically exists; notch_width=0
@@ -500,14 +643,14 @@ public final class BarManager {
             barSize: barSize,
             scale: scale,
             atlas: atlas)
-        // Marquee text needs continuous frames; everything else stays
-        // damage-driven.
-        onMarqueeDemand?(sceneBuilder.sceneHasMarquee)
         if !renderer.render(list: list, layer: surface.hostView.metalLayer, atlas: atlas) {
             // Frame lost (display asleep / drawables exhausted): the damage flag
             // was already consumed, so reschedule or the update is never shown.
             scheduleRetry()
         }
+        // Marquee text needs continuous frames; everything else stays
+        // damage-driven.
+        return list.hasMarquee
     }
 
     private func scheduleRetry() {
@@ -566,39 +709,52 @@ public final class BarManager {
 
     // MARK: - Mouse
 
-    private func handleMouse(_ info: MouseEventInfo, on surface: BarSurface) {
+    func handleMouse(_ info: MouseEventInfo, on surface: BarSurface) {
         switch info.kind {
         case .down:
             // A press proves the pointer is inside (see the popup handler's
             // note on warped cursors outrunning tracking-area enters).
             noteSurfaceEntered(ObjectIdentifier(surface))
             let hit = hitTest(point: info.point, on: surface)
+            if let hit { lastPressSurfaceIndex[hit.id] = surface.arrangementIndex }
             // A press anywhere that is not an open popup's host dismisses
             // auto-close popups (host presses defer to their toggle scripts).
             closeAutoClosePopups(except: hit?.id)
-            if let item = hit, item.slider != nil {
+            // interactive=off is a read-only meter: no drag and no
+            // pointer-derived percentage; the release is an ordinary click.
+            if let item = hit, let slider = item.slider, slider.interactive {
                 draggingSliderID = item.id
                 onSliderDragStarted?(item)
                 updateSlider(item: item, localX: info.point.x, frames: surface.itemFrames)
             }
         case .dragged:
-            if let id = draggingSliderID,
-               let item = store.items.first(where: { $0.id == id }) {
-                item.slider?.isDragged = true
-                updateSlider(item: item, localX: info.point.x, frames: surface.itemFrames)
+            if let id = draggingSliderID {
+                if let item = store.items.first(where: { $0.id == id }), item.slider != nil {
+                    item.slider?.isDragged = true
+                    updateSlider(item: item, localX: info.point.x, frames: surface.itemFrames)
+                } else {
+                    // Self-heal as in the popup handler: the dragged item was
+                    // removed mid-drag.
+                    draggingSliderID = nil
+                    scheduleGlobalExitCheck()
+                }
             }
         case .clicked:
-            if let id = draggingSliderID,
-               let item = store.items.first(where: { $0.id == id }),
-               let slider = item.slider {
+            if let id = draggingSliderID {
                 draggingSliderID = nil
-                slider.isDragged = false
-                updateSlider(item: item, localX: info.point.x, frames: surface.itemFrames)
-                onSliderChanged?(item, slider.percentage)
+                // A release that began a slider drag is never a click, even
+                // when the item was removed mid-drag (see the popup handler).
+                if let item = store.items.first(where: { $0.id == id }),
+                   let slider = item.slider {
+                    slider.isDragged = false
+                    updateSlider(item: item, localX: info.point.x, frames: surface.itemFrames)
+                    onSliderChanged?(item, slider.percentage)
+                }
                 scheduleGlobalExitCheck()
                 return
             }
             if let item = hitTest(point: info.point, on: surface) {
+                lastPressSurfaceIndex[item.id] = surface.arrangementIndex
                 onItemClicked?(item, info)
             }
         case .scrolled:
@@ -658,28 +814,23 @@ public final class BarManager {
     /// surface's own frame snapshot (the shared Item.frame holds whichever
     /// surface rendered last — wrong on multi-display), bar or popup: both
     /// record frames as content minus paddingLeft from the same emit path,
-    /// so one trackX computation mirrors the emit-side fixed-width slack for
-    /// either surface kind.
+    /// and the track origin is the renderer's own SceneBuilder.sliderTrackX,
+    /// so a press lands on exactly the fraction the frame painted.
     private func updateSlider(item: Item, localX: CGFloat,
                               frames: [(itemID: Int, frame: CGRect)]) {
         guard let slider = item.slider,
               let frame = frames.first(where: { $0.itemID == item.id })?.frame,
               frame != .zero
         else { return }
-        var trackX = frame.minX + CGFloat(item.paddingLeft)
-        if item.customWidth >= 0 {
-            let slack = max(0, CGFloat(item.customWidth) - CGFloat(naturalWidth(of: item)))
-            switch item.align {
-            case "c": trackX += slack / 2
-            case "r": trackX += slack
-            default: break
-            }
-        }
-        if item.icon.drawing, !item.icon.string.isEmpty {
-            trackX += CGFloat(item.icon.paddingLeft)
-                + fontCache.measure(part: item.icon).width
-                + CGFloat(item.icon.paddingRight)
-        }
+        let contentBox = CGRect(
+            x: frame.minX + CGFloat(item.paddingLeft),
+            y: frame.minY,
+            width: frame.width - CGFloat(item.paddingLeft) - CGFloat(item.paddingRight),
+            height: frame.height)
+        let measured = MeasuredContent(
+            iconSize: fontCache.measure(part: item.icon),
+            labelSize: fontCache.measure(part: item.label))
+        let trackX = SceneBuilder.sliderTrackX(item: item, contentBox: contentBox, measured: measured)
         slider.percentage = slider.percentage(forLocalX: localX - trackX)
         setNeedsRender()
     }
@@ -725,6 +876,7 @@ public final class BarManager {
         let tooltip = tooltipSurface ?? PopupSurface(hostItemID: -1, device: device)
         tooltipSurface = tooltip
         tooltip.panel.hasShadow = false
+        tooltip.hidesInFullscreen = settings.fullscreenPolicy == .hide
         let barFrame = surface.panelFrame
         let anchor = CGRect(
             x: barFrame.minX + frame.minX,
@@ -732,7 +884,8 @@ public final class BarManager {
             width: frame.width,
             height: frame.height)
         tooltip.present(anchor: anchor, size: built.sizePoints,
-                        barPosition: settings.position, yOffset: 4, align: "c")
+                        barPosition: settings.position, yOffset: 4, align: "c",
+                        screen: surface.screen, edgeMargin: popupEdgeMargin)
         _ = renderer.render(list: built.list, layer: tooltip.hostView.metalLayer, atlas: atlas)
     }
 

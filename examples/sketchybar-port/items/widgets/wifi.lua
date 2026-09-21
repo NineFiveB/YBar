@@ -1,6 +1,7 @@
 local icons = require("icons")
 local colors = require("colors")
 local settings = require("settings")
+local hover = require("helpers.hover")
 
 -- YBAR PORT: Wi-Fi popup mimicking the macOS Settings > Wi-Fi pane:
 -- header with a working power toggle, the connected network with a green
@@ -41,6 +42,8 @@ local wifi_bracket = sbar.add("bracket", "widgets.wifi.bracket", {
   background = { color = colors.bg1 },
   popup = { align = "center", height = 30 }
 })
+
+hover.pill(wifi_bracket, wifi)
 
 local popup_pos = "popup." .. wifi_bracket.name
 
@@ -89,6 +92,11 @@ local current_name = sbar.add("item", {
   },
 })
 
+-- The two slots sum to popup_width (an item centres its parts, so a
+-- shortfall drifts the row right by half of it), and the dot's slot holds
+-- the inset plus its ink — a fixed part width replaces ink + paddings, so
+-- 16 left the 15 pt bullet 4 pt to draw in. 18 also puts "Connected" on
+-- the network rows' text column (inset + 6).
 local current_status = sbar.add("item", {
   position = popup_pos,
   drawing = false,
@@ -96,17 +104,17 @@ local current_status = sbar.add("item", {
   icon = {
     align = "left",
     string = "•",
-    color = colors.green,
+    color = colors.connected,
     font = { size = 15, style = settings.font.style_map["Bold"] },
-    width = 16,
+    width = 18,
     padding_left = inset,
   },
   label = {
     align = "left",
     string = "Connected",
-    color = colors.grey,
+    color = colors.connected,
     font = { size = 12 },
-    width = popup_width - 18 - inset,
+    width = popup_width - 18,
   },
 })
 
@@ -132,7 +140,7 @@ local function add_section_header(title)
 end
 
 local function add_net_row(name)
-  return sbar.add("item", name, {
+  local row = sbar.add("item", name, {
     position = popup_pos,
     drawing = false,
     width = popup_width,
@@ -153,6 +161,8 @@ local function add_net_row(name)
       padding_right = inset,
     },
   })
+  hover.row(row)
+  return row
 end
 
 local known_header = add_section_header("Known Networks")
@@ -201,12 +211,17 @@ local vpn_button = sbar.add("item", {
 local settings_row = sbar.add("item", {
   position = popup_pos,
   width = popup_width,
+  -- Two slot rules shape this row. A part's fixed width REPLACES ink +
+  -- paddings, so the inset has to fit inside it; and an item centres its
+  -- parts by default, so the slots must sum to popup_width or the whole
+  -- row drifts right by half the shortfall (the label is off, so the icon
+  -- slot is the row).
   icon = {
     string = icons.gear .. "  Settings",
     align = "left",
     color = colors.white,
     font = { size = 12.0 },
-    width = popup_width - 20,
+    width = popup_width,
     padding_left = inset,
   },
   label = { drawing = false },
@@ -364,11 +379,11 @@ local function update_vpn_status()
     local connected = output:match("%(Connected%)") ~= nil
     local present = output:match("%S") ~= nil
     vpn_button:set({
-      icon = { color = connected and colors.green or colors.grey },
+      icon = { color = connected and colors.connected or colors.grey },
       label = {
         string = connected and "Connected"
           or (present and "Not Connected" or "Not Installed"),
-        color = connected and colors.green or colors.grey,
+        color = connected and colors.connected or colors.grey,
       },
     })
   end)
@@ -429,6 +444,9 @@ for i, row in ipairs(other_rows) do
     join(other[i], row)
   end)
 end
+
+hover.row(vpn_button)
+hover.row(settings_row)
 
 settings_row:subscribe("mouse.clicked", function()
   sbar.exec("open 'x-apple.systempreferences:com.apple.wifi-settings-extension'")

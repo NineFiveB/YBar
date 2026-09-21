@@ -119,6 +119,7 @@ final class PropertyAnimation {
 public final class AnimationScheduler {
     private var animations: [String: PropertyAnimation] = [:]
     private var displayLink: CADisplayLink?
+    private var frameTrace = FrameRateTrace()
 
     /// Provider of a fresh display link bound to a live bar view (wired by the daemon).
     public var makeDisplayLink: ((AnimationScheduler, Selector) -> CADisplayLink?)?
@@ -157,6 +158,13 @@ public final class AnimationScheduler {
         stopLinkIfIdle()
     }
 
+    /// Cancel every animation under a key namespace — `item.<id>.` when an
+    /// item is removed, so its closures stop steering freed component state.
+    func cancel(prefix: String) {
+        animations = animations.filter { !$0.key.hasPrefix(prefix) }
+        stopLinkIfIdle()
+    }
+
     public func cancelAll() {
         animations.removeAll()
         stopLinkIfIdle()
@@ -166,6 +174,7 @@ public final class AnimationScheduler {
     public func reattachDisplayLink() {
         displayLink?.invalidate()
         displayLink = nil
+        frameTrace.reset()
         startLinkIfNeeded()
     }
 
@@ -180,19 +189,88 @@ public final class AnimationScheduler {
         guard animations.isEmpty, !continuousDemand else { return }
         displayLink?.invalidate()
         displayLink = nil
+        frameTrace.reset()
     }
 
     @objc private func step(_ link: CADisplayLink) {
-        let now = link.targetTimestamp
-        var finishedKeys: [String] = []
-        for (key, animation) in animations {
-            if !animation.tick(now: now) {
-                animation.onComplete?()
-                finishedKeys.append(key)
-            }
+        tick(now: link.targetTimestamp)
+        // After the tick: when this frame finished the last animation the link
+        // is already gone and the trace reset, so an idle gap never enters
+        // the average.
+        if displayLink != nil { traceFrame(link) }
+    }
+
+    /// YBAR_DEBUG: the measured animation frame rate, every ~2 s while the
+    /// link runs. Counts delivered ticks — CADisplayLink skips a callback
+    /// whenever a frame overruns its budget, so this reads the sustained rate
+    /// against the link's nominal cadence rather than the cadence itself.
+    private func traceFrame(_ link: CADisplayLink) {
+        guard DebugTrace.enabled, let fps = frameTrace.record(now: link.targetTimestamp) else { return }
+        let nominal = link.duration > 0 ? 1 / link.duration : 0
+        DebugTrace.log(String(format: "[ybar:frames] %.1f fps sustained (animation clock, link %.0f Hz)",
+                              fps, nominal))
+    }
+
+    /// One frame at `now`. Finished keys are removed BEFORE their completions
+    /// run: a completion that animates the same key again would otherwise be
+    /// swept away together with the animation it replaced.
+    func tick(now: TimeInterval) {
+        var finished: [(key: String, onComplete: (() -> Void)?)] = []
+        for (key, animation) in animations where !animation.tick(now: now) {
+            finished.append((key, animation.onComplete))
         }
-        finishedKeys.forEach { animations.removeValue(forKey: $0) }
+        for entry in finished { animations.removeValue(forKey: entry.key) }
+        for entry in finished { entry.onComplete?() }
         onFrame?()
         stopLinkIfIdle()
+    }
+}
+
+/// `YBAR_DEBUG` (any value) turns on the stderr diagnostics a bug report can
+/// carry: the sustained animation frame rate (`[ybar:frames]`, this file) and
+/// per-display geometry on every surface (re)build (`[ybar:display]`,
+/// `BarManager.rebuildSurfaces`). Same gate and prefixes as the Windows port.
+public enum DebugTrace {
+    public static let enabled = ProcessInfo.processInfo.environment["YBAR_DEBUG"] != nil
+
+    public static func log(_ line: String) {
+        FileHandle.standardError.write(Data((line + "\n").utf8))
+    }
+}
+
+/// The accumulator behind `[ybar:frames]`: counts display-link ticks and
+/// reports frames / elapsed once at least `window` seconds have passed, then
+/// opens the next window. Pure, so a test drives it with synthetic
+/// timestamps. The first tick after a (re)start only opens the window — a
+/// run is never averaged across the idle gap before it.
+struct FrameRateTrace {
+    let window: TimeInterval
+    private(set) var frames = 0
+    private(set) var windowStart: TimeInterval?
+
+    init(window: TimeInterval = 2) {
+        self.window = window
+    }
+
+    /// One tick at `now`; the sustained rate when this tick closes a window.
+    mutating func record(now: TimeInterval) -> Double? {
+        guard let start = windowStart else {
+            windowStart = now
+            frames = 0
+            return nil
+        }
+        frames += 1
+        let elapsed = now - start
+        guard elapsed >= window else { return nil }
+        let rate = Double(frames) / elapsed
+        windowStart = now
+        frames = 0
+        return rate
+    }
+
+    /// The clock stopped: the next tick opens a fresh window.
+    mutating func reset() {
+        windowStart = nil
+        frames = 0
     }
 }

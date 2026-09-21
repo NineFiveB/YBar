@@ -25,5 +25,11 @@
 - The nord, gruvbox, tokyonight, dracula, and rose-pine themes use the
   palettes of the projects credited in each theme's README.
 - Nerd Font glyph codepoints reference [Nerd Fonts](https://www.nerdfonts.com).
+- `Tests/Fixtures/YBarTestSans-Regular.ttf` is a renamed glyph
+  subset of Source Sans 3 Regular, Copyright 2010-2024 Adobe, licensed under
+  the SIL Open Font License 1.1 (`YBarTestSans-LICENSE.txt` beside it). The
+  licence reserves the name "Source", so the modified font carries a
+  different one. It is a test fixture for the text-metric goldens and is
+  not part of the app bundle.
 
 YBar itself is GPL-3.0; see LICENSE.

@@ -120,6 +120,43 @@ import Testing
         #expect(bracket?.members == ["a"])
     }
 
+    @Test func removeReleasesLuaHandlers() throws {
+        let stack = try makeStack()
+        defer { stack.runtime.shutdown() }
+        // Added from Swift so the test still holds the item after Lua drops it.
+        let item = try #require(stack.barManager.store.add(name: "gone", position: .left))
+        let error = run("""
+        ybar.subscribe("gone", "system_woke", function(env) end)
+        ybar.remove("gone")
+        """, stack.runtime)
+        #expect(error == nil)
+        #expect(stack.barManager.store.item(named: "gone") == nil)
+        #expect(!stack.runtime.hasHandlers(for: item))
+        #expect(!item.hasLuaHandlers)
+    }
+
+    @Test func rawAddRejectsUnusableWidths() throws {
+        let stack = try makeStack()
+        defer { stack.runtime.shutdown() }
+        // The sketchybar shim forwards theme widths verbatim: Int(inf) used to
+        // trap the daemon (a silent respawn loop under KeepAlive) and 1e9
+        // allocated gigabytes. Every call must fail cleanly and add nothing.
+        let error = run("""
+        ybar.add("graph", "g_inf", "left", 1/0)
+        ybar.add("graph", "g_nan", "left", 0/0)
+        ybar.add("graph", "g_big", "left", 1e30)
+        ybar.add("graph", "g_zero", "left", 0)
+        ybar.add("slider", "s_inf", "left", 1/0)
+        ybar.add("slider", "s_zero", "left", 0)
+        ybar.add("graph", "g_ok", "left", 8192)
+        """, stack.runtime)
+        #expect(error == nil)
+        for name in ["g_inf", "g_nan", "g_big", "g_zero", "s_inf", "s_zero"] {
+            #expect(stack.barManager.store.item(named: name) == nil, "\(name) was added")
+        }
+        #expect(stack.barManager.store.item(named: "g_ok")?.graph?.capacity == 8192)
+    }
+
     @Test func animateWrapperScopesContext() throws {
         let stack = try makeStack()
         defer { stack.runtime.shutdown() }
@@ -135,6 +172,94 @@ import Testing
         #expect(stack.scheduler.isAnimating)
         #expect(stack.runtime.animationContext == nil)
         #expect(stack.barManager.store.item(named: "anim")?.label.color.argb == 0xFF00_0000)
+    }
+
+    /// `ybar.volume` is the Windows port's trampoline token for token: a number
+    /// is an ABSOLUTE level saturated into 0...100 (slider arithmetic that
+    /// undershoots must not turn into a step, and a runaway value must not trap
+    /// in `Int(_: Double)` and kill the daemon), a string keeps its sign, and
+    /// the reply is nil on success or the handler's `[!]` line.
+    @Test func volumeForwardsToTheCommandHandler() throws {
+        let stack = try makeStack()
+        defer { stack.runtime.shutdown() }
+        var forwarded: [[String]] = []
+        stack.runtime.handleCommand = { tokens in
+            forwarded.append(tokens)
+            return ""
+        }
+        let error = run("""
+        assert(ybar.volume(50) == nil)
+        assert(ybar.volume("+4") == nil)
+        assert(ybar.volume(37.6) == nil)
+        assert(ybar.volume(-4) == nil)
+        assert(ybar.volume(1e300) == nil)
+        assert(ybar.volume(0/0) == "[!] volume(percent) expects a number")
+        assert(ybar.volume({}) == "[!] volume(percent) expects a number")
+        assert(ybar.volume(50, {}) == "[!] volume(percent, app) expects a string app")
+        """, stack.runtime)
+        #expect(error == nil)
+        #expect(forwarded == [
+            ["--volume", "50"], ["--volume", "+4"], ["--volume", "38"],
+            ["--volume", "0"], ["--volume", "100"],
+        ])
+        // …and every token the number form emits stays on the CLI's absolute
+        // branch. Only a signed STRING asks for a step: this is the contract
+        // the trampoline's clamp exists to keep.
+        for tokens in forwarded where tokens[1] != "+4" {
+            #expect(CommandHandler.parseVolume(tokens[1])
+                == .absolute(Int(tokens[1])!), "\(tokens[1]) must be absolute")
+        }
+        #expect(CommandHandler.parseVolume("-4") == .step(-4))
+        // Headless (no daemon): the verb reports instead of raising.
+        stack.runtime.handleCommand = nil
+        #expect(run("""
+        assert(ybar.volume(50) == "[!] volume control is not available")
+        """, stack.runtime) == nil)
+    }
+
+    /// `query_table` applies the CLI's shadowing rule: reserved targets win
+    /// over an item of the same name, and `apps` arrives as a table (a widget
+    /// cannot decode the JSON string `ybar.query` returns).
+    @Test func queryTableServesReservedTargetsAsTables() throws {
+        let stack = try makeStack()
+        defer { stack.runtime.shutdown() }
+        let error = run("""
+        ybar.bar({ height = 40 })
+        ybar.add("item", "bar", "left")
+        ybar.add("item", "apps", "left")
+        assert(ybar.query_table("bar").height == 40, "bar shadows the item")
+        local apps = ybar.query_table("apps")
+        assert(type(apps) == "table" and apps.name == nil, "apps is the list, not the item")
+        for _, app in ipairs(apps) do
+          assert(type(app.name) == "string" and type(app.pid) == "number")
+          assert(type(app.active) == "boolean" and type(app.hidden) == "boolean")
+        end
+        assert(ybar.query_table("no-such-item") == nil)
+        """, stack.runtime)
+        #expect(error == nil)
+    }
+
+    /// …but a HANDLE describes the item it was created for. `apps` only became
+    /// a reserved target in this release, and answering `handle:query()` with
+    /// the app-list array breaks the `:query().popup.drawing` idiom every
+    /// shipped popup toggle uses.
+    @Test func handleQueryPrefersItsOwnItem() throws {
+        let stack = try makeStack()
+        defer { stack.runtime.shutdown() }
+        let error = run("""
+        local apps = ybar.add("item", "apps", "left", { label = "launcher" })
+        local own = apps:query()
+        assert(own.name == "apps", "the handle answers for its own item")
+        assert(own.label.value == "launcher")
+        assert(own.popup.drawing == "off", "the popup toggle idiom must not index nil")
+        -- By name, the CLI's rule is unchanged: the reserved table wins.
+        assert(ybar.query_table("apps").name == nil, "query_table('apps') is the app list")
+        assert(ybar.query_table("apps", true).name == "apps", "own = true asks for the item")
+        -- A handle whose item is gone falls through to the reserved table.
+        ybar.remove("apps")
+        assert(apps:query().name == nil)
+        """, stack.runtime)
+        #expect(error == nil)
     }
 
     @Test func configErrorsAreReportedNotFatal() throws {
