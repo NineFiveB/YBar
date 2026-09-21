@@ -1,6 +1,6 @@
 // AF_UNIX transport over Winsock (spec sections 3.1, 5.1). The socket file is
-// the single-instance lock: an existing file that answers --ping means a live
-// daemon; a dead file is deleted and rebound.
+// the single-instance lock: an existing file that accepts a connect means a
+// live daemon; a dead file is deleted and rebound.
 
 #pragma once
 
@@ -23,6 +23,15 @@ bool ensureWinsockInitialized();
 std::optional<std::string> clientSend(const std::string& path,
                                       const std::vector<std::string>& argv,
                                       double timeoutSeconds = 5.0);
+
+// Whether anything is LISTENING on the path, without needing a reply. A
+// stale socket file is refused (WSAECONNREFUSED); a live daemon whose UI
+// thread is busy — a cold Lua config, a --reload — still completes the
+// connect from its listen backlog. That is the distinction a --ping cannot
+// make, and the one that decides whether the file may be deleted, whether a
+// second instance may launch, and whether `ybar stop` has anything to stop.
+// --ping stays the right question for "is it READY".
+bool isListening(const std::string& path);
 
 // Unframed raw send for foreign protocols (komorebi: one JSON per
 // connection, no delimiter). false on transport failure.

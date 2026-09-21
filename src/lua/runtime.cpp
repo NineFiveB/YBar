@@ -102,6 +102,7 @@ function ybar.add_event(name, notification) local e = raw.add_event(name, notifi
 function ybar.query(target) return raw.query(target) end
 function ybar.tray(name, action) return raw.tray(name, action) end
 function ybar.volume(pct, app) return raw.volume(pct, app) end
+function ybar.bluetooth(action, id) return raw.bluetooth(action, id) end
 function ybar.remove(name) raw.remove(name) end
 
 function ybar.animate(curve, frames, fn)
@@ -471,6 +472,23 @@ struct Trampolines {
     // a slider drag becomes one function call instead of a shell round trip.
     // With an app id (--query audio's `id` field) the set routes to that
     // app's audio-session group instead of the master endpoint.
+    // ybar.bluetooth("scan", "on"|"off") / ("pair", id). A third Windows-only
+    // trampoline beside tray and volume: discovery and pairing are WinRT, and
+    // the alternative is a PowerShell round trip that cannot pair at all.
+    static int bluetooth(lua_State* L) {
+        const char* action = argCString(L, 1);
+        if (!action) {
+            lua_pushstring(L, "[!] bluetooth(action, arg) expects a string action");
+            return 1;
+        }
+        const char* argument = argCString(L, 2);
+        if (!argument) {
+            lua_pushstring(L, "[!] bluetooth(action, arg) expects a string argument");
+            return 1;
+        }
+        return pushReplyAsOptionalError(L, handleTokens({"--bluetooth", action, argument}));
+    }
+
     static int volume(lua_State* L) {
         const char* pct = argCString(L, 1);  // numbers convert in place
         if (!pct) {
@@ -546,7 +564,7 @@ void LuaRuntime::teardown() {
 }
 
 void LuaRuntime::registerBridge() {
-    lua_createtable(state_, 0, 16);
+    lua_createtable(state_, 0, 19); // keep in step with the set() calls below
     const auto set = [this](const char* name, lua_CFunction fn) {
         lua_pushcfunction(state_, fn);
         lua_setfield(state_, -2, name);
@@ -568,6 +586,7 @@ void LuaRuntime::registerBridge() {
     set("query", Trampolines::query);
     set("tray", Trampolines::tray);
     set("volume", Trampolines::volume);
+    set("bluetooth", Trampolines::bluetooth);
     set("remove", Trampolines::remove);
     lua_setglobal(state_, "__ybar_raw");
 }

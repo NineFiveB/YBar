@@ -16,8 +16,17 @@ constexpr char kVersion[] = "0.1.0";
 constexpr char kHelp[] =
     "ybar — a GPU-rendered, scriptable status bar for Windows.\n"
     "\n"
-    "  ybar                       start the daemon\n"
-    "  ybar -c <path>             start the daemon with an explicit config\n"
+    "  ybar                       run the daemon in this terminal\n"
+    "  ybar -c <path>             run the daemon with an explicit config\n"
+    "\n"
+    "Process control — no console window, stderr in %LOCALAPPDATA%\\ybar\\stderr.log:\n"
+    "  ybar start [-c <path>]     launch the bar in the background\n"
+    "  ybar stop                  stop the running bar\n"
+    "  ybar restart [-c <path>]   stop it and launch it again\n"
+    "  ybar status                bar, config and autostart state\n"
+    "  (ybarw.exe beside ybar.exe is `ybar start` for Explorer and the Run key)\n"
+    "\n"
+    "Messages to a running daemon:\n"
     "  ybar --bar height=32 color=0xcc1e1e2e\n"
     "  ybar --add item clock right\n"
     "  ybar --set clock label=\"12:00\" icon=sf:clock\n"
@@ -26,8 +35,12 @@ constexpr char kHelp[] =
     "  ybar --query bar\n"
     "  ybar --volume 40           (add an app id from --query audio for one app)\n"
     "\n"
-    "  ybar theme list|current|use <name>\n"
+    "  ybar theme list|current|use <name>|reset\n"
     "  ybar autostart enable|disable|status\n"
+    "\n"
+    "Exit codes: 0 success, 1 the operation failed, 2 the invocation was wrong.\n"
+    "A rejected message is an [!] reply and exits 1; `ybar --ping` is the\n"
+    "scriptable liveness probe.\n"
     "\n"
     "Design: docs/WINDOWS-PORT.md\n";
 
@@ -95,7 +108,9 @@ std::optional<int> runIfClient(const std::vector<std::string>& args, const std::
         return 0;
     }
     if (args[0] == "--config" || args[0] == "-c") return std::nullopt; // daemon
-    // Local subcommands (autostart, theme) never touch the socket.
+    // Local subcommands (start/stop/restart/status, autostart, theme) never
+    // touch the socket as messages. Checked ahead of the `-m` strip so that
+    // `ybar -m start` still means "send the word start to the daemon".
     if (const auto exitCode = runLocalVerb(args, instance)) return exitCode;
 
     std::vector<std::string> message = args;

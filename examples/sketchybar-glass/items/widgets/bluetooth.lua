@@ -112,7 +112,11 @@ local bt_bracket = sbar.add("bracket", "widgets.bluetooth.bracket", { bt_icon.na
   -- full-width row inherits the theme default item paddings (2/2), so rows
   -- advance 268. 268 also reproduces the no-wrap panel exactly (widest
   -- advance 268 + 2x6 engine inset = 280 wide), pixel-identical to before.
-  popup = { align = "center", height = 26, wrap_width = popup_width + 4 },
+  -- 28, not 26: the panel gained two lists (the mixer and Add device) since
+  -- this was set, and at a 26pt pitch a dozen single-line rows read as one
+  -- block of text. Two points per row is the smallest step that separates
+  -- them without making the panel tall. ROW_H below MUST track this.
+  popup = { align = "center", height = 28, wrap_width = popup_width + 4 },
 })
 
 require("helpers.hover").pill(bt_bracket, bt_icon)
@@ -142,7 +146,7 @@ local popup_pos = "popup." .. bt_bracket.name
 --
 -- ROW_H must track the bracket's popup.height above; the flow lays every row
 -- out on that pitch.
-local ROW_H = 26
+local ROW_H = 28
 -- Shortening each plate by this leaves the gap BETWEEN frames that separates
 -- them, now that no rule does. Rows inside one frame stay continuous: the gap
 -- comes off the group as a whole, not off every row.
@@ -257,9 +261,134 @@ for i = 1, max_devices do
   require("helpers.hover").row(dev_rows[i])
 end
 
--- Nearby Devices section dropped: Windows has no inquiry-scan or
--- pair-from-CLI surface (macOS used `blueutil --inquiry` / `--pair`);
--- discovery lives in ms-settings:bluetooth via the footer row.
+-- ── Nearby devices: discovery and ConfirmOnly pairing ─────────────────────
+-- This section used to be a comment saying Windows could not do it. That was
+-- true of the CLI, not of the platform: it runs on the native provider now
+-- (src/providers/bluetooth.cpp) -- two DeviceWatchers over the
+-- AssociationEndpoint namespace for discovery, DeviceInformationCustomPairing
+-- for the pairing itself.
+--
+-- Collapsed by default, and the radio only scans while it is expanded.
+-- Discovery is real airtime (the selector carries an IssueInquiry clause that
+-- asks the stack to actually inquire rather than replay its cache), and
+-- Windows' own flyout does not scan until you ask it to either.
+--
+-- The ITEMS are created here, between the paired list and the volume row,
+-- because popup members paint in the order they were added. The BEHAVIOUR is
+-- defined further down, after open_bt_settings -- the "needs Settings"
+-- outcome routes to it, and a device that wants a PIN has nowhere else to go.
+local MAX_NEAR = 6
+local near_open = false
+local near_gen = 0      -- bumped on every open/close; stale delay closures bail
+local near_order = {}   -- ids in FIRST-SEEN order, never re-sorted (see bind)
+local near_meta = {}    -- id -> { name, kind, misses }
+local near_row_ids = {} -- row index -> id
+local near_mark = {}    -- id -> "failed" | "settings", the sticky row states
+local near_busy = nil   -- the one ceremony allowed in flight, or nil
+local open_nearby, close_nearby, bind_nearby -- assigned below
+
+-- The title row doubles as the expander, exactly like the mixer chevron: its
+-- own background IS the section frame, so it takes no hover fill of its own.
+-- Two items on one line, the master volume row's shape exactly: the label row
+-- takes popup_width - 32 and the chevron takes the remaining 32, so the
+-- advance is 232 + 36 = 268 and the chevron's right edge lands on the same x
+-- as every full-width row's. The leading glyph is a plus, matching what
+-- Windows puts on its own "Add device" button, and it sits in the same 35pt
+-- column as the paired rows and the nearby rows below.
+local NEAR_CHEV_W = 32
+local near_btn = sbar.add("item", "widgets.bluetooth.near.btn", {
+  position = popup_pos,
+  -- padding_left is the theme default 2, NOT 0: the glyph column is
+  -- item.padding_left + icon.padding_left, so a row that zeroes its own
+  -- padding puts its glyph 2pt left of every row that does not. The width
+  -- absorbs it, so the line still advances 2 + 230 + 0 + 36 = 268.
+  width = popup_width - NEAR_CHEV_W - 2,
+  align = "left",
+  padding_left = 2,
+  padding_right = 0,
+  icon = {
+    string = icons.plus,
+    color = colors.white,
+    font = { size = 12.5 },
+    width = 35,
+    align = "center",
+    padding_left = inset,
+  },
+  label = {
+    string = "Add device",
+    color = colors.white,
+    font = { size = 11.5, style = settings.font.style_map["Semibold"] },
+    width = popup_width - NEAR_CHEV_W - 2 - 35 - inset,
+    align = "left",
+  },
+})
+
+-- The disclosure arrow, on the right where the mixer's is. A separate item
+-- because a row paints one icon and one label and this is a third part; it is
+-- inert on its own and simply shares the title row's click.
+local near_chev = sbar.add("item", "widgets.bluetooth.near.chev", {
+  position = popup_pos,
+  width = NEAR_CHEV_W,
+  icon = {
+    string = "sf:chevron.right",
+    color = colors.grey,
+    font = { size = 10.5 },
+    width = NEAR_CHEV_W,
+    align = "center",
+    padding_left = 0,
+    padding_right = 0,
+  },
+  label = { drawing = false },
+})
+
+-- Geometry byte-identical to dev_rows, so a nearby name and a paired name sit
+-- in the same column and the two lists read as one.
+local near_rows = {}
+for i = 1, MAX_NEAR do
+  near_rows[i] = sbar.add("item", "widgets.bluetooth.near." .. i, {
+    position = popup_pos,
+    drawing = false,
+    width = popup_width,
+    align = "left",
+    icon = {
+      string = bt_logo,
+      color = colors.white,
+      font = { size = 12.5 },
+      width = 35,
+      align = "center",
+      padding_left = inset,
+    },
+    label = {
+      string = "",
+      color = colors.white,
+      font = { size = 11.5 },
+      width = popup_width - 35 - inset,
+      align = "left",
+    },
+  })
+end
+
+-- One status line for the whole section: what the scan is doing, or what the
+-- last ceremony did. Never a per-row subtitle -- a row that grows a second
+-- line reflows every row under it mid-click.
+local near_status = sbar.add("item", "widgets.bluetooth.near.status", {
+  position = popup_pos,
+  drawing = false,
+  width = popup_width,
+  align = "left",
+  icon = {
+    string = "Searching...",
+    align = "left",
+    color = colors.grey,
+    font = { size = 10.5 },
+    -- Indented to the LABEL column (the glyph slot is 35 wide and starts at
+    -- the item's own padding), so the status text lines up under the device
+    -- names rather than under their glyphs.
+    width = popup_width - 35,
+    padding_left = 35,
+  },
+  label = { drawing = false },
+})
 
 -- ── Audio mixer ────────────────────────────────────────────────────────────
 -- The system output slider, Windows-quick-settings style, with the
@@ -281,16 +410,21 @@ end
 -- and the gap between frames is the separation.
 local vol_slider = sbar.add("slider", "widgets.bluetooth.volume", 188, {
   position = popup_pos,
-  width = popup_width - 32,
-  padding_left = 0,
+  -- Same column rule as the rows above: padding_left 2, and the icon takes a
+  -- fixed 35pt slot so the track starts where every row's LABEL starts
+  -- (2 + 35), instead of hard against a natural-width glyph.
+  width = popup_width - 32 - 2,
+  padding_left = 2,
   padding_right = 0,
   align = "left",
   icon = {
     string = "sf:speaker.wave.2.fill",
     color = colors.grey,
     font = { size = 9.5 },
+    width = 35,
+    align = "center",
     padding_left = inset,
-    padding_right = 7,
+    padding_right = 0,
   },
   label = { drawing = false },
   slider = {
@@ -334,11 +468,10 @@ vol_slider:subscribe("volume_change", function(env)
   vol_slider:set({ slider = { percentage = vol } })
 end)
 
--- One frame over the master row, covering the chevron beside it. The slider's
--- own box starts at x=0 where every other row's content starts at x=2, so the
--- plate is nudged 2 right and widened by the chevron's 32 to land on the same
--- 2..266 span as the mixer frame below.
-frame_rows(vol_slider, 1, 32, 2)
+-- No frame on the master row. The slider's own filled track is already a solid
+-- horizontal bar, so a plate behind it read as an outline around a control
+-- rather than as a card grouping rows -- the frame is for LISTS. The mixer
+-- panel below still frames its run, because that genuinely is a list.
 
 -- The chevron: collapsed it is a 32-wide button sharing the master slider's
 -- line; open_mixer() restyles it into the panel's full-width back row
@@ -561,6 +694,10 @@ local function open_mixer()
     icon = { string = "sf:chevron.left", width = 35 },
     label = { drawing = true },
   })
+  -- The two sections are independent. Opening the mixer used to collapse the
+  -- nearby list, which threw away a scan in progress for a reason no user
+  -- would guess. They stack instead: each keeps its own generation counter
+  -- and its own poll, so neither can close the other's rows.
   reveal_mixer(bind_mixer())
   mixer_poll()
 end
@@ -732,12 +869,216 @@ local function collapse_popup()
   -- a stale-true flag after a silent engine close still passes, and the
   -- never-opened common case pays nothing.
   if mixer_open then close_mixer() end
+  if near_open then close_nearby() end -- stop the radio inquiring
 end
 
 local function open_bt_settings()
   sbar.exec('explorer.exe "ms-settings:bluetooth"')
   collapse_popup()
 end
+
+-- ── Nearby devices: behaviour ─────────────────────────────────────────────
+-- The snapshot is `--query bluetooth`, which reads a cache the provider's
+-- worker already filled; it makes no WinRT call, so polling it costs nothing
+-- but the round trip.
+--
+-- Rows are held in FIRST-SEEN order and are NEVER re-sorted by signal. This
+-- is a click-safety rule, not a cosmetic one: a list that reorders under a
+-- stationary pointer turns the next click into a pairing request for a device
+-- the user never saw. A device that drops out of a snapshot keeps its slot for
+-- three rounds before it is dropped, because BLE advertisers routinely miss
+-- one.
+local NEAR_MISS_GRACE = 3
+
+local function near_label(id)
+  local meta = near_meta[id]
+  if not meta then return id end
+  if meta.name ~= "" then return meta.name end
+  -- Unnamed advertisers are the majority of what is on the air. Show the
+  -- address so the row is still identifiable rather than blank.
+  return meta.address ~= "" and meta.address or "Unknown device"
+end
+
+bind_nearby = function()
+  local snapshot = ybar.query_table("bluetooth") or {}
+  local devices = snapshot.devices or {}
+  local present = {}
+  for _, d in ipairs(devices) do
+    -- Dual-mode hardware advertises on both transports and legitimately
+    -- appears twice (once Bluetooth#, once BluetoothLE#). Key on address so
+    -- one physical device is one row; the first id seen wins, and for
+    -- headphones that is the classic one, which is what pairs.
+    local key = (d.address ~= "" and d.address) or d.id
+    present[key] = true
+    if not near_meta[key] then
+      near_order[#near_order + 1] = key
+      near_meta[key] = { id = d.id, name = d.name or "", address = d.address or "",
+                         kind = d.kind, misses = 0 }
+    else
+      local meta = near_meta[key]
+      meta.misses = 0
+      -- A name can arrive several advertisements after the address does.
+      if (meta.name == "" or meta.name == nil) and d.name ~= "" then meta.name = d.name end
+      -- Prefer the classic id: it is the one that pairs for audio devices.
+      if d.kind == "classic" then meta.id = d.id end
+    end
+  end
+  -- Age out anything the last few rounds did not see.
+  local kept = {}
+  for _, key in ipairs(near_order) do
+    local meta = near_meta[key]
+    if present[key] then
+      kept[#kept + 1] = key
+    elseif key == near_busy or near_mark[key] then
+      kept[#kept + 1] = key -- a row mid-ceremony or carrying a result stays put
+    else
+      meta.misses = meta.misses + 1
+      if meta.misses <= NEAR_MISS_GRACE then kept[#kept + 1] = key else near_meta[key] = nil end
+    end
+  end
+  near_order = kept
+
+  local shown = 0
+  for i = 1, MAX_NEAR do
+    local key = near_order[i]
+    if key and near_open then
+      shown = shown + 1
+      near_row_ids[i] = key
+      local mark = near_mark[key]
+      local glyph = bt_logo
+      if key == near_busy then glyph = icons.loading
+      elseif mark == "settings" then glyph = icons.gear
+      elseif mark == "failed" then glyph = "sf:exclamationmark.triangle" end
+      near_rows[i]:set({
+        drawing = true,
+        icon = { string = glyph, color = (near_meta[key].misses or 0) > 0 and colors.grey or colors.white },
+        label = { string = near_label(key),
+                  color = (near_meta[key].misses or 0) > 0 and colors.grey or colors.white },
+      })
+    else
+      near_row_ids[i] = nil
+      near_rows[i]:set({ drawing = false })
+    end
+  end
+
+  local status = nil
+  if near_open then
+    if near_busy then status = "Pairing with " .. near_label(near_busy) .. "..."
+    elseif shown == 0 then status = "Searching..." end
+  end
+  near_status:set({ drawing = status ~= nil, icon = { string = status or "" } })
+  -- The frame spans the title row, every visible device row and the status
+  -- line, as one card (frame_rows puts the plate on the FIRST row of a group).
+  -- Framed only while EXPANDED. Collapsed it is a single row, and a plate
+  -- behind one row reads as an outline around a control rather than a card
+  -- grouping a list -- the same reason the volume row and the footer carry
+  -- none. The chevron is the affordance.
+  -- Reaches over the chevron beside it, and starts at x=2 where the rest of
+  -- the panel does: the title row sets its own paddings to 0, so its box
+  -- begins at 0 rather than the theme default 2.
+  frame_rows(near_btn, near_open and (1 + shown + (status and 1 or 0)) or 0,
+             NEAR_CHEV_W, 2)
+end
+
+-- 2 s refresh AND keepalive. The provider expires discovery on its own after
+-- 60 s so a dismissed flyout cannot leave the radio inquiring; re-issuing scan
+-- renews that deadline, so this loop is what keeps the scan alive. It also
+-- notices an engine-side popup close, which runs no Lua on the way out.
+local function near_tick()
+  local gen = near_gen
+  sbar.delay(2, function()
+    if gen ~= near_gen or not near_open then return end
+    if bt_bracket:query().popup.drawing ~= "on" then
+      close_nearby()
+      return
+    end
+    ybar.bluetooth("scan", "on") -- keepalive; a no-op while already scanning
+    bind_nearby()
+    near_tick()
+  end)
+end
+
+open_nearby = function()
+  near_gen = near_gen + 1
+  near_open = true
+  near_order, near_meta, near_mark = {}, {}, {} -- a fresh look every time
+  near_busy = nil
+  near_chev:set({ icon = { string = "sf:chevron.down" } })
+  ybar.bluetooth("scan", "on")
+  bind_nearby()
+  near_tick()
+end
+
+close_nearby = function()
+  near_gen = near_gen + 1
+  near_open = false
+  near_busy = nil
+  ybar.bluetooth("scan", "off")
+  near_chev:set({ icon = { string = "sf:chevron.right" } })
+  for i = 1, MAX_NEAR do
+    near_row_ids[i] = nil
+    near_rows[i]:set({ drawing = false })
+  end
+  near_status:set({ drawing = false })
+  frame_rows(near_btn, 0, NEAR_CHEV_W, 2)
+end
+
+local function toggle_nearby()
+  if near_open then close_nearby() else open_nearby() end
+end
+
+near_btn:subscribe("mouse.clicked", toggle_nearby)
+near_chev:subscribe("mouse.clicked", toggle_nearby)
+
+for i = 1, MAX_NEAR do
+  near_rows[i]:subscribe("mouse.clicked", function()
+    local key = near_row_ids[i]
+    if not key then return end
+    -- A device that already told us it wants a PIN opens Settings instead.
+    -- Deliberately the SECOND click, not automatic: throwing the user into
+    -- Settings out from under a click they meant as "pair" is worse than
+    -- telling them why first.
+    if near_mark[key] == "settings" then
+      open_bt_settings()
+      return
+    end
+    if near_busy then return end -- one ceremony at a time
+    near_mark[key] = nil
+    near_busy = key
+    bind_nearby()
+    ybar.bluetooth("pair", near_meta[key].id)
+  end)
+end
+
+-- The outcome, seconds later, off the provider's worker thread.
+near_btn:subscribe("bluetooth_pair", function(env)
+  local key = near_busy
+  if not key then return end
+  near_busy = nil
+  if env.BT_PAIRED == "on" then
+    -- It belongs to the paired list now; drop the row and re-probe so it
+    -- reappears above.
+    near_meta[key] = nil
+    local kept = {}
+    for _, k in ipairs(near_order) do if k ~= key then kept[#kept + 1] = k end end
+    near_order = kept
+    near_status:set({ icon = { string = "Paired" } })
+    refresh_paired()
+  elseif env.BT_NEEDS_SETTINGS == "on" then
+    near_mark[key] = "settings"
+    near_status:set({ icon = { string = "Needs the Settings app" } })
+  else
+    near_mark[key] = "failed"
+    near_status:set({ icon = { string = "Could not pair" } })
+  end
+  bind_nearby()
+end)
+
+-- A push from the provider whenever the nearby list moves. Cheaper than
+-- waiting out the 2 s tick when a device appears.
+near_btn:subscribe("bluetooth_change", function()
+  if near_open then bind_nearby() end
+end)
 
 -- No non-admin CLI flips the radio — the toggle hands off to Settings.
 header:subscribe("mouse.clicked", open_bt_settings)
@@ -758,6 +1099,7 @@ local function toggle_popup()
     -- elsewhere runs no Lua), so the collapse-side reset is not enough —
     -- reset to the master view on the way in too.
     close_mixer()
+    close_nearby()
     bt_bracket:set({ popup = { drawing = true } })
     populate()      -- last snapshot first, then the fresh round trip
     refresh_paired()

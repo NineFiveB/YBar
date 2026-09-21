@@ -10,11 +10,13 @@
 #include <shellapi.h> // CommandLineToArgvW
 // clang-format on
 
+#include <cstdlib>
 #include <string>
 #include <vector>
 
 #include "app/client.h"
 #include "app/daemon.h"
+#include "app/process_control.h"
 
 namespace {
 
@@ -50,6 +52,19 @@ int main(int argc, char** argv) {
     std::string configPath;
     for (std::size_t i = 0; i + 1 < args.size(); ++i) {
         if (args[i] == "-c" || args[i] == "--config") configPath = args[i + 1];
+    }
+
+    // The daemon role. This is a console-subsystem exe, so Explorer, the Run
+    // key of an older install and Task Scheduler all hand it a console window
+    // that would sit on the desktop for as long as the bar runs. A console
+    // holding only this process was created for it: hand the work to a
+    // detached copy (what `ybar start` does) and let the window close. A
+    // shell's console is left alone — `ybar` in a terminal runs in that
+    // terminal, as on macOS — and so is any console when YBAR_DEBUG is set,
+    // because that trace is the reason to have one.
+    if (ybar::app::shouldDetachFromConsole(ybar::app::consoleProcessCount(),
+                                           std::getenv("YBAR_DEBUG") != nullptr)) {
+        return ybar::app::detachFromConsole(instance, configPath);
     }
     return ybar::app::runDaemon(instance, configPath);
 }

@@ -78,6 +78,16 @@ std::vector<std::pair<long long, std::string>> collectWindows(const json& state)
     return windows;
 }
 
+// A reply line's own verdict. Absent or unparseable counts as refusal: the
+// only safe reading of "I could not tell" is that the strip is not held.
+bool replyOk(const std::string& line) {
+    try {
+        return json::parse(line).value("ok", false);
+    } catch (const json::exception&) {
+        return false;
+    }
+}
+
 } // namespace
 
 bool YTileProvider::detect() {
@@ -166,8 +176,19 @@ bool YTileProvider::start() {
 void YTileProvider::stop() {
     if (!running_.exchange(false)) return;
     const auto pipe = pipe_.exchange(-1);
+    if (thread_.joinable()) {
+        // Closing the pipe handle does NOT wake a synchronous ReadFile that
+        // another thread is blocked in — the reader stayed parked until
+        // ytiled next pushed a notification, and this join (on the UI thread,
+        // during `--exit`) stayed parked with it: a bar that kept rendering
+        // and kept accepting connections but never exited. Cancel the read
+        // instead, and keep cancelling until the thread is gone, because the
+        // reader may be between its `running_` check and the next ReadFile.
+        const HANDLE thread = thread_.native_handle();
+        while (WaitForSingleObject(thread, 50) == WAIT_TIMEOUT) CancelSynchronousIo(thread);
+        thread_.join();
+    }
     if (pipe != -1) CloseHandle(reinterpret_cast<HANDLE>(pipe));
-    if (thread_.joinable()) thread_.join();
 }
 
 void YTileProvider::readerLoop() {
@@ -212,8 +233,27 @@ void YTileProvider::readerLoop() {
             while (running_ && readLine(pipe, buffer, line)) {
                 try {
                     const auto notification = json::parse(line);
+                    const auto event = notification.value("event", std::string{});
                     if (notification.contains("state")) {
                         handleState(notification.at("state").dump());
+                    }
+
+                    // The event name used to be read and thrown away, which
+                    // cost six minutes of windows tiled under the bar: a MUX
+                    // switch renamed the panel, ytiled rebuilt the monitor and
+                    // dropped its reserved strip, and published exactly this
+                    // event at that instant — while our own re-assert had
+                    // already fired 3 s earlier, into the record about to be
+                    // discarded. A reconcile is the one moment the daemon can
+                    // forget a reservation, so it is the moment to say it
+                    // again. Ordered after handleState because that is what
+                    // refreshes monitorCount_ from the same snapshot.
+                    //
+                    // `reserve` is idempotent by construction, so a redundant
+                    // re-assert costs one pipe round-trip and nothing else.
+                    if (event == "monitors_change" || event == "ready" || event == "reload") {
+                        const int wanted = appliedOffset_.load();
+                        if (wanted > 0) applyWorkAreaOffset(wanted);
                     }
                 } catch (const json::exception&) {
                     // Tolerant parsing: schema drift must not kill the provider.
@@ -337,12 +377,25 @@ bool YTileProvider::cycleWorkspace(bool next) {
     return sendCommand("workspace", std::to_string(target));
 }
 
-void YTileProvider::applyWorkAreaOffset(int barHeightPhysical) {
-    appliedOffset_ = barHeightPhysical; // replayed after every reconnect
+bool YTileProvider::applyWorkAreaOffset(int barHeightPhysical) {
+    appliedOffset_ = barHeightPhysical; // the strip we WANT; replayed on reconnect
+    bool accepted = true;
     for (int i = 0; i < monitorCount_; ++i) {
-        sendCommand("reserve",
-                    std::to_string(i) + " 0 " + std::to_string(barHeightPhysical) + " 0 0");
+        std::string reply;
+        // sendCommand reports whether a reply line came back, not whether the
+        // daemon liked it: a refused reserve (a stale monitor index after the
+        // count changed) answers {"ok":false} and would otherwise be
+        // indistinguishable from success.
+        const bool sent = sendCommand(
+            "reserve", std::to_string(i) + " 0 " + std::to_string(barHeightPhysical) + " 0 0",
+            &reply);
+        if (!sent || !replyOk(reply)) {
+            accepted = false;
+            std::fprintf(stderr, "[ybar] ytile reserve refused for monitor %d: %s\n", i,
+                         sent ? reply.c_str() : "no reply");
+        }
     }
+    return accepted;
 }
 
 void YTileProvider::clearWorkAreaOffset() {

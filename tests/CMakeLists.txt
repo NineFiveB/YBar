@@ -18,6 +18,7 @@ add_executable(ybar_tests
   layout_tests.cpp
   lua_tests.cpp
   popup_layout_tests.cpp
+  process_control_tests.cpp
   property_setter_tests.cpp
   provider_tests.cpp
   scheduler_tests.cpp

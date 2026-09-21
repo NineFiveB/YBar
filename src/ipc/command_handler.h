@@ -64,6 +64,15 @@ struct DaemonHooks {
     // group. Both are stateless enumeration passes inline on the UI thread.
     std::function<std::string()> audioSessions;
     std::function<bool(const std::string&, int)> setAppVolume;
+    // Bluetooth (ybar-win extension). `--query bluetooth` reports the radio,
+    // whether a scan is running, and the nearby UNPAIRED devices seen so far.
+    // It reads a mutex-guarded cache and makes no WinRT call, so it runs
+    // inline here exactly like `--query audio`. `--bluetooth scan on|off` and
+    // `--bluetooth pair <id>` only post a command to the provider's worker and
+    // return: pairing takes seconds of radio negotiation, and the message
+    // thread cannot wait on it, so the outcome arrives later as an event.
+    std::function<std::string()> bluetoothQuery;
+    std::function<std::string(const std::string&, const std::string&)> bluetoothVerb;
 };
 
 class CommandHandler {

@@ -64,6 +64,12 @@ add_library(ybar_core
 target_include_directories(ybar_core PUBLIC src)
 target_link_libraries(ybar_core PUBLIC nlohmann_json::nlohmann_json)
 
+# Command-line composition, shared by the CLI verbs and the ybarw launcher so
+# the two quote the same way. Kept out of ybar_win because the launcher must
+# stay a few kilobytes and link none of the engine.
+add_library(ybar_cmdline STATIC src/win/command_line.cpp)
+target_include_directories(ybar_cmdline PUBLIC src)
+
 # Windows platform layer: transport, client role, daemon shell, windowing,
 # and the D3D11/DirectWrite render stack.
 add_library(ybar_win
@@ -72,6 +78,8 @@ add_library(ybar_win
   src/app/daemon.cpp
   src/app/jsonc_config.cpp
   src/app/local_verbs.cpp
+  src/app/platform.cpp
+  src/app/process_control.cpp
   src/app/script_runner.cpp
   src/ipc/socket.cpp
   src/lua/runtime.cpp
@@ -79,6 +87,7 @@ add_library(ybar_win
   src/providers/app_lifecycle.cpp
   src/providers/audio.cpp
   src/providers/audio_sessions.cpp
+  src/providers/bluetooth.cpp
   src/providers/komorebi.cpp
   src/providers/media.cpp
   src/providers/network.cpp
@@ -99,7 +108,7 @@ add_library(ybar_win
 # version: FileDescription lookups; iphlpapi/wlanapi: connectivity + SSID;
 # runtimeobject: C++/WinRT (GSMTC media session, Windows.UI.Composition);
 # CoreMessaging: CreateDispatcherQueueController for the window compositor.
-target_link_libraries(ybar_win PUBLIC ybar_core lua_vendor
+target_link_libraries(ybar_win PUBLIC ybar_core ybar_cmdline lua_vendor
   ws2_32 d3d11 dxgi d3dcompiler dcomp dwrite shcore user32 gdi32
   windowscodecs ole32 oleaut32 oleacc shell32 version iphlpapi wlanapi runtimeobject uuid dwmapi uiautomationcore
   CoreMessaging)
@@ -109,6 +118,11 @@ endif()
 
 add_executable(ybar src/main.cpp)
 target_link_libraries(ybar PRIVATE ybar_win)
+
+# ybarw.exe: GUI subsystem, so Explorer and the Run key can start the bar
+# without a console window. It runs `ybar.exe start` beside it (spec 5).
+add_executable(ybarw WIN32 src/launcher/ybarw.cpp)
+target_link_libraries(ybarw PRIVATE ybar_cmdline shell32 user32)
 
 if(YBAR_BUILD_TESTS)
   enable_testing()

@@ -327,6 +327,12 @@ std::string CommandHandler::handleBatch(const Batch& batch,
             return hooks_.trayIcons ? hooks_.trayIcons() : std::string("[]");
         if (target == "audio")
             return hooks_.audioSessions ? hooks_.audioSessions() : std::string("[]");
+        // Must stay ABOVE the item lookup: that lookup is the fallthrough, so
+        // a target added below it answers "no item named bluetooth" and never
+        // reaches the hook at all.
+        if (target == "bluetooth")
+            return hooks_.bluetoothQuery ? hooks_.bluetoothQuery()
+                                         : std::string("{\"devices\":[]}");
         auto* item = store_.find(target);
         if (!item) return "[!] no item named " + target;
         return ybar::model::serializeItem(
@@ -445,6 +451,23 @@ std::string CommandHandler::handleBatch(const Batch& batch,
         if (!hooks_.setVolume || !hooks_.setVolume(static_cast<int>(pct)))
             return "[!] volume control is not available";
         return {};
+    }
+
+    if (batch.domain == "bluetooth") { // ybar-win extension
+        if (args.empty()) return "[!] usage: --bluetooth scan on|off | pair <id>";
+        if (!hooks_.bluetoothVerb) return "[!] bluetooth is not available";
+        const std::string& action = args[0];
+        if (action == "scan") {
+            if (args.size() != 2) return "[!] usage: --bluetooth scan on|off";
+            return hooks_.bluetoothVerb(action, args[1]);
+        }
+        if (action == "pair") {
+            // The id is a DeviceInformation.Id and contains '#' and ':'; it is
+            // passed through untouched rather than parsed.
+            if (args.size() != 2) return "[!] usage: --bluetooth pair <id>";
+            return hooks_.bluetoothVerb(action, args[1]);
+        }
+        return "[!] unknown bluetooth action: " + action;
     }
 
     if (batch.domain == "exit") {

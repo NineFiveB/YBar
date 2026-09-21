@@ -11,6 +11,8 @@
 #include <filesystem>
 #include <iterator>
 
+#include "app/platform.h"
+#include "app/process_control.h"
 #include "ipc/socket.h"
 #include "ipc/wire_format.h"
 
@@ -23,58 +25,11 @@ namespace fs = std::filesystem;
 constexpr wchar_t kRunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 constexpr wchar_t kRunValue[] = L"YBar";
 
-std::wstring widen(const std::string& text) {
-    if (text.empty()) return {};
-    const int size = MultiByteToWideChar(CP_UTF8, 0, text.c_str(),
-                                         static_cast<int>(text.size()), nullptr, 0);
-    std::wstring wide(static_cast<std::size_t>(size), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), wide.data(),
-                        size);
-    return wide;
-}
-
-std::string narrow(const std::wstring& wide) {
-    if (wide.empty()) return {};
-    const int size = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(),
-                                         static_cast<int>(wide.size()), nullptr, 0, nullptr,
-                                         nullptr);
-    std::string text(static_cast<std::size_t>(size), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), static_cast<int>(wide.size()), text.data(),
-                        size, nullptr, nullptr);
-    return text;
-}
-
-fs::path executablePath() {
-    wchar_t buffer[MAX_PATH];
-    const DWORD n = GetModuleFileNameW(nullptr, buffer, MAX_PATH);
-    std::wstring path(buffer, n);
-    // Resolve symlinks: winget's portable install launches through a
-    // Links-directory symlink and GetModuleFileNameW reports the LINK path.
-    // Shipped themes and the autostart Run value need the real location.
-    const HANDLE file = CreateFileW(path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file != INVALID_HANDLE_VALUE) {
-        wchar_t resolved[1024];
-        const DWORD length = GetFinalPathNameByHandleW(file, resolved, 1024, FILE_NAME_NORMALIZED);
-        CloseHandle(file);
-        if (length > 0 && length < 1024) {
-            std::wstring final(resolved, length);
-            // \\?\UNC\server\share -> \\server\share; \\?\C:\... -> C:\...
-            if (final.rfind(LR"(\\?\UNC\)", 0) == 0) final = L"\\\\" + final.substr(8);
-            else if (final.rfind(LR"(\\?\)", 0) == 0) final = final.substr(4);
-            path = final;
-        }
-    }
-    return fs::path(path);
-}
-
-fs::path configDirectory() {
-    wchar_t* profile = nullptr;
-    std::size_t length = 0;
-    if (_wdupenv_s(&profile, &length, L"USERPROFILE") != 0 || !profile) return {};
-    fs::path path = fs::path(profile) / L".config" / L"ybar";
-    free(profile);
-    return path;
+// The invocation was wrong. Exit 2, the one distinction a shell wrapper acts
+// on; the operation failing stays at 1.
+int usage(const std::string& invocation) {
+    std::fprintf(stderr, "[!] usage: %s\n", invocation.c_str());
+    return 2;
 }
 
 // A theme is any directory carrying one of the entry-point names, searched in
@@ -125,32 +80,16 @@ fs::path currentThemeFile() {
 }
 
 int autostartStatus() {
-    HKEY key = nullptr;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey, 0, KEY_READ, &key) != ERROR_SUCCESS) {
+    const auto value = autostartRunValue();
+    if (!value) {
         std::printf("autostart: disabled\n");
         return 0;
     }
-    wchar_t buffer[1024];
-    DWORD size = sizeof(buffer);
-    DWORD type = 0;
-    const LSTATUS status =
-        RegQueryValueExW(key, kRunValue, nullptr, &type, reinterpret_cast<BYTE*>(buffer), &size);
-    RegCloseKey(key);
-    if (status != ERROR_SUCCESS) {
-        std::printf("autostart: disabled\n");
-        return 0;
-    }
-    // Registry strings "may not have been stored with the proper terminating
-    // null" (RegQueryValueEx docs), and nothing stops another writer from
-    // storing a non-string type — build from the returned byte count.
-    if (type != REG_SZ && type != REG_EXPAND_SZ) {
+    if (value->empty()) {
         std::printf("autostart: enabled (non-string Run value)\n");
         return 0;
     }
-    std::wstring value(buffer, std::min<std::size_t>(size / sizeof(wchar_t),
-                                                     std::size(buffer)));
-    while (!value.empty() && value.back() == L'\0') value.pop_back();
-    std::printf("autostart: enabled (%s)\n", narrow(value).c_str());
+    std::printf("autostart: enabled (%s)\n", narrow(*value).c_str());
     return 0;
 }
 
@@ -161,9 +100,16 @@ int autostartEnable() {
         std::fprintf(stderr, "[!] could not open the Run key for writing\n");
         return 1;
     }
-    // Quoted: the install path routinely contains spaces, and Run values are
-    // parsed as command lines.
-    const std::wstring command = L"\"" + executablePath().wstring() + L"\"";
+    // The Run key hands a console-subsystem exe a console window for as long
+    // as it runs, so the value names the GUI-subsystem launcher beside us —
+    // `ybarw.exe`, which runs `ybar start` with no window. Without it the
+    // value falls back to `"<exe>" start`, which works but flashes a console
+    // at every login. Quoted: the install path routinely contains spaces, and
+    // Run values are parsed as command lines.
+    const fs::path executable = executablePath();
+    std::error_code ec;
+    const bool launcherPresent = fs::exists(launcherPath(executable), ec);
+    const std::wstring command = autostartCommand(executable, launcherPresent);
     const LSTATUS status =
         RegSetValueExW(key, kRunValue, 0, REG_SZ,
                        reinterpret_cast<const BYTE*>(command.c_str()),
@@ -174,6 +120,10 @@ int autostartEnable() {
         return 1;
     }
     std::printf("autostart enabled: %s\n", narrow(command).c_str());
+    if (!launcherPresent)
+        std::printf("note: ybarw.exe is not beside %s, so the login start will flash a "
+                    "console window; reinstall to get the launcher.\n",
+                    narrow(executable.filename().wstring()).c_str());
     std::printf("Toggle it later in Task Manager > Startup apps, or run "
                 "`ybar autostart disable`.\n");
     return 0;
@@ -202,19 +152,7 @@ int themeList() {
         std::printf("no themes found\n");
         return 0;
     }
-    std::error_code ec;
-    std::string active;
-    if (const fs::path state = currentThemeFile();
-        !state.empty() && fs::exists(state, ec)) {
-        if (FILE* file = _wfopen(state.c_str(), L"rb")) {
-            char buffer[256];
-            const std::size_t n = std::fread(buffer, 1, sizeof(buffer) - 1, file);
-            std::fclose(file);
-            active.assign(buffer, n);
-            while (!active.empty() && (active.back() == '\n' || active.back() == '\r'))
-                active.pop_back();
-        }
-    }
+    const std::string active = currentThemeName();
     for (const auto& [name, config] : themes) {
         std::printf("%s %-24s %s\n", name == active ? "*" : " ", name.c_str(),
                     config.string().c_str());
@@ -223,20 +161,8 @@ int themeList() {
 }
 
 int themeCurrent() {
-    const fs::path state = currentThemeFile();
-    std::error_code ec;
-    if (state.empty() || !fs::exists(state, ec)) {
-        std::printf("no theme selected\n");
-        return 0;
-    }
-    if (FILE* file = _wfopen(state.c_str(), L"rb")) {
-        char buffer[256];
-        const std::size_t n = std::fread(buffer, 1, sizeof(buffer) - 1, file);
-        std::fclose(file);
-        buffer[n] = '\0';
-        std::printf("%s", buffer);
-        if (n == 0 || buffer[n - 1] != '\n') std::printf("\n");
-    }
+    const std::string name = currentThemeName();
+    std::printf("%s\n", name.empty() ? "no theme selected" : name.c_str());
     return 0;
 }
 
@@ -264,7 +190,7 @@ int themeUse(const std::string& name, const std::string& instance) {
     const auto reply = ybar::ipc::clientSend(ybar::ipc::socketPath(instance),
                                              {"--reload", match->second.string()});
     std::printf("theme: %s%s\n", name.c_str(),
-                reply ? "" : " (recorded; start ybar to apply)");
+                reply ? "" : " (recorded; `ybar start` to apply)");
     return 0;
 }
 
@@ -278,7 +204,7 @@ int themeReset() {
 
 } // namespace
 
-std::string themeConfigFromCurrentTheme() {
+std::string currentThemeName() {
     const fs::path state = currentThemeFile();
     std::error_code ec;
     if (state.empty() || !fs::exists(state, ec)) return {};
@@ -290,6 +216,11 @@ std::string themeConfigFromCurrentTheme() {
         name.assign(buffer, n);
         while (!name.empty() && (name.back() == '\n' || name.back() == '\r')) name.pop_back();
     }
+    return name;
+}
+
+std::string themeConfigFromCurrentTheme() {
+    const std::string name = currentThemeName();
     if (name.empty()) return {};
     const auto themes = collectThemes();
     const auto match = std::find_if(themes.begin(), themes.end(),
@@ -298,17 +229,39 @@ std::string themeConfigFromCurrentTheme() {
     return match == themes.end() ? std::string{} : match->second.string();
 }
 
+std::optional<std::wstring> autostartRunValue() {
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey, 0, KEY_READ, &key) != ERROR_SUCCESS)
+        return std::nullopt;
+    wchar_t buffer[1024];
+    DWORD size = sizeof(buffer);
+    DWORD type = 0;
+    const LSTATUS status =
+        RegQueryValueExW(key, kRunValue, nullptr, &type, reinterpret_cast<BYTE*>(buffer), &size);
+    RegCloseKey(key);
+    if (status != ERROR_SUCCESS) return std::nullopt;
+    // Registry strings "may not have been stored with the proper terminating
+    // null" (RegQueryValueEx docs), and nothing stops another writer from
+    // storing a non-string type — build from the returned byte count.
+    if (type != REG_SZ && type != REG_EXPAND_SZ) return std::wstring{};
+    std::wstring value(buffer, std::min<std::size_t>(size / sizeof(wchar_t),
+                                                     std::size(buffer)));
+    while (!value.empty() && value.back() == L'\0') value.pop_back();
+    return value;
+}
+
 std::optional<int> runLocalVerb(const std::vector<std::string>& args,
                                 const std::string& instance) {
     if (args.empty()) return std::nullopt;
+
+    if (const auto verb = parseProcessVerb(args)) return runProcessVerb(*verb, instance);
 
     if (args[0] == "autostart") {
         const std::string action = args.size() > 1 ? args[1] : "status";
         if (action == "enable") return autostartEnable();
         if (action == "disable") return autostartDisable();
         if (action == "status") return autostartStatus();
-        std::fprintf(stderr, "[!] usage: ybar autostart enable|disable|status\n");
-        return 1;
+        return usage(instance + " autostart enable|disable|status");
     }
 
     if (args[0] == "theme") {
@@ -317,14 +270,10 @@ std::optional<int> runLocalVerb(const std::vector<std::string>& args,
         if (action == "current") return themeCurrent();
         if (action == "reset") return themeReset();
         if (action == "use") {
-            if (args.size() < 3) {
-                std::fprintf(stderr, "[!] usage: ybar theme use <name>\n");
-                return 1;
-            }
+            if (args.size() < 3) return usage(instance + " theme use <name>");
             return themeUse(args[2], instance);
         }
-        std::fprintf(stderr, "[!] usage: ybar theme list|current|use <name>|reset\n");
-        return 1;
+        return usage(instance + " theme list|current|use <name>|reset");
     }
 
     return std::nullopt;

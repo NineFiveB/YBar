@@ -128,7 +128,7 @@ local current_status = sbar.add("item", {
   icon = {
     align = "left",
     string = "•",
-    color = colors.green,
+    color = colors.status_green,
     font = { size = 13, style = settings.font.style_map["Bold"] },
     -- The dot occupies the glyph column, so "Connected" starts in the name
     -- column with the SSID above it and the networks below — it used to sit
@@ -139,7 +139,7 @@ local current_status = sbar.add("item", {
   label = {
     align = "left",
     string = "Connected",
-    color = colors.grey,
+    color = colors.status_green,
     font = { size = 10.5 },
     width = popup_width - glyph_col - inset,
   },
@@ -274,7 +274,10 @@ local function populate_rows()
           -- and only the arc's own ink varies, which is the point of an arc.
           icon = { string = (net.secured and icons.wifi.signal.lock
                              or icons.wifi.signal.unlock)
-            .. " " .. signal_glyph(net.signal or 0) },
+            -- Two spaces, not one: the whole run is set in Segoe Fluent
+            -- Icons, whose space advance is narrow enough that the lock and
+            -- the arc read as one composite glyph at a single space.
+            .. "  " .. signal_glyph(net.signal or 0) },
           label = { string = net.ssid },
         })
       end

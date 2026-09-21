@@ -69,6 +69,9 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item build-release/ybar.exe dist/
+          # The windowless launcher: `ybar autostart enable` and a double-click
+          # go through it (spec 5). It must sit beside ybar.exe.
+          Copy-Item build-release/ybarw.exe dist/
           Copy-Item -Recurse shaders dist/shaders
           # Shipped themes: `ybar theme list` searches beside the exe.
           Copy-Item -Recurse examples dist/examples
@@ -97,7 +100,7 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Sign ybar.exe
+      - name: Sign ybar.exe and ybarw.exe
         if: env.AZURE_CLIENT_ID != '' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: azure/trusted-signing-action@v0
         with:
@@ -113,9 +116,11 @@ jobs:
       - name: Verify signature
         if: env.AZURE_CLIENT_ID != '' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         run: |
-          $sig = Get-AuthenticodeSignature dist/ybar.exe
-          if ($sig.Status -ne 'Valid') { throw "signature status is $($sig.Status)" }
-          Write-Host "signed by: $($sig.SignerCertificate.Subject)"
+          foreach ($exe in 'dist/ybar.exe', 'dist/ybarw.exe') {
+            $sig = Get-AuthenticodeSignature $exe
+            if ($sig.Status -ne 'Valid') { throw "$exe signature status is $($sig.Status)" }
+            Write-Host "$exe signed by: $($sig.SignerCertificate.Subject)"
+          }
       # ----------------------------------------------------------------------
 
       - uses: actions/upload-artifact@v4
