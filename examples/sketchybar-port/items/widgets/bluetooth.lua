@@ -173,9 +173,9 @@ for i = 1, max_devices do
     drawing = false,
     width = popup_width,
     align = "left",
-    -- Positive y_offset is up. -6 drops the status under the 22pt name
-    -- plate so it is not drawn inside the selection.
-    y_offset = -6,
+    -- Positive y_offset is up. -2 keeps about a 5pt gap under the 22pt
+    -- name plate without sitting inside the selection.
+    y_offset = -2,
     icon = {
       string = "",
       color = colors.grey,
