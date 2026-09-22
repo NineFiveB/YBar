@@ -47,7 +47,13 @@ trap "/bin/rm -rf '$tmpdir'" EXIT
 "$BLUEUTIL" --paired --format json 2>/dev/null > "$tmpdir/paired" &
 
 # 5) pmset for accessory batteries (headphones, etc. that don't expose BatteryPercent via ioreg)
-/usr/bin/pmset -g everything 2>/dev/null > "$tmpdir/pmset" &
+# `pmset -g accps` NOT `pmset -g everything`. Measured here:
+#   pmset -g everything   2.15s   13,031,649 bytes
+#   pmset -g accps        0.00s          408 bytes
+# Both carry the same accessory battery levels. `everything` was the slowest
+# step in this script by two orders of magnitude and dominated the popup; the
+# other four sources together cost 0.13s.
+/usr/bin/pmset -g accps 2>/dev/null > "$tmpdir/pmset" &
 
 # Wait for all parallel jobs
 wait
@@ -80,25 +86,22 @@ done
 # Maps device name -> battery percent for Bluetooth accessories
 typeset -A PMSET_BATTERIES
 if [[ -f "$tmpdir/pmset" ]]; then
-  # Use Python to extract Bluetooth accessory batteries from pmset plist output
-  $PYTHON -c "
-import re
-
-data = open('$tmpdir/pmset', encoding='utf-8', errors='replace').read()
-
-# Split into plist sections
-sections = data.split('<?xml version=')
-for section in sections:
-    if 'Bluetooth' not in section:
-        continue
-    name_match = re.search(r'<key>Name</key>\s*<string>(.*?)</string>', section)
-    cap_match = re.search(r'<key>Current Capacity</key>\s*<integer>(\d+)</integer>', section)
-    transport_match = re.search(r'<key>Transport Type</key>\s*<string>(.*?)</string>', section)
-
-    if name_match and cap_match and transport_match:
-        if transport_match.group(1) == 'Bluetooth':
-            print(f'{name_match.group(1)}|{cap_match.group(1)}')
-" 2>/dev/null > "$tmpdir/pmset_parsed"
+  # `pmset -g accps` prints one line per accessory:
+  #   -Alex's AirPods Pro #2 (id=63312929)\t67%; discharging present: true
+  #
+  # Two encoding traps, both found by comparing bytes rather than eyeballing:
+  #
+  # 1. accps emits names in MAC OS ROMAN, so the apostrophe in "Alex's AirPods"
+  #    arrives as the single byte 0xD5, while blueutil emits the same name in
+  #    UTF-8 as 0xE2 0x80 0x99. Without iconv the two never byte-match, the
+  #    lookup below silently misses, and every battery reads -1.
+  # 2. BSD sed aborts the line with "RE error: illegal byte sequence" on those
+  #    multibyte names unless it runs byte-literal, hence LC_ALL=C.
+  #
+  # InternalBattery is the Mac's own cell, not an accessory, so it is dropped.
+  /usr/bin/iconv -f MACROMAN -t UTF-8 "$tmpdir/pmset" 2>/dev/null \
+    | LC_ALL=C /usr/bin/sed -n 's/^ *-\(.*\) (id=[0-9]*)[[:space:]]*\([0-9][0-9]*\)%.*/\1|\2/p' \
+    | /usr/bin/grep -v '^InternalBattery' > "$tmpdir/pmset_parsed"
 
   while IFS='|' read -r pname pbatt; do
     [[ -n "$pname" && -n "$pbatt" ]] && PMSET_BATTERIES[$pname]="$pbatt"
