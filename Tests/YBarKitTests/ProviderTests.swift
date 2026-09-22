@@ -135,6 +135,81 @@ import Testing
     }
 }
 
+@Suite struct WifiScanMergeTests {
+    @Test func keepsTheStrongestSightingAndMarksKnown() {
+        let rows = WifiScan.merge(
+            sightings: [
+                .init(name: "Home", rssi: -70),
+                .init(name: "Home", rssi: -40),
+                .init(name: "Cafe", rssi: -55),
+            ],
+            currentSSID: "Home",
+            profiles: [.init(name: "Home", hotspot: false)])
+        #expect(rows.count == 2)
+        #expect(rows[0] == WifiScanRow(
+            name: "Home", rssi: -40, current: true, known: true, hotspot: false))
+        #expect(rows[1].name == "Cafe")
+        #expect(!rows[1].known)
+        #expect(!rows[1].hotspot)
+    }
+
+    @Test func savedHotspotIsListedWhenItIsNotBroadcasting() {
+        let rows = WifiScan.merge(
+            sightings: [.init(name: "Home", rssi: -50)],
+            currentSSID: "Home",
+            profiles: [
+                .init(name: "Home", hotspot: false),
+                .init(name: "iPhone", hotspot: true),
+            ])
+        #expect(rows.contains {
+            $0.name == "iPhone" && $0.hotspot && $0.known
+                && !$0.current && $0.rssi == WifiScan.absentRSSI
+        })
+    }
+
+    @Test func unreadableHotspotFlagIsNotGuessed() {
+        let rows = WifiScan.merge(
+            sightings: [],
+            currentSSID: nil,
+            profiles: [.init(name: "iPhone", hotspot: nil)])
+        #expect(rows.isEmpty)
+    }
+
+    @Test func tsvMatchesThePopupParser() {
+        let rows = WifiScan.merge(
+            sightings: [.init(name: "Home\tNet", rssi: -42)],
+            currentSSID: "Home\tNet",
+            profiles: [.init(name: "Home\tNet", hotspot: false)])
+        #expect(WifiScan.tsv(rows) == "1\tHome Net\t-42\t1\t0\t1")
+    }
+
+    @Test func passwordJoinKeepsTheSecretOutOfTheArguments() {
+        let secret = "super-secret-value"
+        let args = WifiScan.airportJoinArguments(interface: "en0", name: "Cafe", password: secret)
+        #expect(args == ["-setairportnetwork", "en0", "Cafe", "-"])
+        #expect(!args.contains(secret))
+        #expect(WifiScan.airportJoinArguments(interface: "en0", name: "Cafe", password: nil)
+            == ["-setairportnetwork", "en0", "Cafe"])
+    }
+
+    @Test func redactedOutputDropsThePassword() {
+        let secret = "super-secret-value"
+        #expect(WifiScan.redacted("echo \(secret) done", password: secret) == "echo  done")
+        #expect(WifiScan.redacted("Failed to join Cafe.", password: nil) == "Failed to join Cafe.")
+        #expect(WifiScan.redacted("Failed to join Cafe.", password: "") == "Failed to join Cafe.")
+    }
+
+    @Test func openNetworkStaysUnsecured() {
+        let rows = WifiScan.merge(
+            sightings: [.init(name: "Cafe", rssi: -60, secure: false)],
+            currentSSID: nil,
+            profiles: [])
+        #expect(rows.count == 1)
+        #expect(rows[0].secure == false)
+        #expect(WifiScan.tsv(rows) == "0\tCafe\t-60\t0\t0\t0")
+    }
+}
+
 @Suite struct NetworkInfoTests {
     @Test func offlineIsEmpty() {
         #expect(NetworkProvider.info(satisfied: false, isWifi: true, ssid: "Home") == "")

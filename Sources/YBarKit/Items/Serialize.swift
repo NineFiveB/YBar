@@ -76,6 +76,9 @@ public enum Serialize {
             "border_width": settings.borderWidth,
             "corner_radius": settings.cornerRadius,
             "blur_radius": settings.blurRadius,
+            "glass": settings.glass ? "on" : "off",
+            "glass_variant": settings.glassVariant.rawValue,
+            "glass_tint": hex(settings.glassTint),
             "hidden": settings.hidden,
             "topmost": settings.level.rawValue,
             "sticky": settings.sticky,
@@ -98,6 +101,7 @@ public enum Serialize {
                 "position": item.position.rawValue,
                 "associated_display_mask": item.associatedDisplayMask,
                 "y_offset": item.yOffset,
+                "x_offset": item.xOffset,
                 "padding_left": item.paddingLeft,
                 "padding_right": item.paddingRight,
                 "width": item.customWidth,
@@ -125,6 +129,13 @@ public enum Serialize {
                 "color": hex(graph.lineColor),
                 "fill_color": hex(graph.effectiveFillColor),
                 "line_width": graph.lineWidth,
+                "style": graph.style.rawValue,
+                "tick": graph.tickIndex.map { "\($0)" } ?? "off",
+                "plot_width": graph.plotWidth,
+                "axis_max": graph.axisMax,
+                "marks": graph.marks.isEmpty
+                    ? "off"
+                    : graph.marks.map { $0 ? "1" : "0" }.joined(separator: " "),
             ] as [String: Any]
         }
         if let slider = item.slider {
@@ -212,6 +223,9 @@ public enum Serialize {
             "x_offset": background.xOffset,
             "y_offset": background.yOffset,
             "glass": background.glass ? "on" : "off",
+            "sheen": background.sheen ? "on" : "off",
+            "glass_variant": background.glassVariant?.rawValue ?? "default",
+            "glass_tint": background.hasGlassTint ? hex(background.glassTint) : "default",
             "shadow": shadowDictionary(background.shadow),
         ]
     }

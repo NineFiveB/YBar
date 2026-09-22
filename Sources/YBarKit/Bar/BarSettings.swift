@@ -61,6 +61,13 @@ public struct BarSettings: Sendable {
     public var blurRadius: Float = 0
     /// Liquid-glass sheen/rim on the bar background quad.
     public var glass: Bool = false
+    /// NSGlassEffectView material. Default `clear`. Non-clear private names
+    /// (`dock`, `control_center`, `app_icons`) are unsupported SPI.
+    public var glassVariant: GlassVariant = .clear
+    /// `NSGlassEffectView.tintColor` for the bar strip and the default for
+    /// pills that do not set `background.glass_tint`. Alpha is intensity
+    /// (System Settings Liquid Glass slider). Clear leaves the material untinted.
+    public var glassTint: YColor = .clear
     /// Auto-raise to status level while the active Space hosts a fullscreen
     /// window, so the bar stays visible over native-fullscreen Spaces
     /// (fullScreenAuxiliary already carries the panel onto them; only the

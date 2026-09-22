@@ -2,8 +2,10 @@ local colors = require("colors")
 
 sbar.bar({
   height = 40,
-  color = colors.bar.bg,
-  glass = true,
+  -- No full-bleed material: a bar-wide NSGlassEffectView frosts the strip.
+  -- Pills keep their own glass. The strip itself stays clear.
+  color = colors.transparent,
+  glass = false,
   fullscreen_show = true,
   -- Full-bleed strip, matching the webpage mock. A window inset would leak
   -- the native menu bar under topmost=on.
