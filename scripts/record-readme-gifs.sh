@@ -25,8 +25,39 @@ close_popups() {
   $Y --set calendar popup.drawing=off 2>/dev/null || true
 }
 
-# Current network is compat.item.73 (icon). VPN row is compat.item.78.
+# Placeholder names only. The liquid popup splits each network into
+# name/button/lock/signal; the port theme is still one item per row.
 paint_wifi() {
+  if $Y --query widgets.wifi.known.1.name >/dev/null 2>&1; then
+    local i
+    for i in 1 2 3; do
+      $Y --set "widgets.wifi.hotspot.$i.name" drawing=off width=0
+      $Y --set "widgets.wifi.hotspot.$i.button" drawing=off width=0
+      $Y --set "widgets.wifi.hotspot.$i.lock" drawing=off width=0
+      $Y --set "widgets.wifi.hotspot.$i.signal" drawing=off width=0
+    done
+    $Y --set widgets.wifi.known.1.name drawing=on icon="Home Network"
+    for i in 2 3 4 5 6; do
+      $Y --set "widgets.wifi.known.$i.name" drawing=off width=0
+      $Y --set "widgets.wifi.known.$i.button" drawing=off width=0
+      $Y --set "widgets.wifi.known.$i.lock" drawing=off width=0
+      $Y --set "widgets.wifi.known.$i.signal" drawing=off width=0
+    done
+    local names=("Coffee Shop" "Library-Guest" "Neighbor-5G" "CityMesh")
+    i=1
+    for name in "${names[@]}"; do
+      $Y --set "widgets.wifi.other.$i.name" drawing=on icon="$name"
+      i=$((i + 1))
+    done
+    for i in 5 6; do
+      $Y --set "widgets.wifi.other.$i.name" drawing=off width=0
+      $Y --set "widgets.wifi.other.$i.button" drawing=off width=0
+      $Y --set "widgets.wifi.other.$i.lock" drawing=off width=0
+      $Y --set "widgets.wifi.other.$i.signal" drawing=off width=0
+    done
+    $Y --set widgets.wifi.scan icon="Other networks" drawing=on
+    return
+  fi
   $Y --set compat.item.73 icon="Home Network" label="󰌾  󰖩" drawing=on
   $Y --set compat.item.74 icon="•" label="Connected" label.color=0xff30d158 drawing=on
   $Y --set widgets.wifi.known.1 drawing=on icon="✓  Home Network" icon.color=0xffffffff \
@@ -47,6 +78,24 @@ paint_wifi() {
 }
 
 paint_bluetooth() {
+  # Liquid rows put the device name in the icon. The port uses the label
+  # plus a separate status row.
+  if $Y --query widgets.bluetooth.dev.1 >/dev/null 2>&1 \
+      && ! $Y --query widgets.bluetooth.devstatus.1 >/dev/null 2>&1; then
+    $Y --set widgets.bluetooth.dev.1 drawing=on icon="AirPods Pro"
+    $Y --set widgets.bluetooth.dev.2 drawing=on icon="Magic Keyboard"
+    $Y --set widgets.bluetooth.dev.3 drawing=on icon="Desk Speaker"
+    local i
+    for i in 4 5 6; do
+      $Y --set "widgets.bluetooth.dev.$i" drawing=off
+    done
+    $Y --set widgets.bluetooth.near.1 drawing=on icon="Pixel Buds"
+    $Y --set widgets.bluetooth.near.2 drawing=on icon="MX Master"
+    for i in 3 4 5 6; do
+      $Y --set "widgets.bluetooth.near.$i" drawing=off
+    done
+    return
+  fi
   $Y --set widgets.bluetooth.dev.1 drawing=on label="AirPods Pro"
   $Y --set widgets.bluetooth.devstatus.1 drawing=on \
     icon="Connected · 72%" icon.color=0xff30d158
@@ -127,20 +176,25 @@ log "recording widget popups"
   sleep 2.2
   $Y --set widgets.battery.bracket popup.drawing=off
   sleep 0.25
+  paint_wifi
   $Y --set widgets.wifi.bracket popup.drawing=on
-  for _ in 1 2 3 4 5 6; do paint_wifi; sleep 0.4; done
+  for _ in 1 2 3; do paint_wifi; sleep 0.35; done
   $Y --set widgets.wifi.bracket popup.drawing=off
   sleep 0.25
+  paint_bluetooth
   $Y --set widgets.bluetooth.bracket popup.drawing=on
-  for _ in 1 2 3 4 5 6; do paint_bluetooth; sleep 0.4; done
+  for _ in 1 2 3 4; do paint_bluetooth; sleep 0.3; done
   $Y --set widgets.bluetooth.bracket popup.drawing=off
-  sleep 0.25
-  $Y --set widgets.menubar.bracket popup.drawing=on
-  for _ in 1 2 3 4 5; do paint_menubar; sleep 0.4; done
+  # The liquid bar has no menu-extras widget.
+  if $Y --query widgets.menubar.bracket >/dev/null 2>&1; then
+    sleep 0.25
+    $Y --set widgets.menubar.bracket popup.drawing=on
+    for _ in 1 2 3 4 5; do paint_menubar; sleep 0.4; done
+  fi
   close_popups
 ) &
 SEQ=$!
-record_seconds 16 "$WORK/popups.mov"
+record_seconds 18 "$WORK/popups.mov"
 wait "$SEQ" 2>/dev/null || true
 # Right side of the 3024-wide retina display, tall enough for the popups.
 mov_to_gif "$WORK/popups.mov" "$OUT/ybar-popups.gif" "crop=1500:1500:1524:0" 780 16

@@ -4,18 +4,17 @@
 
 **Top bar for macOS and Windows** — a GPU-rendered, scriptable status bar. On macOS, Metal renders everything (SDF shapes, glyph-atlas text, display-link-paced animation at near-zero CPU); a [native Windows port](#windows) mirrors the engine on Direct3D 11 + Windows.UI.Composition. The architecture is [sketchybar](https://github.com/FelixKratz/SketchyBar)'s proven live-object model: a single `ybar` binary that is both daemon and CLI client, driven entirely over IPC — plus an embedded Lua runtime so whole configs run in-process, and themes and scripts move between the two platforms with only OS-inherent edits.
 
-![YBar in use: AeroSpace workspace pills, then the app-menus swap](docs/media/ybar-demo.gif?v=20260921)
+![YBar in use: AeroSpace workspace pills, then the app-menus swap](docs/media/ybar-demo.gif?v=20260922)
 
-*The `sketchybar-glass` theme: AeroSpace workspace pills, then the app-menus
+*The `ysuite-liquid` theme: AeroSpace workspace pills, then the app-menus
 swap opening and collapsing in place. The native macOS menu bar is hidden
 underneath. No app windows are in frame.*
 
-![Calendar, system monitor, battery, Wi-Fi and Bluetooth popups](docs/media/ybar-popups.gif?v=20260921)
+![Calendar, system monitor, battery, Wi-Fi and Bluetooth popups](docs/media/ybar-popups.gif?v=20260922)
 
 *Popups are first-class items laid out by the same engine: calendar, system
-monitor, battery, Wi-Fi, Bluetooth, and menu-bar extras — all on real
-`NSGlassEffectView` backdrops. Network names, device names, and background
-items in this recording are placeholders.*
+monitor, battery, Wi-Fi, and Bluetooth — all on real `NSGlassEffectView`
+backdrops. Network names and device names in this recording are placeholders.*
 
 
 ```sh
