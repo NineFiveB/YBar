@@ -32,6 +32,7 @@ theme reset` hands the bar back to your `~/.config/ybar/ybarrc.lua`. Themes are 
 | Theme | Directory | Look |
 |---|---|---|
 | **sketchybar-glass** | `examples/sketchybar-glass` | Liquid Glass: monochrome near-black bar, real `NSGlassEffectView` pills and popups, full widget suite (wifi/bluetooth/battery/calendar/menus/Claude, a system monitor with CPU and memory gauges plus a GPU utilization graph when the driver reports one, and a now-playing popup with album artwork, seek + volume sliders, and transport controls). The flagship. |
+| **ysuite** | `examples/ysuite` | Maintainer daily driver — same Liquid Glass suite as `sketchybar-glass`, full-width under `topmost=on` (no island inset) so the native menu bar stays fully covered. |
 | **darxk** | `examples/darxk` | Replication of [00Darxk/dotfiles](https://github.com/00Darxk/dotfiles) Waybar: translucent dark bar, segmented rounded capsules with Catppuccin accents, inverted light pills for active workspace and window title, brew-updates + GitHub-notifications modules. |
 | **sketchybar-port** | `examples/sketchybar-port` | The full sketchybar-setup port in its original styling. |
 | **jsonc-demo** | `examples/jsonc-demo` | Minimal declarative JSONC config — clock and battery, no Lua. |
