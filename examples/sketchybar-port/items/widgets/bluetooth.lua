@@ -173,6 +173,9 @@ for i = 1, max_devices do
     drawing = false,
     width = popup_width,
     align = "left",
+    -- Positive y_offset is up. -6 drops the status under the 22pt name
+    -- plate so it is not drawn inside the selection.
+    y_offset = -6,
     icon = {
       string = "",
       color = colors.grey,
@@ -183,12 +186,9 @@ for i = 1, max_devices do
     },
     label = { drawing = false },
   })
-  -- A two-line cell is one click target, so both lines light together:
-  -- one subscription per row driving both plates. Wiring it as two
-  -- hover.row calls plus a sibling attachColor each way subscribed every
-  -- row to mouse.entered twice, and only the last handler per (item, event)
-  -- survives — each line lit the other.
-  hover.rowGroup({ paired_name_rows[i], paired_status_rows[i] })
+  -- Name row only. "Connected" / "Not Connected" is static metadata, same
+  -- as the Wi-Fi status line, not a second selection.
+  hover.row(paired_name_rows[i])
 end
 
 -- Nearby Devices: auto-scan on open, spinner beside the header.
@@ -301,7 +301,11 @@ local function populate()
       })
       paired_status_rows[i]:set({
         drawing = true,
-        icon = { string = status },
+        icon = {
+          string = status,
+          -- Same token as the Wi-Fi "Connected" line.
+          color = dev.connected and colors.connected or colors.grey,
+        },
       })
     else
       paired_name_rows[i]:set({ drawing = false })
@@ -444,7 +448,6 @@ end
 
 for i = 1, max_devices do
   paired_name_rows[i]:subscribe("mouse.clicked", function() toggle_connection(i) end)
-  paired_status_rows[i]:subscribe("mouse.clicked", function() toggle_connection(i) end)
 end
 
 nearby_header:subscribe("mouse.clicked", run_inquiry)
