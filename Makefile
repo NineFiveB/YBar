@@ -48,7 +48,7 @@ helpers:
 # because codesign must run outside the iCloud-synced repo (same xattr race
 # as `build`). Note the resulting zip's signature is local-only: on any other
 # machine the download fails Gatekeeper until re-signed (docs/INSTALL.md).
-VERSION ?= 0.1.0
+VERSION ?= 0.2.0
 STAGE   := $(SCRATCH)/stage/YBar.app
 
 release:
