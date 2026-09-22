@@ -39,6 +39,13 @@ public struct QuadInstance {
     /// leaves unused. Nothing about the 112-byte layout changes — the same
     /// bit and fields as the Windows port's kQuadFlagShadow.
     public static let flagShadow: UInt32 = 1 << 4
+    /// Pre-26 painted lip / shade / pointer specular. Not set when
+    /// NSGlassEffectView is the backdrop.
+    public static let flagSheen: UInt32 = 1 << 5
+    /// Popup trigger (webpage is-liquid-active): stronger pointer lens.
+    public static let flagLens: UInt32 = 1 << 6
+    /// Sample the captured desktop through the liquid-glass refraction.
+    public static let flagLensSample: UInt32 = 1 << 7
 
     public init(
         origin: SIMD2<Float>, size: SIMD2<Float>, radii: SIMD4<Float>,
@@ -111,11 +118,20 @@ public struct Uniforms {
     public var viewportSize: SIMD2<Float>
     /// Cutout count for quads carrying flagHoles.
     public var holeCount: UInt32 = 0
-    var _pad: UInt32 = 0
+    /// Seconds (CACurrentMediaTime) for traveling sheen phase.
+    public var time: Float = 0
+    /// Pointer in this drawable's pixels (top-left, y-down). Far negative when
+    /// the cursor is outside the surface.
+    public var pointer: SIMD2<Float> = SIMD2(repeating: -1e6)
 
-    public init(viewportSize: SIMD2<Float>, holeCount: UInt32 = 0) {
+    public init(
+        viewportSize: SIMD2<Float>, holeCount: UInt32 = 0, time: Float = 0,
+        pointer: SIMD2<Float> = SIMD2(repeating: -1e6)
+    ) {
         self.viewportSize = viewportSize
         self.holeCount = holeCount
+        self.time = time
+        self.pointer = pointer
     }
 }
 
@@ -148,8 +164,17 @@ public struct DisplayList {
     /// This scene contains scrolling text: the frame clock must keep running
     /// while any scene of the frame (bar or popup) carries it.
     public var hasMarquee = false
+    /// Per-pill Metal lip/shade/pointer specular: same continuous display-link
+    /// demand so hover specular tracks the cursor without damage lag.
+    public var hasSheen = false
+    /// Media time stamped when the scene was built (feeds Uniforms.time).
+    public var time: Float = 0
+    /// Cursor in this surface's pixels (top-left, y-down).
+    public var pointer: SIMD2<Float> = SIMD2(repeating: -1e6)
 
     public init() {}
+
+    public var needsContinuousFrames: Bool { hasMarquee || hasSheen }
 
     public var isEmpty: Bool { quads.isEmpty && triangles.isEmpty && glyphs.isEmpty }
 }

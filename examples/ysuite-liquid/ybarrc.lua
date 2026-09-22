@@ -6,6 +6,10 @@
 --
 -- Install: `ybar theme use ysuite-liquid` (see docs/THEMES.md).
 
+-- Port widgets (spaces, menus, calendar) branch on this so the glass theme
+-- stays on its own markup.
+YSUITE_LIQUID = true
+
 local config_dir = debug.getinfo(1, "S").source:match("@?(.*/)") or "./"
 PORT_DIR = config_dir .. "../sketchybar-port"
 do

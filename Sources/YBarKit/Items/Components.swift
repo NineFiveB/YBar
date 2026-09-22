@@ -15,6 +15,11 @@ public enum ItemKind: String, Sendable {
 /// Width in samples == width in points (sketchybar's sample_width = 1).
 @MainActor
 public final class GraphState {
+    public enum Style: String, Sendable {
+        case line
+        case bars
+    }
+
     public let capacity: Int
     public private(set) var values: [Float]
     private var cursor: Int = 0
@@ -23,10 +28,41 @@ public final class GraphState {
     /// nil = derive from lineColor at 20% alpha (sketchybar default).
     public var fillColor: YColor?
     public var lineWidth: Float = 1.0
+    /// `line` = sparkline (default); `bars` = vertical histogram + y-axis strip.
+    public var style: Style = .line
+    /// Bar under-mark index into `ordered()` (webpage charge-event tick), or nil.
+    public var tickIndex: Int?
+    /// Plot width in points for bars (0 = use `capacity`). Sample count stays
+    /// `capacity`; bars stretch evenly across this width so a 64-bucket series
+    /// can fill a ~360pt battery plot.
+    public var plotWidth: Float = 0
+    /// Top of the y-axis, in percent. 100 is a battery-level plot; 150 matches
+    /// System Settings' 10-day energy chart. Samples stay 0...1 of this max.
+    public var axisMax: Float = 100
+    /// Per-sample charging flags, display order (oldest first). Empty means
+    /// the plot has no below-axis band. Length matches `capacity` once set.
+    public var marks: [Bool] = []
+    /// Bar under the pointer, into `ordered()`, or nil. Stays set while the
+    /// highlight eases back out so the same bar shrinks in place.
+    public var hoverIndex: Int?
+    /// 0...1 emphasis of `hoverIndex`, animated on enter and exit.
+    public var hoverAmount: Float = 0
+
+    /// Points reserved to the right of the plot for bars y-axis labels.
+    public static let barsAxisReserve: CGFloat = 36
 
     public init(capacity: Int) {
         self.capacity = max(1, capacity)
         values = [Float](repeating: 0, count: self.capacity)
+    }
+
+    public var plotWidthPoints: CGFloat {
+        plotWidth > 0 ? CGFloat(plotWidth) : CGFloat(capacity)
+    }
+
+    /// Layout advance in points (plot width, plus y-axis strip for bars).
+    public var layoutWidth: CGFloat {
+        plotWidthPoints + (style == .bars ? Self.barsAxisReserve : 0)
     }
 
     public func push(_ value: Float) {
@@ -34,9 +70,30 @@ public final class GraphState {
         cursor = (cursor + 1) % capacity
     }
 
+    /// Replace the whole series (oldest → newest). Pads with zeros if shorter
+    /// than capacity; truncates if longer. Resets the ring so `ordered()`
+    /// returns the series without stale samples.
+    public func replace(_ newValues: [Float]) {
+        values = [Float](repeating: 0, count: capacity)
+        let clipped = newValues.prefix(capacity).map { min(1, max(0, $0)) }
+        for (index, value) in clipped.enumerated() {
+            values[index] = value
+        }
+        cursor = 0
+    }
+
     /// Samples in display order: oldest first, newest last.
     public func ordered() -> [Float] {
         Array(values[cursor...] + values[..<cursor])
+    }
+
+    /// Display-order bar under a plot-local x, or nil when x is outside the plot
+    /// (the y-axis strip, or past either end).
+    public func barIndex(atPlotX x: CGFloat, plotWidth: CGFloat) -> Int? {
+        guard style == .bars, plotWidth > 0, x >= 0, x < plotWidth else { return nil }
+        let index = Int(x / plotWidth * CGFloat(capacity))
+        guard index >= 0, index < capacity else { return nil }
+        return index
     }
 
     public var effectiveFillColor: YColor {

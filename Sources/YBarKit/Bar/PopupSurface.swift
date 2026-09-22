@@ -14,6 +14,9 @@ public final class PopupSurface {
     /// Popup-local hit frames (top-left origin, points).
     public var itemFrames: [(itemID: Int, frame: CGRect)] = []
     public var hoveredItemID: Int?
+    /// Label-plate glass, under the Metal layer. nil before macOS 26.
+    private let chipHost: NSView?
+    private var chipViews: [Int: NSView] = [:]
     public var onMouse: ((MouseEventInfo, PopupSurface) -> Void)?
 
     /// Bumped on every visibility edge (present, fadeOut, close). A fade's
@@ -53,6 +56,9 @@ public final class PopupSurface {
             // over the wallpaper strip where nothing bleeds.
             glass.style = .regular
             glass.appearance = NSAppearance(named: .darkAqua)
+            if #available(macOS 27.0, *) {
+                glass.effectIsInteractive = true
+            }
             madeGlass = glass
         }
         #endif
@@ -75,6 +81,26 @@ public final class PopupSurface {
         let container = NSView()
         container.autoresizesSubviews = true
         container.addSubview(backdropView)
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *) {
+            let merger = NSGlassEffectContainerView()
+            merger.frame = container.bounds
+            merger.autoresizingMask = [.width, .height]
+            // 0 keeps each button its own capsule. The default spacing would
+            // melt a Connect pill into the row beside it.
+            merger.spacing = 0
+            let content = NSView()
+            content.frame = merger.bounds
+            content.autoresizingMask = [.width, .height]
+            merger.contentView = content
+            container.addSubview(merger)
+            chipHost = content
+        } else {
+            chipHost = nil
+        }
+        #else
+        chipHost = nil
+        #endif
         container.addSubview(hostView)
         panel.contentView = container
 
@@ -174,13 +200,61 @@ public final class PopupSurface {
         return CGRect(x: x, y: y, width: size.width, height: size.height)
     }
 
-    /// Glass behind the whole panel (popup.blur_radius > 0).
-    public func setGlass(enabled: Bool, cornerRadius: CGFloat) {
+    /// Place an `NSGlassEffectView` under each glass label plate. `rect` is
+    /// popup-local, top-left origin. Views sit under the Metal layer, so the
+    /// translucent fill and the label text stay on top. Missing chips are
+    /// removed.
+    public func syncGlassChips(_ chips: [SceneBuilder.PopupScene.GlassChip]) {
+        #if compiler(>=6.2)
+        guard #available(macOS 26.0, *), let chipHost else { return }
+        let bounds = panel.contentView?.bounds ?? .zero
+        if let merger = chipHost.superview {
+            merger.frame = bounds
+            chipHost.frame = merger.bounds
+        }
+        let height = bounds.height
+        var live = Set<Int>()
+        for chip in chips {
+            // Last plate for an item wins (the label is emitted after the icon).
+            live.insert(chip.itemID)
+            let frame = CGRect(
+                x: chip.rect.minX,
+                y: height - chip.rect.maxY,
+                width: chip.rect.width,
+                height: chip.rect.height)
+            let glass: NSGlassEffectView
+            if let existing = chipViews[chip.itemID] as? NSGlassEffectView {
+                glass = existing
+            } else {
+                glass = NSGlassEffectView()
+                glass.appearance = NSAppearance(named: .darkAqua)
+                chipHost.addSubview(glass)
+                chipViews[chip.itemID] = glass
+            }
+            glass.frame = frame
+            glass.cornerRadius = chip.cornerRadius
+            // Clear, not regular: a frosted slab at button size hides the tint.
+            BarSurface.configureLiquidGlass(glass, variant: .clear, tint: chip.tint)
+            glass.isHidden = false
+        }
+        for (itemID, view) in chipViews where !live.contains(itemID) {
+            view.removeFromSuperview()
+            chipViews.removeValue(forKey: itemID)
+        }
+        #else
+        _ = chips
+        #endif
+    }
+
+    /// Glass behind the whole panel (popup.blur_radius > 0). `tint` is the
+    /// popup override or the bar's `glass_tint` (alpha is intensity).
+    public func setGlass(enabled: Bool, cornerRadius: CGFloat, tint: YColor = .clear) {
         backdropView.isHidden = !enabled
         guard enabled else { return }
         #if compiler(>=6.2)
         if #available(macOS 26.0, *), let glass = backdropView as? NSGlassEffectView {
             glass.cornerRadius = cornerRadius
+            glass.tintColor = tint.nsColor
             return
         }
         #endif

@@ -180,6 +180,48 @@ struct HeadlessScene {
     }
 }
 
+/// A glass label plate in a popup is recorded so the panel can sit an
+/// NSGlassEffectView under the button. A plain label records nothing.
+@MainActor
+@Suite struct PopupGlassChipTests {
+    @Test func glassLabelBecomesAChip() {
+        let scene = HeadlessScene()
+        let host = Item(name: "host", position: .left)
+        let row = Item(name: "row", position: .popup)
+        row.popupHost = host.name
+        row.customWidth = 260
+        row.background.height = 36
+        row.icon.string = "AirPods"
+        row.icon.customWidth = 80
+        row.label.string = "Disconnect"
+        row.label.customWidth = 124
+        row.label.align = "r"
+        row.label.paddingRight = 14
+        row.label.font.size = 12
+        row.label.background.drawing = true
+        row.label.background.glass = true
+        row.label.background.height = 28
+        row.label.background.cornerRadius = 14
+        row.label.background.paddingLeft = 14
+        row.label.background.paddingRight = 14
+        row.label.background.color = YColor(argb: 0x55FF_FFFF)
+        let popup = scene.builder.buildPopup(
+            host: host, members: [row], scale: scene.scale, atlas: scene.atlas)
+        #expect(popup.glassChips.count == 1)
+        let chip = popup.glassChips[0]
+        #expect(chip.itemID == row.id)
+        #expect(chip.rect.height == 28)
+        #expect(chip.rect.width > 40)
+        #expect(chip.cornerRadius == 14)
+        #expect(chip.tint == YColor(argb: 0x55FF_FFFF))
+
+        row.label.background.glass = false
+        let plain = scene.builder.buildPopup(
+            host: host, members: [row], scale: scene.scale, atlas: scene.atlas)
+        #expect(plain.glassChips.isEmpty)
+    }
+}
+
 /// A graph on a bordered plate runs inside the frame (review finding A3):
 /// the box is inset by the border width, and the stroke never leaves it.
 @MainActor

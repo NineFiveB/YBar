@@ -39,6 +39,9 @@ public final class BarManager {
     private var reportedEmptyDisplays: Set<Int> = []
     /// Item id of a slider currently being dragged.
     var draggingSliderID: Int?
+    /// Bars graph whose plot the pointer is in. Cleared on exit so the
+    /// highlight eases out once, not on every move.
+    private var graphHoverItemID: Int?
     /// Arrangement index of the display each item was last pressed on, so a
     /// host's popup opens where it was clicked rather than on the
     /// lowest-index bar that lays it out. Keyed by display rather than by
@@ -50,6 +53,9 @@ public final class BarManager {
     // Interaction hooks, wired by the daemon (scripts + event bus live there).
     public var onItemClicked: ((Item, MouseEventInfo) -> Void)?
     public var onItemHover: ((Item, _ entered: Bool) -> Void)?
+    /// Bars-graph pointer: the display-order bar index, or nil when the pointer
+    /// leaves the plot (including the y-axis strip and popup exit).
+    public var onGraphHover: ((Item, Int?) -> Void)?
     public var onItemScrolled: ((Item, _ delta: CGFloat, _ modifier: String) -> Void)?
     /// Fired after surfaces are rebuilt for a display topology change.
     public var onDisplaysChanged: (() -> Void)?
@@ -127,6 +133,10 @@ public final class BarManager {
             self.setNeedsRender()
         }
         rebuildSurfaces()
+        // System NSGlassEffectView is the product backdrop. Auto-starting
+        // ScreenCaptureKit would hide those pills behind a Metal lens and
+        // prompt for Screen Recording — that is a separate opt-in path, not
+        // the inactive-glass fix.
     }
 
     /// fullscreen_show: raise each surface over the active Space's fullscreen
@@ -268,17 +278,17 @@ public final class BarManager {
     }
 
     public func renderAll() {
-        // Marquee demand belongs to the whole frame: every bar surface and
-        // every popup panel is accumulated and reported once. Reporting per
-        // surface let whichever scene rendered last decide, and popups never
-        // reported at all, so a display link could be torn down under text
-        // that was still scrolling.
-        var marquee = false
+        // Continuous demand (marquee or traveling sheen) belongs to the whole
+        // frame: every bar surface and every popup panel is accumulated and
+        // reported once. Reporting per surface let whichever scene rendered
+        // last decide, and popups never reported at all, so a display link
+        // could be torn down under text that was still scrolling.
+        var continuous = false
         for surface in surfaces {
-            if render(surface: surface) { marquee = true }
+            if render(surface: surface) { continuous = true }
         }
-        if updatePopups() { marquee = true }
-        onMarqueeDemand?(marquee)
+        if updatePopups() { continuous = true }
+        onMarqueeDemand?(continuous)
     }
 
     // MARK: - Popups
@@ -317,13 +327,13 @@ public final class BarManager {
         return candidates.first
     }
 
-    /// Returns whether any presented popup scene carries marquee text.
+    /// Returns whether any presented popup scene needs the frame clock.
     private func updatePopups() -> Bool {
         // A host only counts as live once its scene actually rendered; anything
         // else (closed, hostless, empty, zero-size) tears its panel down —
         // stale, still-clickable panels must never linger.
         var liveHostIDs: Set<Int> = []
-        var marquee = false
+        var continuous = false
         for host in store.items where host.popup.isOpen {
             let members = store.items.filter { $0.position == .popup && $0.popupHost == host.name }
             guard !members.isEmpty,
@@ -336,10 +346,14 @@ public final class BarManager {
             // drawable at that one scale (a fresh panel's backingScaleFactor
             // reports the primary screen until it is ordered in).
             let scale = surface.scale
+            let savedLens = sceneBuilder.lensActive
+            sceneBuilder.lensActive = false
+            sceneBuilder.pointer = Self.pointerPixels(in: surface.hostView, scale: scale)
             let scene = sceneBuilder.buildPopup(
                 host: host, members: members, scale: scale, atlas: atlas)
+            sceneBuilder.lensActive = savedLens
             guard scene.sizePoints.width > 0, scene.sizePoints.height > 0 else { continue }
-            if scene.hasMarquee { marquee = true }
+            if scene.needsContinuousFrames { continuous = true }
 
             let popupSurface: PopupSurface
             if let existing = popupSurfaces[host.id] {
@@ -366,7 +380,10 @@ public final class BarManager {
                 height: hostFrame.height)
             popupSurface.setGlass(
                 enabled: host.popup.blurRadius > 0,
-                cornerRadius: CGFloat(host.popup.background.cornerRadius))
+                cornerRadius: CGFloat(host.popup.background.cornerRadius),
+                tint: host.popup.background.hasGlassTint
+                    ? host.popup.background.glassTint
+                    : settings.glassTint)
             popupSurface.present(
                 anchor: anchor,
                 size: scene.sizePoints,
@@ -376,6 +393,7 @@ public final class BarManager {
                 screen: surface.screen,
                 edgeMargin: popupEdgeMargin,
                 fadeInFrames: CGFloat(host.popup.fadeInFrames))
+            popupSurface.syncGlassChips(scene.glassChips)
             if renderer.render(list: scene.list, layer: popupSurface.hostView.metalLayer, atlas: atlas) {
                 liveHostIDs.insert(host.id)
             } else {
@@ -407,7 +425,7 @@ public final class BarManager {
             popupSurfaces.removeValue(forKey: hostID)
         }
         updateOutsideClickMonitor()
-        return marquee
+        return continuous
     }
 
     func handlePopupMouse(_ info: MouseEventInfo, on popup: PopupSurface) {
@@ -477,13 +495,17 @@ public final class BarManager {
         case .moved:
             noteSurfaceEntered(ObjectIdentifier(popup))
             let hovered = member(at: info.point)
-            guard popup.hoveredItemID != hovered?.id else { return }
-            releaseHover(in: popup)
-            popup.hoveredItemID = hovered?.id
-            if let hovered {
-                hovered.mouseOver = true
-                onItemHover?(hovered, true)
+            if popup.hoveredItemID != hovered?.id {
+                releaseHover(in: popup)
+                popup.hoveredItemID = hovered?.id
+                if let hovered {
+                    hovered.mouseOver = true
+                    onItemHover?(hovered, true)
+                }
             }
+            // Same item on every move: a chart still has to name the bar
+            // under the pointer, which the item-level enter/exit does not.
+            updateGraphHover(item: hovered, localX: info.point.x, frames: popup.itemFrames)
         case .exited:
             pointerInsideSurfaces.remove(ObjectIdentifier(popup))
             releaseHover(in: popup)
@@ -498,9 +520,11 @@ public final class BarManager {
     func releaseHover(in popup: PopupSurface) {
         guard let previousID = popup.hoveredItemID else { return }
         popup.hoveredItemID = nil
-        guard let previous = store.items.first(where: { $0.id == previousID }) else { return }
-        previous.mouseOver = false
-        onItemHover?(previous, false)
+        if let previous = store.items.first(where: { $0.id == previousID }) {
+            previous.mouseOver = false
+            onItemHover?(previous, false)
+        }
+        clearGraphHover()
     }
 
     /// Bar-surface counterpart (also cancels the pending tooltip).
@@ -604,7 +628,7 @@ public final class BarManager {
         // Glass backdrops: blurred material views placed exactly under the
         // painted pill of every glass item (background.glass implies the
         // backdrop; blur_radius > 0 forces one explicitly).
-        var glassSpecs: [(itemID: Int, rect: CGRect, cornerRadius: CGFloat)] = []
+        var glassSpecs: [(itemID: Int, rect: CGRect, cornerRadius: CGFloat, variant: GlassVariant?, tint: YColor?)] = []
         for item in items
         where (item.blurRadius > 0
                || (item.background.glass && item.background.drawing
@@ -631,11 +655,19 @@ public final class BarManager {
                 rect = SceneBuilder.backgroundRect(
                     item: item, contentBox: contentBox, contentHeight: contentHeight)
             }
-            glassSpecs.append((item.id, rect, CGFloat(item.background.cornerRadius)))
+            glassSpecs.append((
+                item.id, rect, CGFloat(item.background.cornerRadius),
+                item.background.glassVariant,
+                item.background.hasGlassTint ? item.background.glassTint : nil))
         }
-        surface.syncGlassBackdrops(glassSpecs)
+        // System glass stays visible: ScreenCaptureKit lens is not started by
+        // default (inactive-glass path), so lensCoversPills stays false.
+        surface.syncGlassBackdrops(
+            glassSpecs, lensCoversPills: renderer.lensBackdrop(for: surface.arrangementIndex) != nil)
 
         sceneBuilder.clock = CACurrentMediaTime()
+        sceneBuilder.pointer = Self.pointerPixels(in: surface.hostView, scale: scale)
+        sceneBuilder.lensActive = renderer.lensBackdrop(for: surface.arrangementIndex) != nil
         let list = sceneBuilder.build(
             items: items,
             settings: settings,
@@ -643,14 +675,31 @@ public final class BarManager {
             barSize: barSize,
             scale: scale,
             atlas: atlas)
-        if !renderer.render(list: list, layer: surface.hostView.metalLayer, atlas: atlas) {
+        if !renderer.render(
+            list: list,
+            layer: surface.hostView.metalLayer,
+            atlas: atlas,
+            backdrop: renderer.lensBackdrop(for: surface.arrangementIndex)) {
             // Frame lost (display asleep / drawables exhausted): the damage flag
             // was already consumed, so reschedule or the update is never shown.
             scheduleRetry()
         }
-        // Marquee text needs continuous frames; everything else stays
-        // damage-driven.
-        return list.hasMarquee
+        // Marquee text and traveling sheen need continuous frames; everything
+        // else stays damage-driven.
+        return list.needsContinuousFrames
+    }
+
+    /// Cursor in a surface's Metal pixels (top-left, y-down). Far negative when
+    /// the pointer is outside that window.
+    private static func pointerPixels(in view: NSView, scale: CGFloat) -> SIMD2<Float> {
+        let missing = SIMD2<Float>(repeating: -1e6)
+        guard let window = view.window else { return missing }
+        let screenPoint = NSEvent.mouseLocation
+        guard window.frame.contains(screenPoint) else { return missing }
+        let inWindow = window.convertPoint(fromScreen: screenPoint)
+        let inView = view.convert(inWindow, from: nil)
+        let height = view.bounds.height
+        return SIMD2(Float(inView.x * scale), Float((height - inView.y) * scale))
     }
 
     private func scheduleRetry() {
@@ -700,8 +749,8 @@ public final class BarManager {
             guard let frame = surface.itemFrames.first(where: { $0.itemID == item.id })?.frame,
                   frame != .zero else { continue }
             rects["display-\(surface.arrangementIndex)"] = [
-                "origin": [frame.origin.x, frame.origin.y],
-                "size": [frame.size.width, frame.size.height],
+                "origin": [Double(frame.origin.x), Double(frame.origin.y)] as [Any],
+                "size": [Double(frame.size.width), Double(frame.size.height)] as [Any],
             ]
         }
         return rects
@@ -833,6 +882,48 @@ public final class BarManager {
         let trackX = SceneBuilder.sliderTrackX(item: item, contentBox: contentBox, measured: measured)
         slider.percentage = slider.percentage(forLocalX: localX - trackX)
         setNeedsRender()
+    }
+
+    /// Map a popup-local x onto a bars graph. The plot origin is the
+    /// renderer's, so the bar under the pointer is the one that was painted.
+    private func graphBarIndex(
+        item: Item, localX: CGFloat, frames: [(itemID: Int, frame: CGRect)]
+    ) -> Int? {
+        guard let graph = item.graph, graph.style == .bars,
+              let frame = frames.first(where: { $0.itemID == item.id })?.frame,
+              frame != .zero
+        else { return nil }
+        let contentBox = CGRect(
+            x: frame.minX + CGFloat(item.paddingLeft),
+            y: frame.minY,
+            width: max(0, frame.width - CGFloat(item.paddingLeft) - CGFloat(item.paddingRight)),
+            height: frame.height)
+        let measured = MeasuredContent(
+            iconSize: fontCache.measure(part: item.icon),
+            labelSize: fontCache.measure(part: item.label))
+        guard let plot = SceneBuilder.barPlotOrigin(
+            item: item, contentBox: contentBox, measured: measured)
+        else { return nil }
+        return graph.barIndex(atPlotX: localX - plot.x, plotWidth: plot.width)
+    }
+
+    private func updateGraphHover(
+        item: Item?, localX: CGFloat, frames: [(itemID: Int, frame: CGRect)]
+    ) {
+        if let item, let index = graphBarIndex(item: item, localX: localX, frames: frames) {
+            if graphHoverItemID == item.id, item.graph?.hoverIndex == index { return }
+            graphHoverItemID = item.id
+            onGraphHover?(item, index)
+            return
+        }
+        clearGraphHover()
+    }
+
+    private func clearGraphHover() {
+        guard let id = graphHoverItemID else { return }
+        graphHoverItemID = nil
+        guard let item = store.items.first(where: { $0.id == id }) else { return }
+        onGraphHover?(item, nil)
     }
 
     private func updateHover(surface: BarSurface, to item: Item?) {
