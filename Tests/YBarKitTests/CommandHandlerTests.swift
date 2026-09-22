@@ -32,6 +32,85 @@ import Testing
         return try #require(object as? [String: Any])
     }
 
+    @Test func barGlassVariantParsesAndQueries() throws {
+        let stack = try makeStack()
+        let reply = stack.handler.handle(arguments: [
+            "--bar", "glass=on", "glass_variant=control_center",
+        ])
+        #expect(reply.isEmpty)
+        #expect(stack.barManager.settings.glass)
+        #expect(stack.barManager.settings.glassVariant == .controlCenter)
+        let bar = try query(stack, "bar")
+        #expect(bar["glass"] as? String == "on")
+        #expect(bar["glass_variant"] as? String == "control_center")
+        #expect(bar["glass_tint"] as? String == "0x00000000")
+    }
+
+    @Test func barGlassTintParsesAndClears() throws {
+        let stack = try makeStack()
+        let reply = stack.handler.handle(arguments: [
+            "--bar", "glass_tint=0x40ffffff",
+        ])
+        #expect(reply.isEmpty)
+        #expect(stack.barManager.settings.glassTint.argb == 0x40FF_FFFF)
+        let bar = try query(stack, "bar")
+        #expect(bar["glass_tint"] as? String == "0x40ffffff")
+        let cleared = stack.handler.handle(arguments: ["--bar", "glass_tint=0x00000000"])
+        #expect(cleared.isEmpty)
+        #expect(stack.barManager.settings.glassTint.argb == 0)
+    }
+
+    @Test func itemGlassTintOverridesBarDefault() throws {
+        let stack = try makeStack()
+        let reply = stack.handler.handle(arguments: [
+            "--bar", "glass_tint=0x402a2a2a",
+            "--add", "item", "pill", "left",
+            "--set", "pill", "background.glass_tint=0x80ff0000",
+        ])
+        #expect(reply.isEmpty)
+        let item = try #require(stack.barManager.store.items.first { $0.name == "pill" })
+        #expect(item.background.hasGlassTint)
+        #expect(item.background.glassTint.argb == 0x80FF_0000)
+        let geometry = try #require(try query(stack, "pill")["geometry"] as? [String: Any])
+        let background = try #require(geometry["background"] as? [String: Any])
+        #expect(background["glass_tint"] as? String == "0x80ff0000")
+        let cleared = stack.handler.handle(arguments: [
+            "--set", "pill", "background.glass_tint=0x00000000",
+        ])
+        #expect(cleared.isEmpty)
+        #expect(!item.background.hasGlassTint)
+        let after = try #require(try query(stack, "pill")["geometry"] as? [String: Any])
+        let bg = try #require(after["background"] as? [String: Any])
+        #expect(bg["glass_tint"] as? String == "default")
+        let popupSet = stack.handler.handle(arguments: [
+            "--set", "pill", "popup.background.glass_tint=0x20ffffff",
+        ])
+        #expect(popupSet.isEmpty)
+        #expect(item.popup.background.hasGlassTint)
+        #expect(item.popup.background.glassTint.argb == 0x20FF_FFFF)
+    }
+
+    @Test func itemGlassVariantOverrideParses() throws {
+        let stack = try makeStack()
+        let reply = stack.handler.handle(arguments: [
+            "--add", "item", "pill", "left",
+            "--set", "pill", "background.glass=on", "background.glass_variant=dock",
+        ])
+        #expect(reply.isEmpty)
+        let item = try #require(stack.barManager.store.items.first { $0.name == "pill" })
+        #expect(item.background.glass)
+        #expect(item.background.glassVariant == .dock)
+        let bad = stack.handler.handle(arguments: [
+            "--set", "pill", "background.glass_variant=not_a_variant",
+        ])
+        #expect(bad.contains("invalid glass_variant"))
+        let cleared = stack.handler.handle(arguments: [
+            "--set", "pill", "background.glass_variant=default",
+        ])
+        #expect(cleared.isEmpty)
+        #expect(item.background.glassVariant == nil)
+    }
+
     @Test func queryReportsEveryPopupProperty() throws {
         let stack = try makeStack()
         let reply = stack.handler.handle(arguments: [

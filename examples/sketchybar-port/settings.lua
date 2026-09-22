@@ -1,6 +1,9 @@
 return {
   paddings = 3,
   group_paddings = 5,
+  -- ysuite-liquid: seconds before workspace pills drop app icons.
+  -- The active pill then shows the front app name; the others keep their number.
+  workspace_icon_hide = 2.8,
 
   icons = "sf-symbols", -- alternatively available: NerdFont
 

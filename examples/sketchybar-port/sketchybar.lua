@@ -120,6 +120,10 @@ function compat.bar(props) ybar.bar(props) end
 function compat.default(props) ybar.default(props) end
 function compat.set(name, props) ybar.set(name, props) end
 function compat.exec(cmd, fn) ybar.exec(cmd, fn) end
+function compat.wifi_scan(fn) ybar.wifi_scan(fn) end
+function compat.wifi_join(ssid, fn) ybar.wifi_join(ssid, fn) end
+function compat.wifi_prompt(ssid, fn) ybar.wifi_prompt(ssid, fn) end
+function compat.wifi_disconnect(fn) ybar.wifi_disconnect(fn) end
 function compat.trigger(event, env) ybar.trigger(event, env) end
 function compat.animate(curve, frames, fn) ybar.animate(curve, frames, fn) end
 function compat.delay(seconds, fn) ybar.delay(seconds, fn) end

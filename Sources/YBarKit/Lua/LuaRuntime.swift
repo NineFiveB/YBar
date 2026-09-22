@@ -362,12 +362,21 @@ public final class LuaRuntime {
                 guard let graph = runtime.barManager.store.item(named: name)?.graph else { return 0 }
                 let count = lua_rawlen(L, 2)
                 guard count > 0 else { return 0 }
+                var samples: [Float] = []
+                samples.reserveCapacity(Int(count))
                 for index in 1...count {
                     lua_rawgeti(L, 2, lua_Integer(index))
                     if lua_type(L, -1) == luaTypeNumber {
-                        graph.push(Float(lua_tonumberx(L, -1, nil)))
+                        samples.append(Float(lua_tonumberx(L, -1, nil)))
                     }
                     pop(L, 1)
+                }
+                // A full-capacity table replaces the series (battery history);
+                // shorter tables append into the ring (CPU ticks, tests).
+                if samples.count >= graph.capacity {
+                    graph.replace(samples)
+                } else {
+                    for sample in samples { graph.push(sample) }
                 }
                 runtime.barManager.setNeedsRender()
                 return 0
@@ -536,6 +545,68 @@ public final class LuaRuntime {
                 return 1
             }
         }
+        register("wifi_scan") { L in
+            MainActor.assumeIsolated {
+                guard let runtime = LuaRuntime.current else { return 0 }
+                guard lua_type(L, 1) == luaTypeFunction else {
+                    FileHandle.standardError.write(
+                        Data("[ybar] lua: wifi_scan(fn) expects a function\n".utf8))
+                    return 0
+                }
+                lua_pushvalue(L, 1)
+                let ref = Int32(luaL_ref(L, registryIndex))
+                runtime.scheduleWifiScan(ref: ref)
+                return 0
+            }
+        }
+        register("wifi_join") { L in
+            MainActor.assumeIsolated {
+                guard let runtime = LuaRuntime.current else { return 0 }
+                guard let ssid = argString(L, 1) else {
+                    FileHandle.standardError.write(
+                        Data("[ybar] lua: wifi_join(ssid, fn?) expects a network name\n".utf8))
+                    return 0
+                }
+                var ref: Int32 = luaRefNil
+                if lua_type(L, 2) == luaTypeFunction {
+                    lua_pushvalue(L, 2)
+                    ref = Int32(luaL_ref(L, registryIndex))
+                }
+                runtime.scheduleWifiJoin(ssid: ssid, ref: ref)
+                return 0
+            }
+        }
+        // Password stays in the panel. The callback is (output, code) with an
+        // empty output: 0 joined, 2 cancelled. A wrong password does not return.
+        register("wifi_prompt") { L in
+            MainActor.assumeIsolated {
+                guard let runtime = LuaRuntime.current else { return 0 }
+                guard let ssid = argString(L, 1) else {
+                    FileHandle.standardError.write(
+                        Data("[ybar] lua: wifi_prompt(ssid, fn?) expects a network name\n".utf8))
+                    return 0
+                }
+                var ref: Int32 = luaRefNil
+                if lua_type(L, 2) == luaTypeFunction {
+                    lua_pushvalue(L, 2)
+                    ref = Int32(luaL_ref(L, registryIndex))
+                }
+                runtime.scheduleWifiPrompt(ssid: ssid, ref: ref)
+                return 0
+            }
+        }
+        register("wifi_disconnect") { L in
+            MainActor.assumeIsolated {
+                guard let runtime = LuaRuntime.current else { return 0 }
+                var ref: Int32 = luaRefNil
+                if lua_type(L, 1) == luaTypeFunction {
+                    lua_pushvalue(L, 1)
+                    ref = Int32(luaL_ref(L, registryIndex))
+                }
+                runtime.scheduleWifiDisconnect(ref: ref)
+                return 0
+            }
+        }
         register("remove") { L in
             MainActor.assumeIsolated {
                 guard let runtime = LuaRuntime.current else { return 0 }
@@ -612,6 +683,68 @@ public final class LuaRuntime {
         }
         barManager.setNeedsRender()
         return nil
+    }
+
+    /// CoreWLAN scan off the main thread. The callback matches `exec`:
+    /// `(output, exitCode)`.
+    private func scheduleWifiScan(ref: Int32) {
+        let generation = stateGeneration
+        DispatchQueue.global(qos: .utility).async {
+            let output = WifiScan.perform()
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard ref != luaRefNil else { return }
+                    LuaRuntime.current?.completeExec(
+                        ref: ref, generation: generation, output: output, exitCode: 0)
+                }
+            }
+        }
+    }
+
+    /// Saved-network join, also off the main thread. Exit code is
+    /// `networksetup`'s status.
+    private func scheduleWifiJoin(ssid: String, ref: Int32) {
+        let generation = stateGeneration
+        DispatchQueue.global(qos: .utility).async {
+            let result = WifiScan.join(ssid: ssid)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard ref != luaRefNil else { return }
+                    LuaRuntime.current?.completeExec(
+                        ref: ref, generation: generation,
+                        output: result.output, exitCode: result.code)
+                }
+            }
+        }
+    }
+
+    /// Locked personal network. The panel owns retries; Lua hears the close.
+    private func scheduleWifiPrompt(ssid: String, ref: Int32) {
+        let generation = stateGeneration
+        WifiPasswordPrompt.shared.present(ssid: ssid) { joined in
+            MainActor.assumeIsolated {
+                guard ref != luaRefNil else { return }
+                LuaRuntime.current?.completeExec(
+                    ref: ref, generation: generation,
+                    output: "", exitCode: joined ? 0 : 2)
+            }
+        }
+    }
+
+    /// Leave the associated network. Same callback shape as `wifi_join`.
+    private func scheduleWifiDisconnect(ref: Int32) {
+        let generation = stateGeneration
+        DispatchQueue.global(qos: .utility).async {
+            let result = WifiScan.disconnect()
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard ref != luaRefNil else { return }
+                    LuaRuntime.current?.completeExec(
+                        ref: ref, generation: generation,
+                        output: result.output, exitCode: result.code)
+                }
+            }
+        }
     }
 
     private func execAsync(command: String, ref: Int32) {
@@ -796,6 +929,10 @@ public final class LuaRuntime {
     function ybar.add_event(name, notification) local e = raw.add_event(name, notification) if e then print(e) end end
     function ybar.query(target) return raw.query(target) end
     function ybar.volume(pct, app) return raw.volume(pct, app) end
+    function ybar.wifi_scan(fn) raw.wifi_scan(fn) end
+    function ybar.wifi_join(ssid, fn) raw.wifi_join(ssid, fn) end
+    function ybar.wifi_prompt(ssid, fn) raw.wifi_prompt(ssid, fn) end
+    function ybar.wifi_disconnect(fn) raw.wifi_disconnect(fn) end
     function ybar.remove(name) raw.remove(name) end
 
     function ybar.animate(curve, frames, fn)

@@ -7,7 +7,7 @@ sbar.default({
   icon = {
     font = {
       family = settings.font.text,
-      style = settings.font.style_map["Bold"],
+      style = settings.font.style_map["Regular"],
       size = 14.0
     },
     color = colors.white,
@@ -17,7 +17,7 @@ sbar.default({
   label = {
     font = {
       family = settings.font.text,
-      style = settings.font.style_map["Semibold"],
+      style = settings.font.style_map["Regular"],
       size = 13.0
     },
     color = colors.white,
@@ -26,15 +26,16 @@ sbar.default({
   },
   background = {
     height = 28,
-    corner_radius = 9,
+    corner_radius = 20,
     border_width = 0,
     glass = true,
+    sheen = false,
   },
   popup = {
     blur_radius = 30,
     background = {
       border_width = 0,
-      corner_radius = 9,
+      corner_radius = 16,
       color = colors.popup.bg,
       glass = true,
     },

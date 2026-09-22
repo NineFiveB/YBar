@@ -253,7 +253,8 @@ update_calendar = function(events)
         cell:set({
           drawing = true,
           background = {
-            color = is_today and colors.with_alpha(colors.grey, 0.55)
+            color = is_today and (YSUITE_LIQUID and colors.selection
+              or colors.with_alpha(colors.grey, 0.55))
               or colors.transparent,
           },
           label = {
@@ -344,7 +345,7 @@ cal:subscribe({ "forced", "routine", "system_woke" }, function()
   -- Native menu bar clock format: "Mon Aug 3" + "7:50 PM" (no dots, day
   -- and hour without leading zeros).
   cal:set({
-    icon = os.date("%a %b ") .. tostring(os.date("*t").day),
+    icon = os.date(YSUITE_LIQUID and "%a" or "%a %b ") .. (YSUITE_LIQUID and "" or tostring(os.date("*t").day)),
     label = (os.date("%I:%M %p"):gsub("^0", "", 1)),
   })
 end)

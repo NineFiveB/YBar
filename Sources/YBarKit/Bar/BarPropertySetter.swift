@@ -94,6 +94,14 @@ public enum BarPropertySetter {
             guard let flag = PropertySetter.parseBool(value) else { return "[!] invalid boolean: \(value)" }
             manager.settings.glass = flag
             return nil
+        case "glass_variant":
+            guard let variant = GlassVariant(rawValue: value) else {
+                return "[!] invalid glass_variant: \(value) (clear|regular|dock|control_center|app_icons)"
+            }
+            manager.settings.glassVariant = variant
+            return nil
+        case "glass_tint":
+            return setColor(manager, \BarManager.settings.glassTint, "glass_tint", rest, value, context)
         case "fullscreen_show", "show_in_fullscreen":
             guard let flag = PropertySetter.parseBool(value) else { return "[!] invalid boolean: \(value)" }
             manager.settings.fullscreenShow = flag

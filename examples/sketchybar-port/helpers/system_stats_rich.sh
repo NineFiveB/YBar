@@ -32,6 +32,13 @@ netstat -ib -I en0 2>/dev/null | awk 'NR == 2 { printf "NET_IN=%s\nNET_OUT=%s\n"
 echo "MEM_TOTAL_BYTES=$(sysctl -n hw.memsize 2>/dev/null)"
 sysctl -n vm.swapusage 2>/dev/null | awk '{ printf "SWAP_USED=%s\n", $6 }'
 
+# Activity Monitor's free share, not top's "unused" (which ignores reclaimable cache).
+memory_pressure 2>/dev/null | awk -F': ' '/free percentage/ {
+  gsub(/%/, "", $2)
+  gsub(/ /, "", $2)
+  printf "MEM_FREE_PCT=%s\n", $2
+}'
+
 case "$(sysctl -n kern.memorystatus_vm_pressure_level 2>/dev/null)" in
   1) echo "MEM_PRESSURE=Normal" ;;
   2) echo "MEM_PRESSURE=Warning" ;;
@@ -46,4 +53,8 @@ ioreg -r -d 1 -w 0 -c IOAccelerator 2>/dev/null \
   | grep -o '"Device Utilization %"=[0-9]*' | head -1 \
   | awk -F= '{ print "GPU=" $2 }'
 
-sysctl -n kern.boottime 2>/dev/null | awk -F'[ ,]' '{ print "BOOT_SEC=" $4 }'
+echo "BOOT_SEC=$(sysctl -n kern.boottime 2>/dev/null | awk -F'[ ,]' '{ print $4 }')"
+# Best-effort die temp. Absent (no helper, or it needs root) leaves CPU_TEMP unset.
+if command -v osx-cpu-temp >/dev/null 2>&1; then
+  osx-cpu-temp -C 2>/dev/null | awk 'NF { printf "CPU_TEMP=%d\n", $1; exit }'
+fi
