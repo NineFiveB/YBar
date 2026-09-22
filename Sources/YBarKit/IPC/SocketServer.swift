@@ -24,8 +24,6 @@ public final class SocketServer: @unchecked Sendable {
     public let path: String
     private let handler: @MainActor ([String]) -> String
     private var listenFD: Int32 = -1
-    /// Whether this server is the one that owns the socket file on disk.
-    private var bound = false
     private var thread: Thread?
     /// Set once bind+listen succeeded: only then is the node ours to unlink.
     private var bound = false
