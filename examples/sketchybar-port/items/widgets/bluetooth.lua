@@ -164,8 +164,12 @@ for i = 1, max_devices do
       string = "",
       color = colors.white,
       font = { size = 13.0 },
-      width = popup_width - 44 - inset,
+      -- Icon (44) + label must sum to popup_width or the row centres and
+      -- drifts; right inset lives inside this width as padding.
+      width = popup_width - 44,
       align = "left",
+      padding_left = 0,
+      padding_right = inset,
     },
   })
   paired_status_rows[i] = sbar.add("item", "widgets.bluetooth.devstatus." .. i, {
@@ -173,18 +177,29 @@ for i = 1, max_devices do
     drawing = false,
     width = popup_width,
     align = "left",
-    -- Positive y_offset is up. -6 drops the status under the 22pt name
-    -- plate so it is not drawn inside the selection.
-    y_offset = -6,
+    -- Positive y_offset is up. -2 keeps about a 5pt gap under the 22pt
+    -- name plate without sitting inside the selection.
+    y_offset = -2,
+    -- Same two-slot layout as the name row (44 + rest = popup_width) so
+    -- "Connected" shares the device label's left edge. A single short
+    -- icon slot centres and walks the status off the name column.
     icon = {
+      string = "",
+      width = 44,
+      padding_left = 0,
+      padding_right = 0,
+      -- drawing stays on: a drawing=false part contributes no width, and
+      -- the status label would slide under the device icon column.
+    },
+    label = {
       string = "",
       color = colors.grey,
       font = { size = 11.0 },
       width = popup_width - 44,
       align = "left",
-      padding_left = 44,
+      padding_left = 0,
+      padding_right = inset,
     },
-    label = { drawing = false },
   })
   -- Name row only. "Connected" / "Not Connected" is static metadata, same
   -- as the Wi-Fi status line, not a second selection.
@@ -213,8 +228,10 @@ for i = 1, max_devices do
       string = "",
       color = colors.white,
       font = { size = 12.0 },
-      width = popup_width - 44 - inset,
+      width = popup_width - 44,
       align = "left",
+      padding_left = 0,
+      padding_right = inset,
     },
   })
   hover.row(nearby_rows[i])
@@ -301,7 +318,7 @@ local function populate()
       })
       paired_status_rows[i]:set({
         drawing = true,
-        icon = {
+        label = {
           string = status,
           -- Same token as the Wi-Fi "Connected" line.
           color = dev.connected and colors.connected or colors.grey,
@@ -435,7 +452,7 @@ end)
 local function toggle_connection(i)
   local dev = paired_cache[i]
   if not dev then return end
-  paired_status_rows[i]:set({ icon = { string = dev.connected and "Disconnecting…" or "Connecting…" } })
+  paired_status_rows[i]:set({ label = { string = dev.connected and "Disconnecting…" or "Connecting…" } })
   local action = dev.connected and "--disconnect" or "--connect"
   sbar.exec(blueutil(action .. " " .. shell.quote(dev.address)) .. " 2>/dev/null",
     function()
