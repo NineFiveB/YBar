@@ -57,7 +57,9 @@ local bt_icon = sbar.add("item", "widgets.bluetooth", {
 
 local bt_bracket = sbar.add("bracket", "widgets.bluetooth.bracket", { bt_icon.name }, {
   background = { color = colors.bg1 },
-  popup = { align = "center", height = 30 },
+  -- 24pt cells: name hover plate is 22pt; status sits in the next cell with a
+  -- small gap under the plate (do not y_offset status upward into the plate).
+  popup = { align = "center", height = 24 },
 })
 
 hover.pill(bt_bracket, bt_icon)
@@ -173,6 +175,9 @@ for i = 1, max_devices do
     drawing = false,
     width = popup_width,
     align = "left",
+    -- Keep status in its own cell below the name hover plate (y_offset=0).
+    -- A positive y_offset pulled "Connected" up under the selection fill.
+    y_offset = 0,
     icon = {
       string = "",
       color = colors.grey,
@@ -183,12 +188,8 @@ for i = 1, max_devices do
     },
     label = { drawing = false },
   })
-  -- A two-line cell is one click target, so both lines light together:
-  -- one subscription per row driving both plates. Wiring it as two
-  -- hover.row calls plus a sibling attachColor each way subscribed every
-  -- row to mouse.entered twice, and only the last handler per (item, event)
-  -- survives — each line lit the other.
-  hover.rowGroup({ paired_name_rows[i], paired_status_rows[i] })
+  -- Name row only: status is static metadata (same as Wi-Fi Connected line).
+  hover.row(paired_name_rows[i])
 end
 
 -- Nearby Devices: auto-scan on open, spinner beside the header.
@@ -301,7 +302,12 @@ local function populate()
       })
       paired_status_rows[i]:set({
         drawing = true,
-        icon = { string = status },
+        icon = {
+          string = status,
+          -- Match Wi-Fi: Connected uses colors.connected (system green);
+          -- Not Connected stays secondary grey.
+          color = dev.connected and colors.connected or colors.grey,
+        },
       })
     else
       paired_name_rows[i]:set({ drawing = false })
@@ -444,7 +450,6 @@ end
 
 for i = 1, max_devices do
   paired_name_rows[i]:subscribe("mouse.clicked", function() toggle_connection(i) end)
-  paired_status_rows[i]:subscribe("mouse.clicked", function() toggle_connection(i) end)
 end
 
 nearby_header:subscribe("mouse.clicked", run_inquiry)
