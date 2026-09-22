@@ -6,17 +6,16 @@
 
 ![YBar in use: AeroSpace workspace pills with live app icons, then the app-menus swap](docs/media/ybar-demo.gif)
 
-*The `sketchybar-glass` theme: workspace pills tracking AeroSpace with live app
-icons, a running Claude Code session indicator, CPU graph, and the app-menus
-swap replacing the pills in place. The native macOS menu bar is hidden
-underneath.*
+*The `sketchybar-glass` theme: AeroSpace workspace pills, then the app-menus
+swap opening and collapsing in place. The native macOS menu bar is hidden
+underneath. No app windows are in frame.*
 
 ![Calendar, system monitor and Wi-Fi popups rendered as Liquid Glass panels](docs/media/ybar-popups.gif)
 
-*Popups are first-class items laid out by the same engine: a calendar month
-grid (`popup.wrap_width` flow layout), arc gauges for CPU and memory, and a
-Settings-style Wi-Fi picker — all on real `NSGlassEffectView` backdrops.
-Network names in this recording are placeholders.*
+*Popups are first-class items laid out by the same engine: calendar, system
+monitor, battery, Wi-Fi, Bluetooth, and menu-bar extras — all on real
+`NSGlassEffectView` backdrops. Network names, device names, and background
+items in this recording are placeholders.*
 
 
 ```sh
