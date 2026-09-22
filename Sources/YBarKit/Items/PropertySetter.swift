@@ -86,6 +86,8 @@ public enum PropertySetter {
             return nil
         case "y_offset":
             return setFloat(item, \Item.yOffset, "y_offset", value, ctx)
+        case "x_offset":
+            return setFloat(item, \Item.xOffset, "x_offset", value, ctx)
         case "padding_left":
             return setFloat(item, \Item.paddingLeft, "padding_left", value, ctx)
         case "padding_right":
@@ -147,6 +149,61 @@ public enum PropertySetter {
         case "line_width":
             return setFloatValue(key: "item.\(item.id).graph.line_width", current: graph.lineWidth,
                                  value: value, ctx: ctx) { graph.lineWidth = $0 }
+        case "style":
+            switch value.lowercased() {
+            case "line":
+                graph.style = .line
+            case "bars", "bar":
+                graph.style = .bars
+            default:
+                return "[!] invalid graph.style: \(value) (line|bars)"
+            }
+            ctx.invalidate()
+            return nil
+        case "tick":
+            if value == "off" || value == "none" || value.isEmpty {
+                graph.tickIndex = nil
+                ctx.invalidate()
+                return nil
+            }
+            guard let index = Int(value), index >= 0 else {
+                return "[!] invalid graph.tick: \(value)"
+            }
+            graph.tickIndex = index
+            ctx.invalidate()
+            return nil
+        case "plot_width":
+            return setFloatValue(key: "item.\(item.id).graph.plot_width", current: graph.plotWidth,
+                                 value: value, ctx: ctx) { graph.plotWidth = max(0, $0) }
+        case "axis_max":
+            guard let maxValue = Float(value), maxValue >= 1 else {
+                return "[!] invalid graph.axis_max: \(value)"
+            }
+            graph.axisMax = maxValue
+            ctx.invalidate()
+            return nil
+        case "marks":
+            if value == "off" || value == "none" || value.isEmpty {
+                graph.marks = []
+                ctx.invalidate()
+                return nil
+            }
+            var flags: [Bool] = []
+            flags.reserveCapacity(graph.capacity)
+            for part in value.split(whereSeparator: \.isWhitespace).prefix(graph.capacity) {
+                switch part {
+                case "1", "true", "on":
+                    flags.append(true)
+                case "0", "false", "off":
+                    flags.append(false)
+                default:
+                    return "[!] invalid graph.marks: \(value)"
+                }
+            }
+            while flags.count < graph.capacity { flags.append(false) }
+            graph.marks = flags
+            ctx.invalidate()
+            return nil
         default:
             return "[?] unknown property: graph.\(path.joined(separator: "."))"
         }
@@ -284,6 +341,24 @@ public enum PropertySetter {
                 return setFloatValue(key: "item.\(item.id).slider.background.corner_radius",
                                      current: slider.background.cornerRadius,
                                      value: value, ctx: ctx) { slider.background.cornerRadius = $0 }
+            case "border_color":
+                return setColorValue(key: "item.\(item.id).slider.background.border_color",
+                                     current: slider.background.borderColor,
+                                     value: value, ctx: ctx) {
+                    slider.background.borderColor = $0
+                    slider.background.drawing = true
+                }
+            case "border_width":
+                return setFloatValue(key: "item.\(item.id).slider.background.border_width",
+                                     current: slider.background.borderWidth,
+                                     value: value, ctx: ctx) {
+                    slider.background.borderWidth = $0
+                    slider.background.drawing = true
+                }
+            case "drawing":
+                return setBoolValue(current: slider.background.drawing, value: value, ctx: ctx) {
+                    slider.background.drawing = $0
+                }
             default:
                 return "[?] unknown property: slider.background.\(rest.joined(separator: "."))"
             }
@@ -356,6 +431,12 @@ public enum PropertySetter {
                                      value: value, ctx: ctx) { [weak item] in item?.popup.background.borderWidth = $0 }
             case "glass":
                 return setBool(item, \Item.popup.background.glass, value, ctx)
+            case "sheen":
+                return setBool(item, \Item.popup.background.sheen, value, ctx)
+            case "glass_tint":
+                return setGlassTint(
+                    item, base: \Item.popup.background, prefix: "popup.background",
+                    rest: rest.dropFirst(), value: value, ctx: ctx)
             case "shadow", "image":
                 // Panel shadow comes from the window; images unsupported. Ignore.
                 return nil
@@ -574,6 +655,22 @@ public enum PropertySetter {
             return setFloat(item, base.appending(path: \BackgroundStyle.yOffset), "\(prefix).y_offset", value, ctx)
         case "glass":
             return setBool(item, base.appending(path: \BackgroundStyle.glass), value, ctx)
+        case "sheen":
+            return setBool(item, base.appending(path: \BackgroundStyle.sheen), value, ctx)
+        case "glass_variant":
+            if value == "off" || value == "default" || value.isEmpty {
+                item[keyPath: base.appending(path: \BackgroundStyle.glassVariant)] = nil
+                ctx.invalidate()
+                return nil
+            }
+            guard let variant = GlassVariant(rawValue: value) else {
+                return "[!] invalid glass_variant: \(value) (clear|regular|dock|control_center|app_icons)"
+            }
+            item[keyPath: base.appending(path: \BackgroundStyle.glassVariant)] = variant
+            ctx.invalidate()
+            return nil
+        case "glass_tint":
+            return setGlassTint(item, base: base, prefix: prefix, rest: rest, value: value, ctx: ctx)
         case "gradient_color":
             guard let color = YColor.parse(value) else { return "[!] invalid color: \(value)" }
             item[keyPath: base.appending(path: \BackgroundStyle.gradientColor)] = color
@@ -742,6 +839,33 @@ public enum PropertySetter {
             ctx.invalidate()
         }
         return nil
+    }
+
+    /// Per-plate glass tint. `off`, empty, and `0x00000000` drop the override
+    /// so the plate inherits `--bar glass_tint`. Any other color is animatable
+    /// through the same path as `background.color`.
+    private static func setGlassTint(
+        _ item: Item,
+        base: ReferenceWritableKeyPath<Item, BackgroundStyle>,
+        prefix: String,
+        rest: ArraySlice<Substring>,
+        value: String,
+        ctx: PropertyContext
+    ) -> String? {
+        let animationKey = "item.\(item.id).\(prefix).glass_tint"
+        let clears = value == "off" || value == "default" || value.isEmpty
+            || (rest.isEmpty && YColor.parse(value)?.argb == 0)
+        if clears {
+            ctx.scheduler.cancel(key: animationKey)
+            item[keyPath: base.appending(path: \BackgroundStyle.hasGlassTint)] = false
+            item[keyPath: base.appending(path: \BackgroundStyle.glassTint)] = .clear
+            ctx.invalidate()
+            return nil
+        }
+        item[keyPath: base.appending(path: \BackgroundStyle.hasGlassTint)] = true
+        return setColor(
+            item, base.appending(path: \BackgroundStyle.glassTint),
+            "\(prefix).glass_tint", rest, value, ctx)
     }
 
     /// Animatable color leaf, with per-channel addressing (`...color.alpha` etc.).

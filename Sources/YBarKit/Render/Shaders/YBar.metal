@@ -34,7 +34,8 @@ struct GlyphInstance {
 struct Uniforms {
     float2 viewportSize;
     uint   holeCount;
-    uint   _pad;
+    float  time;
+    float2 pointer;
 };
 
 struct Hole {
@@ -49,6 +50,9 @@ constant uint kQuadFlagGlass      = 1u << 1;
 constant uint kQuadFlagArc        = 1u << 2;
 constant uint kQuadFlagHoles      = 1u << 3;
 constant uint kQuadFlagShadow     = 1u << 4;
+constant uint kQuadFlagSheen      = 1u << 5;
+constant uint kQuadFlagLens       = 1u << 6;
+constant uint kQuadFlagLensSample = 1u << 7;
 constant uint kGlyphFlagColor     = 1u << 0;
 constant uint kGlyphFlagGrey      = 1u << 1;
 
@@ -115,10 +119,97 @@ static inline float sd_rounded_box(float2 p, float2 halfSize, float4 radii) {
     return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
 }
 
+// Webpage liquid-glass-js: capsule SDF refraction of a backdrop, rim,
+// ripple, 9x9 blur, and a slight vertical tint.
+static inline float pill_distance(float2 coord, float2 size, float radius) {
+    float2 pixelCoord = coord * size;
+    float2 center = size * 0.5;
+    float2 capsuleStart = float2(radius, center.y);
+    float2 capsuleEnd = float2(size.x - radius, center.y);
+    float2 axis = capsuleEnd - capsuleStart;
+    float len2 = dot(axis, axis);
+    if (len2 > 0.0) {
+        float t = clamp(dot(pixelCoord - capsuleStart, axis) / len2, 0.0, 1.0);
+        return length(pixelCoord - (capsuleStart + t * axis)) - radius;
+    }
+    return length(pixelCoord - center) - radius;
+}
+
+static inline float4 liquid_lens(
+    float2 uv,
+    float2 fragPx,
+    float2 size,
+    bool hot,
+    texture2d<float, access::sample> backdrop
+) {
+    float radius = min(size.x, size.y) * 0.5;
+    float distFromEdgeShape = max(-pill_distance(uv, size, radius), 0.0);
+    float2 pixelCoord = uv * size;
+    float2 capsuleStart = float2(radius, size.y * 0.5);
+    float2 capsuleEnd = float2(size.x - radius, size.y * 0.5);
+    float2 capsuleAxis = capsuleEnd - capsuleStart;
+    float2 shapeNormal = float2(0.0, 1.0);
+    float axisLen2 = dot(capsuleAxis, capsuleAxis);
+    if (axisLen2 > 0.0) {
+        float t = clamp(dot(pixelCoord - capsuleStart, capsuleAxis) / axisLen2, 0.0, 1.0);
+        float2 normalDir = pixelCoord - (capsuleStart + t * capsuleAxis);
+        if (length(normalDir) > 0.0) shapeNormal = normalize(normalDir);
+    } else {
+        shapeNormal = normalize(uv - 0.5);
+    }
+    float baseI = 1.0 - exp(-distFromEdgeShape * 0.1);
+    float edgeI = exp(-distFromEdgeShape * 0.15);
+    float rimI = exp(-distFromEdgeShape * 0.8);
+    float rimK = hot ? 0.1 : 0.05;
+    float edgeK = hot ? 0.02 : 0.01;
+    float total = baseI * 0.01 + edgeI * edgeK + rimI * rimK;
+    float2 baseRefraction = shapeNormal * total;
+    float cornerNorm = max(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y)) * min(size.x, size.y);
+    float2 cornerRefraction = shapeNormal * exp(-cornerNorm * 0.3) * 0.02;
+    float2 perpendicular = float2(-shapeNormal.y, shapeNormal.x);
+    float distNorm = distFromEdgeShape / max(min(size.x, size.y), 1.0);
+    float2 ripple = perpendicular * sin(distNorm * 25.0) * 0.1 * rimI;
+    float2 refraction = (baseRefraction + cornerRefraction + ripple) * 2.5;
+
+    float2 texSize = float2(backdrop.get_width(), backdrop.get_height());
+    float2 sampleUV = fragPx / max(texSize, float2(1.0)) + refraction;
+    constexpr sampler smp(filter::linear, address::clamp_to_edge);
+    float4 color = float4(0.0);
+    float2 texel = 1.0 / max(texSize, float2(1.0));
+    // Same 9x9 kernel as liquid-glass-js, but a tighter sigma so window
+    // edges survive instead of smearing into a flat tint.
+    float sigma = 2.0;
+    float2 blurStep = texel * sigma;
+    float totalWeight = 0.0;
+    for (int j = -4; j <= 4; j++) {
+        for (int i = -4; i <= 4; i++) {
+            float dist = length(float2(float(i), float(j)));
+            if (dist > 4.0) continue;
+            float weight = exp(-(dist * dist) / (2.0 * sigma * sigma));
+            color += backdrop.sample(smp, sampleUV + float2(float(i), float(j)) * blurStep) * weight;
+            totalWeight += weight;
+        }
+    }
+    color /= max(totalWeight, 1e-4);
+    float3 tint = mix(float3(1.0), float3(0.78), uv.y);
+    float tintK = hot ? 0.04 : 0.08;
+    color.rgb = mix(color.rgb, tint, tintK);
+    // Depth is object-local: a lip on the top of this capsule, a shade on
+    // the bottom. Not a ring, and not a light shared with the next pill.
+    float topFacing = max(-shapeNormal.y, 0.0);
+    float bottomFacing = max(shapeNormal.y, 0.0);
+    float edge = exp(-distFromEdgeShape * 0.55);
+    color.rgb = clamp(color.rgb + float3(edge * mix(0.04, 0.5, topFacing))
+                      - float3(edge * bottomFacing * 0.35), 0.0, 1.0);
+    color.a = 1.0;
+    return color;
+}
+
 fragment float4 quad_fragment(
     QuadVOut in [[stage_in]],
     constant Uniforms &uniforms [[buffer(1)]],
-    const device Hole *holes [[buffer(2)]]
+    const device Hole *holes [[buffer(2)]],
+    texture2d<float, access::sample> backdrop [[texture(0)]]
 ) {
     float d = sd_rounded_box(in.local, in.halfSize, in.radii);
     float aa = max(fwidth(d), 1e-4);
@@ -183,7 +274,18 @@ fragment float4 quad_fragment(
     float3 rgb = fill.rgb * fill.a * inner + in.borderColor.rgb * in.borderColor.a * (outer - inner);
     float alpha = fill.a * inner + in.borderColor.a * (outer - inner);
 
-    if (in.flags & kQuadFlagGlass) {
+    // Webpage liquid lens replaces the pill fill. System glass is hidden
+    // while this texture is live, so the painted rim stays off.
+    if ((in.flags & kQuadFlagLensSample) && backdrop.get_width() > 1u) {
+        float2 size = max(in.halfSize * 2.0, float2(1.0));
+        float2 origin = in.position.xy - in.uv * size;
+        float2 puv = (uniforms.pointer - origin) / size;
+        bool over = puv.x >= 0.0 && puv.x <= 1.0 && puv.y >= 0.0 && puv.y <= 1.0;
+        bool hot = over || (in.flags & kQuadFlagLens) != 0u;
+        float4 lens = liquid_lens(in.uv, in.position.xy, size, hot, backdrop);
+        rgb = lens.rgb * outer;
+        alpha = outer;
+    } else if (in.flags & kQuadFlagGlass) {
         // Liquid-glass rim: the SDF's screen-space gradient is the surface
         // normal, so speculars wrap around corners like light bending through
         // curved glass (Tahoe's signature) instead of a flat top band.
@@ -208,6 +310,39 @@ fragment float4 quad_fragment(
         float light = (rimLight + innerGlow + sheen) * presence;
         rgb = clamp(rgb + float3(light), 0.0, 1.0);
         alpha = clamp(alpha + light * 0.85, 0.0, 1.0);
+    }
+
+    // Per-pill depth on top of (possibly inactive) system glass: top lip,
+    // bottom shade, and a specular only while the pointer is inside this
+    // capsule — never a light shared across neighboring pills.
+    if (in.flags & kQuadFlagSheen) {
+        float2 size = max(in.halfSize * 2.0, float2(1.0));
+        float2 origin = in.position.xy - in.uv * size;
+        float2 puv = (uniforms.pointer - origin) / size;
+        bool over = puv.x >= 0.0 && puv.x <= 1.0 && puv.y >= 0.0 && puv.y <= 1.0;
+        bool hot = over || (in.flags & kQuadFlagLens) != 0u;
+        // Near-clear fills (inactive-glass compensation) still need a floor
+        // so lip/shade read as depth without a dark Metal slab.
+        float presence = max(smoothstep(0.0, 0.06, max(fill.a, alpha)), 0.75);
+
+        float topLip = smoothstep(0.28, 0.0, in.uv.y) * outer * 0.42 * presence;
+        float bottomShade = smoothstep(0.62, 1.0, in.uv.y) * outer * 0.32 * presence;
+        float2 grad = float2(dfdx(d), dfdy(d));
+        float2 n = normalize(grad + float2(1e-5, 1e-5));
+        float topFacing = pow(max(dot(n, float2(0.0, -1.0)), 0.0), 1.6);
+        float edge = smoothstep(2.4, 0.15, abs(d)) * outer;
+        float rim = edge * (0.12 + 0.62 * topFacing) * presence;
+
+        rgb = clamp(rgb + float3(topLip + rim) - float3(bottomShade), 0.0, 1.0);
+        alpha = clamp(alpha + (topLip + rim) * 0.55, 0.0, 1.0);
+
+        if (hot) {
+            float2 delta = (in.uv - puv) * float2(1.2, 0.62);
+            float radial = 1.0 - smoothstep(0.02, 0.48, length(delta));
+            float spec = radial * 0.7 * outer * presence;
+            rgb = clamp(rgb + float3(spec), 0.0, 1.0);
+            alpha = clamp(alpha + spec * 0.45, 0.0, 1.0);
+        }
     }
     return float4(rgb * holeMask, alpha * holeMask);
 }

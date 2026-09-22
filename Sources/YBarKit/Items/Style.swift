@@ -70,6 +70,14 @@ public struct YColor: Equatable, Sendable {
 
     public static let clear = YColor(argb: 0x0000_0000)
     public static let white = YColor(argb: 0xFFFF_FFFF)
+
+    /// sRGB color for `NSGlassEffectView.tintColor`. Alpha 0 is untinted.
+    public var nsColor: NSColor {
+        if alpha <= 0 { return .clear }
+        return NSColor(
+            srgbRed: CGFloat(red), green: CGFloat(green),
+            blue: CGFloat(blue), alpha: CGFloat(alpha))
+    }
 }
 
 /// Silhouette shadow: a copy of the plate displaced by distance + angle
@@ -93,6 +101,27 @@ public struct ShadowStyle: Equatable, Sendable {
     }
 }
 
+/// NSGlassEffectView material choice. Only `clear` and `regular` are public API;
+/// the rest call unsupported `_setVariant:` SPI and may break across OS updates.
+/// None of these force the active look on a non-key HUD.
+public enum GlassVariant: String, Sendable, Equatable {
+    case clear
+    case regular
+    case dock
+    case controlCenter = "control_center"
+    case appIcons = "app_icons"
+
+    /// Private material codes used by undocumented `_setVariant:` (Dock=2, …).
+    var privateVariantCode: UInt64? {
+        switch self {
+        case .clear, .regular: return nil
+        case .dock: return 2
+        case .appIcons: return 3
+        case .controlCenter: return 8
+        }
+    }
+}
+
 /// Rounded-rect background: fill, optional 2-stop gradient, border, shadow.
 // (background.image lives below as value fields — see imageSource)
 public struct BackgroundStyle: Equatable, Sendable {
@@ -109,6 +138,17 @@ public struct BackgroundStyle: Equatable, Sendable {
     /// Liquid-glass material: specular top rim + vertical sheen in-shader,
     /// designed to sit over a blurred backdrop (item blur_radius > 0).
     public var glass: Bool = false
+    /// Pre-26 painted lip, shade, and pointer specular. Ignored where
+    /// NSGlassEffectView is the material, so it does not draw a fake shine
+    /// over system glass or keep the display link running.
+    public var sheen: Bool = false
+    /// Overrides the bar-wide glass variant for this plate when `glass` is on.
+    public var glassVariant: GlassVariant? = nil
+    /// `NSGlassEffectView.tintColor` when `hasGlassTint` is true. Alpha is
+    /// intensity. Otherwise the plate inherits `--bar glass_tint`.
+    public var glassTint: YColor = .clear
+    /// False means inherit the bar tint (`glass_tint=off` / `0x00000000`).
+    public var hasGlassTint: Bool = false
     public var height: Float = 0
     public var paddingLeft: Float = 0
     public var paddingRight: Float = 0

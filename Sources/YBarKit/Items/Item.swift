@@ -36,6 +36,9 @@ public final class Item {
     /// Content alignment within a fixed-width item.
     public var align: Character = "c"
     public var yOffset: Float = 0
+    /// Horizontal slide that does not change the flow. The next item stays
+    /// where layout put it, so a pill can travel across its neighbors.
+    public var xOffset: Float = 0
     /// Item-level paddings are outer margins around the whole item.
     public var paddingLeft: Float = 0
     public var paddingRight: Float = 0
@@ -84,6 +87,7 @@ public final class Item {
         paddingLeft = prototype.paddingLeft
         paddingRight = prototype.paddingRight
         yOffset = prototype.yOffset
+        xOffset = prototype.xOffset
         updatePolicy = prototype.updatePolicy
         script = prototype.script
         clickScript = prototype.clickScript
@@ -116,7 +120,7 @@ public final class Item {
     public var contentWidth: CGFloat {
         var width: CGFloat = image?.advance ?? 0
         if let alias { width += alias.displaySize(backingScale: 2).width }
-        if let graph { width += CGFloat(graph.capacity) }
+        if let graph { width += graph.layoutWidth }
         else if let slider { width += CGFloat(slider.width) }
         else if let gauge { width += CGFloat(gauge.diameter) }
         return width

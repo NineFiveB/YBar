@@ -33,6 +33,10 @@ public final class BarSurface {
     private let glassHost: NSView?
     /// Bar-wide Liquid Glass backdrop (--bar glass=on), behind the pill glass.
     private var barGlass: NSView?
+    /// Applied to bar strip and pill glass on the next sync / apply.
+    private var glassVariant: GlassVariant = .clear
+    /// Bar-wide `NSGlassEffectView` tint. Pills inherit this unless overridden.
+    private var glassTint: YColor = .clear
     /// fullscreen_show: temporarily at status level while the active Space
     /// hosts a fullscreen window. Survives apply() until cleared.
     private(set) var elevated = false
@@ -79,6 +83,10 @@ public final class BarSurface {
             let merger = NSGlassEffectContainerView()
             merger.frame = container.bounds
             merger.autoresizingMask = [.width, .height]
+            // 0 keeps each pill a separate glass object. The default spacing
+            // melts neighbors into one blob, so a highlight slides across the
+            // row instead of staying inside the pill it belongs to.
+            merger.spacing = 0
             let content = NSView()
             content.frame = merger.bounds
             content.autoresizingMask = [.width, .height]
@@ -114,22 +122,27 @@ public final class BarSurface {
         panel.hasShadow = settings.shadow
         panel.collectionBehavior = BarSurface.collectionBehavior(
             sticky: settings.sticky, policy: settings.fullscreenPolicy)
+        glassVariant = settings.glassVariant
+        glassTint = settings.glassTint
         #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
             effectView.isHidden = settings.blurRadius <= 0
             if settings.glass, barGlass == nil, let container = panel.contentView {
                 let glass = NSGlassEffectView()
-                // Clear, same as the pills: regular's frost is an opaque slab
-                // at bar width; the bar color quad supplies any tint.
-                glass.style = .clear
                 glass.appearance = NSAppearance(named: .darkAqua)
                 glass.autoresizingMask = [.width, .height]
                 glass.frame = container.bounds
+                BarSurface.configureLiquidGlass(
+                    glass, variant: settings.glassVariant, tint: settings.glassTint)
                 container.addSubview(glass, positioned: .above, relativeTo: effectView)
                 barGlass = glass
             }
             barGlass?.isHidden = !settings.glass
-            (barGlass as? NSGlassEffectView)?.cornerRadius = CGFloat(settings.cornerRadius)
+            if let glass = barGlass as? NSGlassEffectView {
+                glass.cornerRadius = CGFloat(settings.cornerRadius)
+                BarSurface.configureLiquidGlass(
+                    glass, variant: settings.glassVariant, tint: settings.glassTint)
+            }
         } else {
             // Pre-26 there is no glass material; fall back to the blur.
             effectView.isHidden = settings.blurRadius <= 0 && !settings.glass
@@ -180,7 +193,14 @@ public final class BarSurface {
 
     /// Sync the per-item glass backdrop views to the latest layout. `rect` is
     /// bar-local top-left-origin points (the painted background pill's rect).
-    public func syncGlassBackdrops(_ specs: [(itemID: Int, rect: CGRect, cornerRadius: CGFloat)]) {
+    /// `variantOverride` is per-item (`background.glass_variant`); nil uses the
+    /// bar-wide setting. Metal text/icons stay siblings of the glass (not in
+    /// `contentView`) so the existing glyph pipeline keeps working — AppKit
+    /// only guarantees z-order for `contentView` children.
+    public func syncGlassBackdrops(
+        _ specs: [(itemID: Int, rect: CGRect, cornerRadius: CGFloat, variant: GlassVariant?, tint: YColor?)],
+        lensCoversPills: Bool = false
+    ) {
         guard let container = panel.contentView else { return }
         let containerHeight = container.bounds.height
         var live = Set<Int>()
@@ -192,6 +212,8 @@ public final class BarSurface {
                 y: containerHeight - spec.rect.maxY,
                 width: spec.rect.width,
                 height: spec.rect.height)
+            let variant = spec.variant ?? glassVariant
+            let tint = spec.tint ?? glassTint
             var handled = false
             #if compiler(>=6.2)
             if #available(macOS 26.0, *), let glassHost {
@@ -200,16 +222,16 @@ public final class BarSurface {
                     glass = existing
                 } else {
                     glass = NSGlassEffectView()
-                    // Clear glass: fully transparent + refractive (regular's
-                    // adaptive frost reads as an opaque dark slab in a bar);
-                    // the item's own fill tint supplies the darkness.
-                    glass.style = .clear
                     glass.appearance = NSAppearance(named: .darkAqua)
                     glassHost.addSubview(glass)
                     glassViews[spec.itemID] = glass
                 }
                 glass.frame = frame
                 glass.cornerRadius = spec.cornerRadius
+                BarSurface.configureLiquidGlass(glass, variant: variant, tint: tint)
+                // System glass is the product backdrop; hide only while a
+                // ScreenCaptureKit lens texture is actively covering the pills.
+                glass.isHidden = lensCoversPills
                 handled = true
             }
             #endif
@@ -227,6 +249,7 @@ public final class BarSurface {
                 }
                 view.frame = frame
                 view.maskImage = BarSurface.roundedMask(radius: spec.cornerRadius)
+                view.isHidden = lensCoversPills
             }
         }
         for (itemID, view) in glassViews where !live.contains(itemID) {
@@ -234,6 +257,35 @@ public final class BarSurface {
             glassViews.removeValue(forKey: itemID)
         }
     }
+
+    /// Public style + interactive flag; optional private `_setVariant:` for
+    /// Dock / Control Center approximations. Does not (and cannot) force the
+    /// active material on a non-key panel.
+    #if compiler(>=6.2)
+    @available(macOS 26.0, *)
+    static func configureLiquidGlass(
+        _ glass: NSGlassEffectView, variant: GlassVariant, tint: YColor = .clear
+    ) {
+        switch variant {
+        case .regular:
+            glass.style = .regular
+        case .clear, .dock, .controlCenter, .appIcons:
+            // Clear: fully transparent + refractive. Regular's adaptive frost
+            // reads as an opaque dark slab at bar/pill size; Metal fill tints.
+            glass.style = .clear
+        }
+        glass.tintColor = tint.nsColor
+        if #available(macOS 27.0, *) {
+            glass.effectIsInteractive = true
+        }
+        if let code = variant.privateVariantCode {
+            let sel = Selector(("_setVariant:"))
+            if glass.responds(to: sel) {
+                glass.perform(sel, with: NSNumber(value: code))
+            }
+        }
+    }
+    #endif
 
     /// Stretchable rounded-rect mask (the sanctioned way to shape a
     /// behind-window material), cached per radius.

@@ -74,9 +74,12 @@ public enum Layout {
 
         func place(_ item: Item, x: CGFloat, measured: MeasuredContent) {
             let length = contentLength(item: item, measured: measured)
-            let box = CGRect(x: x, y: 0, width: length, height: barSize.height)
+            // x_offset slides the drawn pill (and the bracket wrapped around
+            // its content box) without pushing the items that follow.
+            let shift = CGFloat(item.xOffset)
+            let box = CGRect(x: x + shift, y: 0, width: length, height: barSize.height)
             item.frame = CGRect(
-                x: x - CGFloat(item.paddingLeft),
+                x: x - CGFloat(item.paddingLeft) + shift,
                 y: 0,
                 width: length + CGFloat(item.paddingLeft) + CGFloat(item.paddingRight),
                 height: barSize.height

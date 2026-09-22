@@ -1,6 +1,7 @@
 return {
-  text = "SF Pro",
-  numbers = "SF Pro",
+  -- Empty family resolves to NSFont.systemFont, the Mac UI font.
+  text = "",
+  numbers = "",
 
   style_map = {
     ["Regular"] = "Regular",
