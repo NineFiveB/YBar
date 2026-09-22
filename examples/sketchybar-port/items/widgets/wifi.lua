@@ -249,17 +249,54 @@ local function signal_color(net)
   return colors.grey
 end
 
+-- The network name YBar read in-process with CoreWLAN.
+--
+-- macOS now redacts the SSID from every command-line source unless the calling
+-- process holds Location Services. Verified on this machine, all returning the
+-- literal string "<redacted>":
+--
+--   ipconfig getsummary en0
+--   system_profiler SPAirPortDataType          (text)
+--   system_profiler SPAirPortDataType -json    (what the scan below uses)
+--
+-- and the old `airport` utility has been removed from macOS entirely. So the
+-- scan cannot name ANY network, including the one we are joined to.
+--
+-- YBar reads the current network with CoreWLAN inside its own process, where
+-- the grant applies, and hands it over in the wifi_change payload. That
+-- recovers the CURRENT network's name. The other scanned networks cannot be
+-- recovered by any available means and stay redacted (filtered out below).
+--
+-- The grant is a one-time opt-in: `ybar --bar wifi_ssid_prompt=on`, then click
+-- Allow. Until then INFO carries "connected" rather than a name.
+local live_ssid = nil
+local REDACTED = "<redacted>"
+
 -- Split the scan into current / known (saved) / other.
 local function classify()
   local current, known, other = nil, {}, {}
   for _, net in ipairs(scan_cache) do
     if net.current then
       current = net
-    elseif preferred_set[net.name] then
+    elseif net.name ~= REDACTED and preferred_set[net.name] then
       known[#known + 1] = net
-    else
+    elseif net.name ~= REDACTED then
       other[#other + 1] = net
     end
+    -- Pure "<redacted>" rows (no Location grant on the CLI scanner) are
+    -- dropped: they cannot be named, distinguished, or joined.
+  end
+  -- CoreWLAN recovered the joined SSID even when the scan could not — synthesize
+  -- a current row so the Connected block is not blank.
+  if not current and live_ssid then
+    current = {
+      current = true,
+      name = live_ssid,
+      rssi = -50,
+      secured = true,
+    }
+  elseif current and current.name == REDACTED and live_ssid then
+    current.name = live_ssid
   end
   return current, known, other
 end
@@ -330,8 +367,14 @@ local function run_scan()
       for line in output:gmatch("[^\r\n]+") do
         local cur, name, rssi, sec = line:match("^(%d)\t(.-)\t(%-?%d+)\t(%d)$")
         if name then
+          local is_current = cur == "1"
+          -- Only the joined network can be un-redacted, and only from YBar's
+          -- own CoreWLAN read.
+          if is_current and name == REDACTED and live_ssid then
+            name = live_ssid
+          end
           nets[#nets + 1] = {
-            current = cur == "1",
+            current = is_current,
             name = name,
             rssi = tonumber(rssi),
             secured = sec == "1",
@@ -512,7 +555,22 @@ end
 
 wifi:subscribe("mouse.clicked", toggle_details)
 wifi:subscribe("mouse.exited.global", hide_details)
-wifi:subscribe({ "wifi_change", "system_woke" }, refresh_pill_icon)
+wifi:subscribe({ "wifi_change", "system_woke" }, function(env)
+  -- INFO is "" offline, "connected" when the grant is missing, else the SSID.
+  local info = env and env.INFO
+  if info == nil or info == "" or info == "connected" then
+    live_ssid = nil
+  else
+    live_ssid = info
+    -- Rename the cached current row in place so the popup does not have to
+    -- wait for another scan to show the real name.
+    for _, net in ipairs(scan_cache or {}) do
+      if net.current and net.name == REDACTED then net.name = info end
+    end
+  end
+  populate_rows()
+  refresh_pill_icon()
+end)
 
 sbar.add("item", { position = "right", width = settings.group_paddings })
 

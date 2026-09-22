@@ -3,8 +3,22 @@
     current(0/1) \t ssid \t rssi \t secured(0/1)
 
 Deduped by SSID keeping the strongest band; sorted current-first, then by
-signal (unknown-signal networks last), then name. This is the only macOS
-CLI source that still reports real SSIDs without location permission.
+signal (unknown-signal networks last), then name.
+
+NOTE ON REDACTION
+-----------------
+This file used to claim it was "the only macOS CLI source that still reports
+real SSIDs without location permission". That is no longer true. Verified
+against a live system: SPAirPortDataType -json now returns the literal string
+"<redacted>" for the current network AND for every scanned network, exactly
+like `ipconfig getsummary` and the plain-text profiler. The `airport` utility
+that used to work has been removed from macOS.
+
+Names are therefore unavailable from any command line without the Location
+grant. The widget recovers the CURRENT network's name from YBar's own CoreWLAN
+read (delivered in the wifi_change payload, which runs in-process where the
+grant applies) and leaves the rest redacted, because nothing available can
+resolve them.
 """
 import json
 import sys
