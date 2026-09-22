@@ -309,6 +309,44 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                 eventName: entered ? "mouse.entered" : "mouse.exited",
                 environment: ["NAME": item.name])
         }
+        barManager.onGraphHover = { [weak self] item, index in
+            guard let self, let graph = item.graph else { return }
+            let key = "item.\(item.id).graph.hover"
+            if let index {
+                graph.hoverIndex = index
+                if graph.hoverAmount < 0.999 {
+                    self.scheduler.animate(
+                        key: key,
+                        from: .float(graph.hoverAmount),
+                        to: .float(1),
+                        durationFrames: 8,
+                        curve: .tanh,
+                        apply: { value in
+                            if case .float(let amount) = value { graph.hoverAmount = amount }
+                        })
+                }
+                self.barManager.setNeedsRender()
+                self.triggerTargeted(item: item, eventName: "graph.hovered", environment: [
+                    "NAME": item.name,
+                    "INFO": "\(index)",
+                ])
+            } else {
+                self.scheduler.animate(
+                    key: key,
+                    from: .float(graph.hoverAmount),
+                    to: .float(0),
+                    durationFrames: 8,
+                    curve: .tanh,
+                    apply: { value in
+                        if case .float(let amount) = value { graph.hoverAmount = amount }
+                    },
+                    onComplete: { graph.hoverIndex = nil })
+                self.triggerTargeted(item: item, eventName: "graph.hovered", environment: [
+                    "NAME": item.name,
+                    "INFO": "",
+                ])
+            }
+        }
         barManager.onItemScrolled = { [weak self] item, delta, modifier in
             self?.triggerTargeted(
                 item: item,

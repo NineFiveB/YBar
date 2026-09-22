@@ -12,19 +12,25 @@ return {
   grey = 0xff8e8e8e,
   connected = 0xff30d158,
   transparent = 0x00000000,
+  -- Selection plates and gray capsules. Black wash and a low white, so they
+  -- sit darker than a bright frost on the glass popup.
+  selection = 0x50000000,
+  button = 0x2cffffff,
 
   bar = {
-    -- rgba(18, 18, 20, 0.25) — the mock's full-bleed strip.
-    bg = 0x40121214,
+    -- Unused by ysuite-liquid's bar.lua (the strip is fully clear). Kept so
+    -- other item files can still read colors.bar.bg.
+    bg = 0x00000000,
     border = 0x00000000,
   },
   popup = {
     bg = 0x212a2a2a,
     border = 0x2effffff,
   },
-  -- Pills: rgba(42,42,42,0.13). Hover: rgba(56,56,56,0.22).
-  bg1 = 0x212a2a2a,
-  bg2 = 0x38383838,
+  -- Pills: keep alpha above ~0.02 so glass backdrops still attach, but light
+  -- enough that inactive frost stays refractive instead of a solid plate.
+  bg1 = 0x152a2a2a,
+  bg2 = 0x28383838,
   row_hover = 0x16ffffff,
 
   with_alpha = function(color, alpha)

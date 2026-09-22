@@ -461,6 +461,26 @@ import Testing
         MeasuredContent(iconSize: .zero, labelSize: CGSize(width: 50, height: 14))
     }
 
+    @Test func xOffsetSlidesThePillWithoutPushingTheNext() {
+        let a = makeItem("a", .left)
+        let b = makeItem("b", .left)
+        a.xOffset = 12
+        var settings = BarSettings()
+        settings.paddingLeft = 10
+        let result = Layout.perform(items: [a, b], barSize: CGSize(width: 1000, height: 30),
+                                    settings: settings, measure: fixedMeasure)
+        #expect(a.frame.minX == 22)
+        #expect(b.frame.minX == 60)
+        #expect(result.contentBoxes[a.id]?.minX == 22)
+
+        let bracket = Item(name: "ring", position: .left)
+        bracket.kind = .bracket
+        bracket.members = ["a"]
+        let frames = ComponentGeometry.bracketFrames(
+            items: [a, b, bracket], contentBoxes: result.contentBoxes, barHeight: 30)
+        #expect(frames[bracket.id]?.minX == 22)
+    }
+
     @Test func leftItemsFlowRight() {
         let a = makeItem("a", .left)
         let b = makeItem("b", .left)

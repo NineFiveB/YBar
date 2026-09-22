@@ -15,6 +15,10 @@ public final class SceneBuilder {
     private var activeAtlas: GlyphAtlas?
     /// Monotonic clock driving marquee phase (set by the render loop).
     public var clock: CFTimeInterval = 0
+    /// Cursor in the surface being built, pixels, top-left y-down.
+    public var pointer = SIMD2<Float>(repeating: -1e6)
+    /// Glass pills sample the captured desktop instead of a flat fill.
+    public var lensActive = false
 
     public init(fontCache: FontCache) {
         self.fontCache = fontCache
@@ -93,6 +97,7 @@ public final class SceneBuilder {
                 width: union.width,
                 height: height)
             emitBackground(item.background, rect: rect, scale: scale, into: &list)
+            if item.popup.isOpen { SceneBuilder.markLens(&list) }
         }
 
         for item in items {
@@ -102,20 +107,40 @@ public final class SceneBuilder {
             emit(item: item, contentBox: contentBox, scale: scale, atlas: atlas, into: &list)
         }
 
+        list.time = Float(clock)
+        list.pointer = pointer
         return list
     }
 
     // MARK: - Popup scene
 
     public struct PopupScene {
+        public struct GlassChip: Equatable {
+            /// Popup-local, top-left origin, points. Matches the label plate.
+            public var itemID: Int
+            public var rect: CGRect
+            public var cornerRadius: CGFloat
+            public var tint: YColor
+        }
+
         public var list = DisplayList()
         /// Popup-local hit frames.
         public var itemFrames: [(itemID: Int, frame: CGRect)] = []
+        /// Label plates with `background.glass`, in popup-local points.
+        public var glassChips: [GlassChip] = []
         /// Panel content size in points.
         public var sizePoints: CGSize = .zero
         /// A member scrolls its text: the panel needs the frame clock too.
         public var hasMarquee: Bool { list.hasMarquee }
+        /// Traveling sheen (or marquee) needs the display link.
+        public var needsContinuousFrames: Bool { list.needsContinuousFrames }
     }
+
+    /// Set for the duration of `buildPopup` so a glass label plate is recorded
+    /// next to the quad. Bar scenes leave this off.
+    private var collectGlassChips = false
+    private var glassChipItemID = 0
+    private var glassChipBuffer: [PopupScene.GlassChip] = []
 
     /// Vertical (or horizontal) stack of the host's popup members.
     public func buildPopup(
@@ -126,6 +151,9 @@ public final class SceneBuilder {
     ) -> PopupScene {
         var scene = PopupScene()
         activeAtlas = atlas
+        collectGlassChips = true
+        glassChipBuffer.removeAll(keepingCapacity: true)
+        defer { collectGlassChips = false }
         let visible = members.filter { $0.drawing }
         guard !visible.isEmpty else { return scene }
 
@@ -171,8 +199,12 @@ public final class SceneBuilder {
                 y: box.minY,
                 width: box.width + CGFloat(member.paddingLeft) + CGFloat(member.paddingRight),
                 height: box.height)))
+            glassChipItemID = member.id
             emit(item: member, contentBox: box, scale: scale, atlas: atlas, into: &scene.list)
         }
+        scene.glassChips = glassChipBuffer
+        scene.list.time = Float(clock)
+        scene.list.pointer = pointer
         return scene
     }
 
@@ -196,6 +228,7 @@ public final class SceneBuilder {
             let backgroundRect = SceneBuilder.backgroundRect(
                 item: item, contentBox: contentBox, contentHeight: contentHeight)
             emitBackground(item.background, rect: backgroundRect, scale: scale, into: &list)
+            if item.popup.isOpen { SceneBuilder.markLens(&list) }
         }
 
         let measured = MeasuredContent(iconSize: iconSize, labelSize: labelSize)
@@ -234,8 +267,8 @@ public final class SceneBuilder {
         }
         if let graph = item.graph {
             emitGraph(graph, item: item, penX: penX, contentBox: contentBox,
-                      centerY: centerY, scale: scale, into: &list)
-            penX += CGFloat(graph.capacity)
+                      centerY: centerY, scale: scale, atlas: atlas, into: &list)
+            penX += graph.layoutWidth
         }
         if let slider = item.slider {
             // The track origin comes from the shared helper -- the same
@@ -339,9 +372,38 @@ public final class SceneBuilder {
             penX += Layout.partAdvance(item.icon, inkWidth: measured.iconSize.width)
         }
         if let graph = item.graph {
-            penX += CGFloat(graph.capacity)
+            penX += graph.layoutWidth
         }
         return penX
+    }
+
+    /// Plot origin and width of a bars graph, in the same space as item frames.
+    /// Matches `emitGraph`: alignment slack, a leading image, the icon, then
+    /// the border inset. Nil unless the item is a bars graph.
+    static func barPlotOrigin(
+        item: Item, contentBox: CGRect, measured: MeasuredContent
+    ) -> (x: CGFloat, width: CGFloat)? {
+        guard let graph = item.graph, graph.style == .bars else { return nil }
+        var penX = contentBox.minX + alignmentOffset(item: item, measured: measured)
+        if let image = item.image, image.align != "r" {
+            penX += image.advance
+        }
+        if item.icon.drawing {
+            penX += Layout.partAdvance(item.icon, inkWidth: measured.iconSize.width)
+        }
+        let height = item.background.height > 0
+            ? CGFloat(item.background.height)
+            : contentBox.height - 2
+        let borderPaints = item.background.drawing
+            && item.background.borderWidth > 0
+            && item.background.borderColor.alpha > 0
+        let inset = borderPaints
+            ? max(0, min(CGFloat(item.background.borderWidth),
+                         graph.plotWidthPoints / 2, height / 2))
+            : 0
+        let width = graph.plotWidthPoints - 2 * inset
+        guard width > 0 else { return nil }
+        return (penX + inset, width)
     }
 
     // MARK: - Components
@@ -353,6 +415,7 @@ public final class SceneBuilder {
         contentBox: CGRect,
         centerY: CGFloat,
         scale: CGFloat,
+        atlas: GlyphAtlas,
         into list: inout DisplayList
     ) {
         let height = item.background.height > 0
@@ -372,13 +435,25 @@ public final class SceneBuilder {
             && item.background.borderColor.alpha > 0
         let inset = borderPaints
             ? max(0, min(CGFloat(item.background.borderWidth),
-                         CGFloat(graph.capacity) / 2, height / 2))
+                         graph.plotWidthPoints / 2, height / 2))
             : 0
+        let plotWidth = graph.plotWidthPoints
         let box = CGRect(
             x: (penX + inset) * scale,
             y: (centerY - height / 2 + inset) * scale,
-            width: (CGFloat(graph.capacity) - 2 * inset) * scale,
+            width: (plotWidth - 2 * inset) * scale,
             height: (height - 2 * inset) * scale)
+
+        if graph.style == .bars {
+            emitBarGraph(graph, boxPoints: CGRect(
+                x: penX + inset,
+                y: centerY - height / 2 + inset,
+                width: plotWidth - 2 * inset,
+                height: height - 2 * inset),
+                scale: scale, atlas: atlas, into: &list)
+            return
+        }
+
         let rightToLeft = item.position == .right || item.position == .centerLeft
         let tessellation = ComponentGeometry.tessellateGraph(
             samples: graph.ordered(),
@@ -390,6 +465,172 @@ public final class SceneBuilder {
         let lineColor = graph.lineColor.simd
         list.triangles.append(contentsOf: tessellation.fill.map { ShapeVertex(position: $0, color: fillColor) })
         list.triangles.append(contentsOf: tessellation.line.map { ShapeVertex(position: $0, color: lineColor) })
+    }
+
+    /// Vertical histogram. Battery level uses a 0–100 axis; the 10-day energy
+    /// chart sets axisMax to 150 so a full bar is 150% of capacity. Charging
+    /// flags reserve a band under the 0% line for a short downward bar and one
+    /// bolt per contiguous run.
+    private func emitBarGraph(
+        _ graph: GraphState,
+        boxPoints: CGRect,
+        scale: CGFloat,
+        atlas: GlyphAtlas,
+        into list: inout DisplayList
+    ) {
+        let samples = graph.ordered()
+        guard !samples.isEmpty, boxPoints.width > 0, boxPoints.height > 0 else { return }
+        let color = graph.lineColor.simd
+        let count = CGFloat(samples.count)
+        let stride = boxPoints.width / count
+        // A handful of daily bars need a real gap, like System Settings.
+        // A dense 24-hour series stays a hairline apart.
+        let gap = samples.count <= 14 ? max(stride * 0.32, 2) : 1
+        let barWidth = max(stride - gap, 0.5)
+        let axisMax = CGFloat(max(graph.axisMax, 1))
+        // Room under 0% for the charging stubs and bolt. Only when marks are
+        // set, so the 10-day chart (no marks) keeps its full plot.
+        let band: CGFloat = graph.marks.isEmpty ? 0 : 18
+        let plotBottom = boxPoints.maxY - band
+        let plotHeight = max(boxPoints.height - band, 1)
+
+        func yFor(fraction: CGFloat) -> CGFloat {
+            plotBottom - plotHeight * fraction
+        }
+
+        func brighten(_ fill: SIMD4<Float>, amount: Float) -> SIMD4<Float> {
+            let t = amount * 0.55
+            return SIMD4(
+                fill.x + (1 - fill.x) * t,
+                fill.y + (1 - fill.y) * t,
+                fill.z + (1 - fill.z) * t,
+                min(1, fill.w + (1 - fill.w) * t))
+        }
+
+        // Horizontal grid. fraction is the sample scale (1 = axis max).
+        let axisLabels: [(String, CGFloat)]
+        if axisMax >= 140 {
+            axisLabels = [("150%", 1), ("100%", 100 / axisMax), ("50%", 50 / axisMax), ("0%", 0)]
+        } else {
+            axisLabels = [("100%", 1), ("50%", 0.5), ("0%", 0)]
+        }
+        for (_, fraction) in axisLabels {
+            let y = yFor(fraction: fraction)
+            let line = CGRect(x: boxPoints.minX, y: y - 0.5, width: boxPoints.width, height: 1)
+            list.quads.append(QuadInstance(
+                origin: SceneBuilder.pixelOrigin(line, scale: scale),
+                size: SceneBuilder.pixelSize(line, scale: scale),
+                radii: .zero,
+                fill: SIMD4(1, 1, 1, fraction == 0 ? 0.16 : 0.12)))
+        }
+
+        if samples.count <= 14 {
+            for index in 0...samples.count {
+                let x = boxPoints.minX + CGFloat(index) * stride
+                let line = CGRect(x: x, y: boxPoints.minY, width: 1, height: plotHeight)
+                list.quads.append(QuadInstance(
+                    origin: SceneBuilder.pixelOrigin(line, scale: scale),
+                    size: SceneBuilder.pixelSize(line, scale: scale),
+                    radii: .zero,
+                    fill: SIMD4(1, 1, 1, 0.08)))
+            }
+        }
+
+        let hover = graph.hoverIndex
+        let emphasis = graph.hoverAmount
+        for (index, sample) in samples.enumerated() {
+            let level = CGFloat(min(1, max(0, sample)))
+            let emphasized = hover == index && emphasis > 0.001
+            if level <= 0.001 && !emphasized { continue }
+            let grow: CGFloat = emphasized ? 3 * CGFloat(emphasis) : 0
+            let barHeight = min(plotHeight, max(level * plotHeight, emphasized ? 2 : 0) + grow)
+            let x = boxPoints.minX + CGFloat(index) * stride + (stride - barWidth) / 2
+            let bar = CGRect(
+                x: x,
+                y: plotBottom - barHeight,
+                width: barWidth,
+                height: barHeight)
+            let fill = emphasized ? brighten(color, amount: emphasis) : color
+            list.quads.append(QuadInstance(
+                origin: SceneBuilder.pixelOrigin(bar, scale: scale),
+                size: SceneBuilder.pixelSize(bar, scale: scale),
+                radii: SIMD4(Float(2 * scale), Float(2 * scale), 0, 0),
+                fill: fill))
+        }
+
+        // The old single tick sits under the plot. Charging bolts replace it
+        // once the below-axis band is reserved.
+        if band == 0, let tick = graph.tickIndex, tick >= 0, tick < samples.count {
+            let x = boxPoints.minX + CGFloat(tick) * stride + (stride - barWidth) / 2
+            let mark = CGRect(
+                x: x,
+                y: boxPoints.maxY + 3,
+                width: barWidth,
+                height: 5)
+            list.quads.append(QuadInstance(
+                origin: SceneBuilder.pixelOrigin(mark, scale: scale),
+                size: SceneBuilder.pixelSize(mark, scale: scale),
+                radii: SIMD4(repeating: Float(1 * scale)),
+                fill: color))
+        }
+
+        if band > 0 {
+            let chargeColor = YColor(argb: 0xff248a3d).simd
+            let stubHeight: CGFloat = 8
+            for index in samples.indices where index < graph.marks.count && graph.marks[index] {
+                let emphasized = hover == index && emphasis > 0.001
+                let x = boxPoints.minX + CGFloat(index) * stride + (stride - barWidth) / 2
+                let stub = CGRect(x: x, y: plotBottom, width: barWidth, height: stubHeight)
+                list.quads.append(QuadInstance(
+                    origin: SceneBuilder.pixelOrigin(stub, scale: scale),
+                    size: SceneBuilder.pixelSize(stub, scale: scale),
+                    radii: SIMD4(0, 0, Float(2 * scale), Float(2 * scale)),
+                    fill: emphasized ? brighten(chargeColor, amount: emphasis) : chargeColor))
+            }
+
+            var runs: [(start: Int, end: Int)] = []
+            var runStart: Int?
+            for index in 0...samples.count {
+                let on = index < samples.count && index < graph.marks.count && graph.marks[index]
+                if on {
+                    if runStart == nil { runStart = index }
+                } else if let start = runStart {
+                    runs.append((start, index))
+                    runStart = nil
+                }
+            }
+            var bolt = TextPart()
+            bolt.string = "sf:bolt.fill"
+            bolt.font.size = 12
+            bolt.color = YColor(argb: 0xEBFFFFFF)
+            let ink = fontCache.measure(part: bolt)
+            let half = ink.width / 2
+            for run in runs {
+                let left = boxPoints.minX + CGFloat(run.start) * stride + (stride - barWidth) / 2
+                let right = boxPoints.minX + CGFloat(run.end - 1) * stride
+                    + (stride - barWidth) / 2 + barWidth
+                let mid = min(max((left + right) / 2, boxPoints.minX + half),
+                              boxPoints.maxX - half)
+                emitText(part: bolt,
+                         penX: mid - half,
+                         centerY: plotBottom + band / 2,
+                         scale: scale, atlas: atlas, clip: nil, centerInk: true, into: &list)
+            }
+        }
+
+        let axisX = boxPoints.maxX + 4
+        for (label, fraction) in axisLabels {
+            var part = TextPart()
+            part.string = label
+            part.font.size = 10
+            part.font.style = "Regular"
+            part.color = YColor(argb: 0x8CFF_FFFF)
+            let ink = fontCache.measure(part: part)
+            emitText(part: part,
+                     penX: axisX + GraphState.barsAxisReserve - 4 - ink.width,
+                     centerY: yFor(fraction: fraction),
+                     scale: scale, atlas: atlas, clip: nil, into: &list)
+        }
     }
 
     /// Bitmap image (app icon) via the atlas color page, vertically centered.
@@ -477,13 +718,20 @@ public final class SceneBuilder {
 
         let fraction = CGFloat(min(100, max(0, slider.percentage))) / 100
         if fraction > 0 {
-            let highlight = CGRect(x: track.minX, y: track.minY,
-                                   width: track.width * fraction, height: track.height)
-            list.quads.append(QuadInstance(
-                origin: SceneBuilder.pixelOrigin(highlight, scale: scale),
-                size: SceneBuilder.pixelSize(highlight, scale: scale),
-                radii: SIMD4(repeating: slider.background.cornerRadius * Float(scale)),
-                fill: slider.highlightColor.simd))
+            // Inset the fill inside the shell border so a capsule meter does not
+            // paint over its own rim.
+            let inset = CGFloat(slider.background.borderWidth)
+            let inner = track.insetBy(dx: inset, dy: inset)
+            if inner.width > 0, inner.height > 0 {
+                let highlight = CGRect(x: inner.minX, y: inner.minY,
+                                       width: max(inner.width * fraction, 0), height: inner.height)
+                let fillRadius = max(0, slider.background.cornerRadius - Float(inset))
+                list.quads.append(QuadInstance(
+                    origin: SceneBuilder.pixelOrigin(highlight, scale: scale),
+                    size: SceneBuilder.pixelSize(highlight, scale: scale),
+                    radii: SIMD4(repeating: fillRadius * Float(scale)),
+                    fill: slider.highlightColor.simd))
+            }
         }
 
         if !slider.knob.string.isEmpty {
@@ -540,6 +788,10 @@ public final class SceneBuilder {
         }
 
         list.quads.append(SceneBuilder.backgroundQuad(background, rect: rect, scale: scale))
+        if background.sheen, !SceneBuilder.nativeGlassBackdrops { list.hasSheen = true }
+        if lensActive && background.glass, !list.quads.isEmpty {
+            list.quads[list.quads.count - 1].flags |= QuadInstance.flagLensSample
+        }
 
         // background.image: aspect-fit inside the background rect, scaled.
         if background.imageDrawing, !background.imageSource.isEmpty,
@@ -584,7 +836,19 @@ public final class SceneBuilder {
         if background.glass && !nativeGlassBackdrops {
             quad.flags |= QuadInstance.flagGlass
         }
+        // Painted lip/shade/specular is the pre-26 stand-in. On macOS 26 the
+        // system material is the glass; the Metal highlight reads as a fake
+        // shine and would keep the display link running.
+        if background.sheen, !nativeGlassBackdrops {
+            quad.flags |= QuadInstance.flagSheen
+        }
         return quad
+    }
+
+    /// The plate just emitted is the open-popup trigger: brighter pointer lens.
+    private static func markLens(_ list: inout DisplayList) {
+        guard !list.quads.isEmpty else { return }
+        list.quads[list.quads.count - 1].flags |= QuadInstance.flagLens
     }
 
     /// The same plate, trimmed to a clip rect (device px) the way
@@ -614,9 +878,7 @@ public final class SceneBuilder {
     }
 
     /// Real Liquid Glass (NSGlassEffectView) exists on macOS 26+: the backdrop
-    /// itself refracts and glints, so the shader's painted rim/sheen imitation
-    /// stays off there — layered on the true material it reads as a glow
-    /// outline, not glass. Pre-26 systems keep the shader approximation.
+    /// itself refracts, so the shader's painted rim and sheen stay off there.
     public static let nativeGlassBackdrops: Bool = {
         if #available(macOS 26.0, *) { return true }
         return false
@@ -731,6 +993,25 @@ public final class SceneBuilder {
             if let quad = SceneBuilder.clippedQuad(
                 part.background, rect: plate, scale: scale, clip: clip) {
                 list.quads.append(quad)
+                if part.background.sheen, !SceneBuilder.nativeGlassBackdrops {
+                    list.hasSheen = true
+                }
+            }
+            if collectGlassChips, part.background.glass {
+                var recorded = plate
+                if let clip {
+                    let pointClip = CGRect(
+                        x: clip.minX / scale, y: clip.minY / scale,
+                        width: clip.width / scale, height: clip.height / scale)
+                    recorded = recorded.intersection(pointClip)
+                }
+                if !recorded.isNull, recorded.width >= 1, recorded.height >= 1 {
+                    glassChipBuffer.append(PopupScene.GlassChip(
+                        itemID: glassChipItemID,
+                        rect: recorded,
+                        cornerRadius: CGFloat(part.background.cornerRadius),
+                        tint: part.background.color))
+                }
             }
         }
         penX -= marqueeOffset

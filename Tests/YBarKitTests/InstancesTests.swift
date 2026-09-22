@@ -15,7 +15,7 @@ import Testing
         // 48, not the Windows port's 32: the Metal Hole pads with a float3,
         // which is 16-byte aligned on both sides of the buffer.
         #expect(MemoryLayout<HoleInstance>.stride == 48)
-        #expect(MemoryLayout<Uniforms>.stride == 16)
+        #expect(MemoryLayout<Uniforms>.stride == 24)
         #expect(InstanceLayout.mismatch() == nil)
     }
 
@@ -54,6 +54,9 @@ import Testing
         #expect(QuadInstance.flagArc == 4)
         #expect(QuadInstance.flagHoles == 8)
         #expect(QuadInstance.flagShadow == 16)
+        #expect(QuadInstance.flagSheen == 32)
+        #expect(QuadInstance.flagLens == 64)
+        #expect(QuadInstance.flagLensSample == 128)
         #expect(GlyphInstance.flagColorGlyph == 1)
         #expect(GlyphInstance.flagDesaturate == 2)
     }

@@ -43,10 +43,11 @@ for i = 1, max_items, 1 do
     padding_left = settings.paddings,
     padding_right = settings.paddings,
     drawing = false,
+    background = YSUITE_LIQUID and { drawing = false, glass = false, sheen = false } or nil,
     icon = { drawing = false },
     label = {
       font = {
-        style = settings.font.style_map[i == 1 and "Heavy" or "Semibold"]
+        style = settings.font.style_map[YSUITE_LIQUID and "Regular" or (i == 1 and "Heavy" or "Semibold")]
       },
       padding_left = 6,
       padding_right = 6,
@@ -60,7 +61,10 @@ end
 -- YBAR PORT: digits-only pattern — the bracket pill must end at the last
 -- menu item, not swallow menu.padding (which is the gap before "Spaces").
 sbar.add("bracket", { '/menu\\.[0-9]+/' }, {
-  background = { color = colors.bg1 }
+  background = {
+    color = YSUITE_LIQUID and colors.transparent or colors.bg1,
+    drawing = not YSUITE_LIQUID,
+  },
 })
 
 local menu_padding = sbar.add("item", "menu.padding", {
@@ -80,6 +84,7 @@ local function park_menu_item(i)
   menu_items[i]:set({
     padding_left = settings.paddings,
     padding_right = settings.paddings,
+    y_offset = 0,
     label = { width = "dynamic", padding_left = 6, padding_right = 6, color = { alpha = 1.0 } },
   })
 end
@@ -97,6 +102,7 @@ local function update_menus(env)
           drawing = true,
           padding_left = 0,
           padding_right = 0,
+          y_offset = -4,
           label = { string = menu, width = 0, padding_left = 0, padding_right = 0,
                     color = { alpha = 0.0 } },
         })
@@ -104,7 +110,8 @@ local function update_menus(env)
       id = id + 1
     end
     local count = id - 1
-    sbar.animate("tanh", 14, function()
+    -- ~0.28s at 60Hz: slide up 4pt while fading in (webpage menus/spaces swap).
+    sbar.animate("tanh", 17, function()
       for i = 1, count do park_menu_item(i) end
     end)
   end)
@@ -119,11 +126,12 @@ space_menu_swap:subscribe("swap_menus_and_spaces", function(env)
     menu_watcher:set( { updates = false })
     menu_hide_seq = menu_hide_seq + 1
     local seq = menu_hide_seq
-    sbar.animate("tanh", 14, function()
+    sbar.animate("tanh", 17, function()
       for i = 1, max_items do
         menu_items[i]:set({
           padding_left = 0,
           padding_right = 0,
+          y_offset = -4,
           label = { width = 0, padding_left = 0, padding_right = 0,
                     color = { alpha = 0.0 } },
         })
@@ -134,7 +142,7 @@ space_menu_swap:subscribe("swap_menus_and_spaces", function(env)
       sbar.set("/menu\\..*/", { drawing = false })
       menu_padding:set({ drawing = false })
       for i = 1, max_items do park_menu_item(i) end
-      sbar.set("front_app", { drawing = true })
+      if not YSUITE_LIQUID then sbar.set("front_app", { drawing = true }) end
       -- YBAR PORT: a blanket show resurrects every configured workspace
       -- (6..9, A..Z). Restore through the spaces refresh instead, which only
       -- shows non-empty or focused workspaces and re-applies highlights.
@@ -149,7 +157,13 @@ space_menu_swap:subscribe("swap_menus_and_spaces", function(env)
     menu_hide_seq = menu_hide_seq + 1   -- cancel a pending collapse cleanup
     menu_watcher:set( { updates = true })
     sbar.set("/space\\..*/", { drawing = false })
-    sbar.set("front_app", { drawing = false })
+    -- The active pill is the menu toggle, so it stays while the others hide.
+    if ACTIVE_SPACE_NAME then
+      sbar.set(ACTIVE_SPACE_NAME, { drawing = true })
+      local slot = ACTIVE_SPACE_NAME:match("^space%.(%d+)$")
+      if slot then sbar.set("space.padding." .. slot, { drawing = true }) end
+    end
+    if not YSUITE_LIQUID then sbar.set("front_app", { drawing = false }) end
     update_menus()
   end
 end)

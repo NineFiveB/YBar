@@ -148,7 +148,8 @@ local function update_history()
       .. history_buckets .. " 2>/dev/null",
     function(out)
       local values = {}
-      for v in out:gmatch("%d+") do
+      -- The helper's second line is charging flags; only the first line is levels.
+      for v in (out:match("^[^\n]*") or ""):gmatch("%d+") do
         values[#values + 1] = tonumber(v) / 100
       end
       if #values > 0 then history:push(values) end
