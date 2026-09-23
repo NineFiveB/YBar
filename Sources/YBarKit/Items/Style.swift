@@ -101,25 +101,11 @@ public struct ShadowStyle: Equatable, Sendable {
     }
 }
 
-/// NSGlassEffectView material choice. Only `clear` and `regular` are public API;
-/// the rest call unsupported `_setVariant:` SPI and may break across OS updates.
-/// None of these force the active look on a non-key HUD.
+/// NSGlassEffectView material choice; each case maps onto the public
+/// `NSGlassEffectView.Style`. Neither forces the active look on a non-key HUD.
 public enum GlassVariant: String, Sendable, Equatable {
     case clear
     case regular
-    case dock
-    case controlCenter = "control_center"
-    case appIcons = "app_icons"
-
-    /// Private material codes used by undocumented `_setVariant:` (Dock=2, …).
-    var privateVariantCode: UInt64? {
-        switch self {
-        case .clear, .regular: return nil
-        case .dock: return 2
-        case .appIcons: return 3
-        case .controlCenter: return 8
-        }
-    }
 }
 
 /// Rounded-rect background: fill, optional 2-stop gradient, border, shadow.
