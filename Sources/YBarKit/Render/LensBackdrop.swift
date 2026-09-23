@@ -1,8 +1,10 @@
 import AppKit
-import Metal
-// @preconcurrency on both: MTKTextureLoader's async newTexture returns an
-// MTLTexture the macOS 15 SDK does not mark Sendable, and ScreenCaptureKit's
+// @preconcurrency on all three: MTKTextureLoader's async newTexture returns
+// an MTLTexture the macOS 15 SDK does not mark Sendable — and the
+// annotation must sit on the module that DECLARES the type (Metal), not
+// only on the one whose method returns it (MetalKit). ScreenCaptureKit's
 // Sendable annotations landed after that SDK too.
+@preconcurrency import Metal
 @preconcurrency import MetalKit
 @preconcurrency import ScreenCaptureKit
 
