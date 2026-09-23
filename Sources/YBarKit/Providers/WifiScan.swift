@@ -37,6 +37,9 @@ enum WifiScan {
     /// Exit code of a join the watchdog killed — timeout(1)'s number, so it
     /// cannot collide with anything networksetup itself exits with.
     static let timedOutCode: Int32 = 124
+    /// Exit code of a scan whose every SSID was withheld: macOS gates the
+    /// names behind the Location grant, which the popup then has to ask for.
+    static let redactedCode: Int32 = 3
 
     struct Sighting: Equatable, Sendable {
         var name: String
@@ -151,9 +154,20 @@ enum WifiScan {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Pure: whether a pass came back with every SSID withheld. Without the
+    /// Location grant CoreWLAN answers nil for each network's name, so
+    /// networks on the air that none could be read from is the missing
+    /// grant; an empty pass (Wi-Fi off, or the scan failing) is not.
+    /// Detected from the result rather than asked of CLLocationManager,
+    /// which must never be touched unattended (see NetworkProvider).
+    static func isRedacted(scanned: Int, named: Int) -> Bool {
+        scanned > 0 && named == 0
+    }
+
     /// Blocking scan. Call off the main thread; a pass takes seconds.
-    static func perform() -> String {
-        guard let iface = CWWiFiClient.shared().interface() else { return "" }
+    /// The code is `redactedCode` when no SSID could be read, else 0.
+    static func perform() -> (output: String, code: Int32) {
+        guard let iface = CWWiFiClient.shared().interface() else { return ("", 0) }
         let current = iface.ssid().map(sanitize)
         let profiles = readProfiles(on: iface)
         let networks: Set<CWNetwork>
@@ -169,6 +183,11 @@ enum WifiScan {
             sightings.append(Sighting(
                 name: name, rssi: network.rssiValue, secure: isSecure(network)))
         }
+        if isRedacted(scanned: networks.count, named: sightings.count) {
+            // The saved profiles lose their names the same way, so there is
+            // nothing to list; the popup says what to allow instead.
+            return ("", redactedCode)
+        }
         if let current, !current.isEmpty,
            !sightings.contains(where: { sanitize($0.name) == current }) {
             let rssi = iface.rssiValue()
@@ -176,7 +195,7 @@ enum WifiScan {
             sightings.append(Sighting(
                 name: current, rssi: rssi == 0 ? -50 : rssi, secure: secure))
         }
-        return tsv(merge(sightings: sightings, currentSSID: current, profiles: profiles))
+        return (tsv(merge(sightings: sightings, currentSSID: current, profiles: profiles)), 0)
     }
 
     /// Arguments for `networksetup -setairportnetwork`. A password is never

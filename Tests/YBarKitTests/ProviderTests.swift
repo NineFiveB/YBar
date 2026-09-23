@@ -175,6 +175,15 @@ import Testing
         #expect(rows.isEmpty)
     }
 
+    @Test func redactionIsNetworksOnTheAirThatNoneCouldName() {
+        #expect(WifiScan.isRedacted(scanned: 22, named: 0))
+        #expect(!WifiScan.isRedacted(scanned: 22, named: 22))
+        // One hidden-SSID network is a hidden network, not a missing grant.
+        #expect(!WifiScan.isRedacted(scanned: 22, named: 21))
+        // Wi-Fi off or a failed pass: nothing to name.
+        #expect(!WifiScan.isRedacted(scanned: 0, named: 0))
+    }
+
     @Test func tsvMatchesThePopupParser() {
         let rows = WifiScan.merge(
             sightings: [.init(name: "Home\tNet", rssi: -42)],
