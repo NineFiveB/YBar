@@ -34,6 +34,9 @@ struct WifiScanRow: Equatable, Sendable {
 enum WifiScan {
     /// Signal placeholder for a hotspot profile that was not in the scan.
     static let absentRSSI = -999
+    /// Exit code of a join the watchdog killed — timeout(1)'s number, so it
+    /// cannot collide with anything networksetup itself exits with.
+    static let timedOutCode: Int32 = 124
 
     struct Sighting: Equatable, Sendable {
         var name: String
@@ -254,6 +257,12 @@ enum WifiScan {
         process.waitUntilExit()
         let code = process.terminationStatus
         if password != nil {
+            // A signal death is the watchdog above, not a verdict on the
+            // password: the child was killed before it could say anything,
+            // and its status would read as an ordinary failure otherwise.
+            if process.terminationReason == .uncaughtSignal {
+                return ("", timedOutCode)
+            }
             let cleaned = redacted(raw, password: password)
             if joinRejected(code: code, output: cleaned) {
                 return ("", code == 0 ? 1 : code)
