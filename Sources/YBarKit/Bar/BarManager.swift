@@ -271,13 +271,20 @@ public final class BarManager {
         guard !renderScheduled else { return }
         renderScheduled = true
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.renderScheduled = false
+            // The flag is consumed by renderAll, not here: a display-link
+            // tick that painted in the meantime has retired this redraw.
+            guard let self, self.renderScheduled else { return }
             self.renderAll()
         }
     }
 
+    /// Paint every surface and popup now. Damage is consumed where it is
+    /// painted: a tick paint retires any pending coalesced redraw, and an
+    /// invalidate raised inside the tick (an interpolated value, a completion)
+    /// is consumed by the tick's own paint that follows it. Damage raised
+    /// while painting is left standing and repaints on the next turn.
     public func renderAll() {
+        renderScheduled = false
         // Continuous demand (marquee or traveling sheen) belongs to the whole
         // frame: every bar surface and every popup panel is accumulated and
         // reported once. Reporting per surface let whichever scene rendered
