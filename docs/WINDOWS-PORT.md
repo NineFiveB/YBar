@@ -386,11 +386,66 @@ independent instance.
 ## 5. Process model & lifecycle
 
 - `main.cpp`: empty argv or a leading `-c/--config` → daemon; `-h/--help` and
-  `-v/--version` print locally; `theme …`/`autostart …` are handled in-process
-  (only `theme use` sends a `--reload <entry>` over the socket). Anything else
-  → thin client (strip a leading `-m/--message`, fold `AEROSPACE_*`/`YABAI_*`/
-  `KOMOREBI_*` env on `--trigger`, serialize argv → socket → print reply; `[!]`
-  replies go to stderr, exit 1).
+  `-v/--version` print locally; `start [-c <path>]`/`stop`/`restart [-c
+  <path>]`/`status`, `theme …` and `autostart …` are handled in-process (only
+  `theme use` sends a `--reload <entry>` over the socket, `stop` a `--exit`).
+  Anything else → thin client (strip a leading `-m/--message`, fold
+  `AEROSPACE_*`/`YABAI_*`/`KOMOREBI_*` env on `--trigger`, serialize argv →
+  socket → print reply; `[!]` replies go to stderr, exit 1).
+- Process control (`src/app/process_control.cpp`): the same four verbs the
+  reference stages on its unmerged `wip/process-control-cli` branch, with
+  that branch's exit codes (on `main` today the reference's only local verbs
+  are `theme` and `autostart`, whose usage errors still exit 1; once the
+  branch lands these are simply the reference's verbs and codes) — **0**
+  success including every idempotent no-op
+  (`stop` with nothing running, `start` with a bar already up), **1** the
+  operation failed, **2** the invocation was wrong (usage errors from every
+  local verb, `autostart`/`theme` included; message-grammar errors stay at 1):
+  - `start` refuses a `-c` that does not exist, probes the socket with a
+    connect (not `--ping`: a bar mid-config-run cannot answer one, and reading
+    that as "not running" would launch a second instance), then
+    `CreateProcessW`s the same exe with `DETACHED_PROCESS` (no console at all)
+    and `CREATE_BREAKAWAY_FROM_JOB` (retried without when the job forbids it),
+    stdin/stdout on `NUL`, stderr appended to `%LOCALAPPDATA%\ybar\stderr.log`
+    — the analogue of the LaunchAgent's `StandardErrorPath`, rotated to `.1`
+    past 1 MB, one `--- ybar start <time> ---` header per launch. It then
+    waits up to 20 s for `--ping` (readiness is the one question `--ping` is
+    right for), reporting an early exit with the log's tail. `-c` is made
+    absolute first: the child has no working directory of ours.
+  - `stop` sends `--exit` and waits up to 10 s for the socket FILE to go
+    (`SocketServer::stop` deletes it; a connect per tick would park
+    connections on the backlog), with one connect at the deadline for a daemon
+    that died without cleaning up. No escalation to `TerminateProcess`: there
+    is no pid, and killing by image name is the bug the verb replaces.
+  - `restart` = `stop` (quiet when nothing runs) + `start`; `status` prints
+    running/instance/socket/exe/config-a-fresh-start-would-pick (labelled with
+    the theme when the recorded theme produced it)/autostart/log, plus notes.
+  - The staged macOS verbs (`wip/process-control-cli`; `main`'s `theme` and
+    `autostart` do not check the uid) refuse to run as root; the Windows ones
+    do **not** refuse elevation. The reason there is TCC attribution, which
+    has no analogue here, and an elevated bar is a legitimate setup next to
+    an elevated tiler.
+- Console ownership. `ybar.exe` stays a console-subsystem binary: the CLI has
+  to behave in a terminal (the shell waits, `$LASTEXITCODE` is real, output
+  lands before the prompt), which a GUI-subsystem exe cannot give. The price
+  is that Explorer, the Run key and Task Scheduler hand it a console window
+  before a line of code runs, so two things fix that:
+  - `ybarw.exe` (`src/launcher/ybarw.cpp`, GUI subsystem, links only the
+    command-line quoting library) runs `"<dir>\ybar.exe" start <args>` with
+    `DETACHED_PROCESS`, waits, and shows a message box only on a non-zero
+    exit. It is what `autostart enable` writes to the Run key and what a
+    shortcut should point at — `w` as in `pythonw`/`javaw`.
+  - The daemon role in `main.cpp` re-launches itself through the `start` path
+    when `GetConsoleProcessList` says this process is alone on its console
+    (a console created for it), so a double-clicked `ybar.exe` or an older
+    Run value flashes a console and then runs windowless. Two or more
+    processes (a shell) means "run here", as bare `ybar` does on macOS, and
+    `YBAR_DEBUG` keeps even an owned console since it exists to watch the
+    trace. A no-console process (the detached copy itself) never detaches.
+  - Command lines are composed by `src/win/command_line.cpp` with
+    `CommandLineToArgvW`'s rules (backslashes before a quote doubled, a
+    trailing backslash not allowed to eat the closing quote), shared by both
+    binaries so they cannot drift.
 - Daemon boot order (mirrors `Daemon.swift`): `CoInitializeEx` (STA) → create
   hidden message-only window → bind socket (instance lock, before any shared
   state is touched) → renderer + per-display bar windows (headless if the GPU
@@ -460,7 +515,7 @@ list|current|use <name>|reset` subcommand here first (no `.ps1`; `install
 <git-url>` is not ported, `reset` is new), and the reference has since adopted
 the same built-in — `ybar theme list|current|use|reset|install`, its script
 reduced to a forwarding shim — so the verb is parity. `use` records `current-theme` and sends
-`--reload <entry>` over the same socket, falling back to "recorded; start ybar
+`--reload <entry>` over the same socket, falling back to "recorded; `ybar start`
 to apply" when no daemon answers (the next start picks it up through config
 discovery, §5). The `~/.config/ybar/themes/` + `current-theme` state file
 layout is preserved; shipped themes are found in `examples/` or `themes/`
@@ -738,9 +793,13 @@ toward the pointer at FIXED elevation, because leaning the whole vector also
 drops `L.z`, which is the flat-face reference the bevel is measured against, and
 the effect then cancels itself to 1–2 levels out of 255.
 
-`Uniforms` is **32 bytes here, not the reference's 16**: it carries the pointer
+`Uniforms` is **32 bytes here, not the reference's 24**: both carry the pointer
 position (device px on the surface being drawn, negative = pointer away) for
-that key light. It is a per-frame constant buffer, not the shared per-item
+that key light — the reference has since adopted the field, so the first
+24 bytes are laid out the same on both sides (`viewportSize`, `holeCount`, a
+4-byte `_pad`, `pointer`; the reference's stride is pinned at 24 in
+`InstancesTests.swift`) and the 32 here is only the cbuffer rounding up to
+16. It is a per-frame constant buffer, not the shared per-item
 instance ABI. The daemon gates the pointer path three ways — only when a glass
 quad is actually on screen, only past 3pt of travel, and never faster than
 60 Hz — so a flat theme pays nothing and zero-work-at-rest is preserved.
@@ -766,7 +825,12 @@ been ported to the reference (`GlyphInstance.flagDesaturate` /
 `kGlyphFlagGrey` in `YBar.metal`, same bit): `kGlyphFlagDesaturate`
 (`1u << 1`; `kGlyphFlagGrey` in the HLSL) applies a Rec. 709 luma conversion
 to colour-atlas samples — valid directly on premultiplied colour — backing
-`image.desaturate` (§3.3). The painted glass rim (`flagGlass`) ships with
+`image.desaturate` (§3.3). Of `QuadInstance.flags`, bits 0–4 (gradient, glass,
+arc, holes, shadow) are the shared ABI — `instances.h` and the HLSL define
+exactly those. The reference additionally reserves bits 5–7 for effects that
+are macOS-only (its pre-26 painted sheen, which a native `NSGlassEffectView`
+backdrop replaces); the HLSL neither defines nor reads them. The glyph flags
+are shared in full (bits 0–1). The painted glass rim (`flagGlass`) ships with
 its exact constants and stays ON over the Mica backdrop — the opposite of the
 reference's `nativeGlassBackdrops` gate, which drops the rim over macOS-26
 Liquid Glass because that material refracts and carries its own edge. Mica is
@@ -1379,13 +1443,16 @@ the README's third-party section.)
 - Identity: `AppUserModelID = "YBar.YBar"` (taskbar/notification identity;
   successor to `com.ybar.YBar`).
 - Autostart: `ybar autostart enable|disable|status` writes/removes/reports a
-  `YBar` value (quoted, symlink-resolved exe path) under
-  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (visible in Task
-  Manager's Startup Apps, user-toggleable). Crash-restart semantics (macOS
-  LaunchAgent `KeepAlive.SuccessfulExit=false`) via an optional Task Scheduler
-  recipe (not yet written — today the Run value starts ybar once per login and
-  nothing restarts it after a crash); `ybar --exit` remains the only
-  sanctioned stop.
+  `YBar` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
+  (visible in Task Manager's Startup Apps, user-toggleable). The value is the
+  quoted, symlink-resolved path of `ybarw.exe` beside the exe (§5: the
+  windowless launcher, so login shows no console), falling back to `"<exe>"
+  start` with a printed note when the launcher is missing. Crash-restart
+  semantics (macOS LaunchAgent `KeepAlive.SuccessfulExit=false`) via an
+  optional Task Scheduler recipe (not yet written — today the Run value starts
+  ybar once per login and nothing restarts it after a crash); `ybar stop` is
+  the sanctioned stop, `ybar --exit` the message under it. The payload is
+  `ybar.exe` + `ybarw.exe` (both signed: the signing step filters on `exe`).
 - Build dir: in-tree — `CMakePresets.json` puts the `default` (Debug) preset
   at `build/` and `release` at `build-release/` (`build/` is git-ignored;
   `build-release/` is not), so be aware that the repo may live in
@@ -1550,7 +1617,10 @@ key.
 backdrops and Mica popup panels (§7.6; both surfaces moved to
 Windows.UI.Composition for them, DirectComposition remains only as the
 frame pump's clock), `ybar theme
-list|current|use`, `ybar autostart enable|disable|status`, the
+list|current|use|reset`, `ybar autostart enable|disable|status`, `ybar
+start|stop|restart|status` with the 0/1/2 exit codes of the verbs the
+reference stages on `wip/process-control-cli` (§5), the windowless
+`ybarw.exe` launcher (§5), the
 `AppUserModelID`, the shipped `examples/catppuccin-komorebi` theme, and CI
 packaging of `examples/` + app-local `d3dcompiler_47.dll`.
 
