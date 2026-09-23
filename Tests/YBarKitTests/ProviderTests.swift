@@ -1,5 +1,7 @@
 import CoreLocation
+import CoreWLAN
 import Foundation
+import ObjectiveC
 import Testing
 @testable import YBarKit
 
@@ -206,6 +208,31 @@ import Testing
         #expect(WifiScan.redacted("echo \(secret) done", password: secret) == "echo  done")
         #expect(WifiScan.redacted("Failed to join Cafe.", password: nil) == "Failed to join Cafe.")
         #expect(WifiScan.redacted("Failed to join Cafe.", password: "") == "Failed to join Cafe.")
+    }
+}
+
+@Suite struct WifiHotspotFlagTests {
+    @Test func onlyAOneByteBoolEncodingIsRead() {
+        #expect(WifiScan.isBoolIvarEncoding("B"))
+        #expect(WifiScan.isBoolIvarEncoding("c"))
+        // A wider integer, an object, or no encoding: refuse rather than
+        // read the first byte of something else.
+        #expect(!WifiScan.isBoolIvarEncoding("i"))
+        #expect(!WifiScan.isBoolIvarEncoding("Q"))
+        #expect(!WifiScan.isBoolIvarEncoding("@"))
+        #expect(!WifiScan.isBoolIvarEncoding(""))
+        #expect(!WifiScan.isBoolIvarEncoding(nil))
+    }
+
+    @Test func theRealFlagStillPassesTheGuard() {
+        // If this SDK still declares the ivar, it must be the BOOL the peek
+        // expects — otherwise hotspot rows silently vanish and this is the
+        // test that says why. An SDK without the ivar has nothing to check.
+        guard let ivar = class_getInstanceVariable(CWNetworkProfile.self, "_isPersonalHotspot") else {
+            return
+        }
+        let encoding = ivar_getTypeEncoding(ivar).map { String(cString: $0) }
+        #expect(WifiScan.isBoolIvarEncoding(encoding), "encoding \(encoding ?? "nil")")
     }
 }
 
