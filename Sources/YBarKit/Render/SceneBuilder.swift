@@ -17,8 +17,6 @@ public final class SceneBuilder {
     public var clock: CFTimeInterval = 0
     /// Cursor in the surface being built, pixels, top-left y-down.
     public var pointer = SIMD2<Float>(repeating: -1e6)
-    /// Glass pills sample the captured desktop instead of a flat fill.
-    public var lensActive = false
 
     public init(fontCache: FontCache) {
         self.fontCache = fontCache
@@ -97,7 +95,7 @@ public final class SceneBuilder {
                 width: union.width,
                 height: height)
             emitBackground(item.background, rect: rect, scale: scale, into: &list)
-            if item.popup.isOpen { SceneBuilder.markLens(&list) }
+            if item.popup.isOpen { SceneBuilder.markHot(&list) }
         }
 
         for item in items {
@@ -107,7 +105,6 @@ public final class SceneBuilder {
             emit(item: item, contentBox: contentBox, scale: scale, atlas: atlas, into: &list)
         }
 
-        list.time = Float(clock)
         list.pointer = pointer
         return list
     }
@@ -203,7 +200,6 @@ public final class SceneBuilder {
             emit(item: member, contentBox: box, scale: scale, atlas: atlas, into: &scene.list)
         }
         scene.glassChips = glassChipBuffer
-        scene.list.time = Float(clock)
         scene.list.pointer = pointer
         return scene
     }
@@ -228,7 +224,7 @@ public final class SceneBuilder {
             let backgroundRect = SceneBuilder.backgroundRect(
                 item: item, contentBox: contentBox, contentHeight: contentHeight)
             emitBackground(item.background, rect: backgroundRect, scale: scale, into: &list)
-            if item.popup.isOpen { SceneBuilder.markLens(&list) }
+            if item.popup.isOpen { SceneBuilder.markHot(&list) }
         }
 
         let measured = MeasuredContent(iconSize: iconSize, labelSize: labelSize)
@@ -789,9 +785,6 @@ public final class SceneBuilder {
 
         list.quads.append(SceneBuilder.backgroundQuad(background, rect: rect, scale: scale))
         if background.sheen, !SceneBuilder.nativeGlassBackdrops { list.hasSheen = true }
-        if lensActive && background.glass, !list.quads.isEmpty {
-            list.quads[list.quads.count - 1].flags |= QuadInstance.flagLensSample
-        }
 
         // background.image: aspect-fit inside the background rect, scaled.
         if background.imageDrawing, !background.imageSource.isEmpty,
@@ -845,10 +838,11 @@ public final class SceneBuilder {
         return quad
     }
 
-    /// The plate just emitted is the open-popup trigger: brighter pointer lens.
-    private static func markLens(_ list: inout DisplayList) {
+    /// The plate just emitted is the open-popup trigger: its sheen specular
+    /// stays lit for as long as the popup is up.
+    private static func markHot(_ list: inout DisplayList) {
         guard !list.quads.isEmpty else { return }
-        list.quads[list.quads.count - 1].flags |= QuadInstance.flagLens
+        list.quads[list.quads.count - 1].flags |= QuadInstance.flagHot
     }
 
     /// The same plate, trimmed to a clip rect (device px) the way

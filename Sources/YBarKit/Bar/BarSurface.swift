@@ -198,8 +198,7 @@ public final class BarSurface {
     /// `contentView`) so the existing glyph pipeline keeps working — AppKit
     /// only guarantees z-order for `contentView` children.
     public func syncGlassBackdrops(
-        _ specs: [(itemID: Int, rect: CGRect, cornerRadius: CGFloat, variant: GlassVariant?, tint: YColor?)],
-        lensCoversPills: Bool = false
+        _ specs: [(itemID: Int, rect: CGRect, cornerRadius: CGFloat, variant: GlassVariant?, tint: YColor?)]
     ) {
         guard let container = panel.contentView else { return }
         let containerHeight = container.bounds.height
@@ -229,9 +228,6 @@ public final class BarSurface {
                 glass.frame = frame
                 glass.cornerRadius = spec.cornerRadius
                 BarSurface.configureLiquidGlass(glass, variant: variant, tint: tint)
-                // System glass is the product backdrop; hide only while a
-                // ScreenCaptureKit lens texture is actively covering the pills.
-                glass.isHidden = lensCoversPills
                 handled = true
             }
             #endif
@@ -249,7 +245,6 @@ public final class BarSurface {
                 }
                 view.frame = frame
                 view.maskImage = BarSurface.roundedMask(radius: spec.cornerRadius)
-                view.isHidden = lensCoversPills
             }
         }
         for (itemID, view) in glassViews where !live.contains(itemID) {

@@ -133,10 +133,6 @@ public final class BarManager {
             self.setNeedsRender()
         }
         rebuildSurfaces()
-        // System NSGlassEffectView is the product backdrop. Auto-starting
-        // ScreenCaptureKit would hide those pills behind a Metal lens and
-        // prompt for Screen Recording — that is a separate opt-in path, not
-        // the inactive-glass fix.
     }
 
     /// fullscreen_show: raise each surface over the active Space's fullscreen
@@ -346,12 +342,9 @@ public final class BarManager {
             // drawable at that one scale (a fresh panel's backingScaleFactor
             // reports the primary screen until it is ordered in).
             let scale = surface.scale
-            let savedLens = sceneBuilder.lensActive
-            sceneBuilder.lensActive = false
             sceneBuilder.pointer = Self.pointerPixels(in: surface.hostView, scale: scale)
             let scene = sceneBuilder.buildPopup(
                 host: host, members: members, scale: scale, atlas: atlas)
-            sceneBuilder.lensActive = savedLens
             guard scene.sizePoints.width > 0, scene.sizePoints.height > 0 else { continue }
             if scene.needsContinuousFrames { continuous = true }
 
@@ -660,14 +653,10 @@ public final class BarManager {
                 item.background.glassVariant,
                 item.background.hasGlassTint ? item.background.glassTint : nil))
         }
-        // System glass stays visible: ScreenCaptureKit lens is not started by
-        // default (inactive-glass path), so lensCoversPills stays false.
-        surface.syncGlassBackdrops(
-            glassSpecs, lensCoversPills: renderer.lensBackdrop(for: surface.arrangementIndex) != nil)
+        surface.syncGlassBackdrops(glassSpecs)
 
         sceneBuilder.clock = CACurrentMediaTime()
         sceneBuilder.pointer = Self.pointerPixels(in: surface.hostView, scale: scale)
-        sceneBuilder.lensActive = renderer.lensBackdrop(for: surface.arrangementIndex) != nil
         let list = sceneBuilder.build(
             items: items,
             settings: settings,
@@ -675,11 +664,7 @@ public final class BarManager {
             barSize: barSize,
             scale: scale,
             atlas: atlas)
-        if !renderer.render(
-            list: list,
-            layer: surface.hostView.metalLayer,
-            atlas: atlas,
-            backdrop: renderer.lensBackdrop(for: surface.arrangementIndex)) {
+        if !renderer.render(list: list, layer: surface.hostView.metalLayer, atlas: atlas) {
             // Frame lost (display asleep / drawables exhausted): the damage flag
             // was already consumed, so reschedule or the update is never shown.
             scheduleRetry()
