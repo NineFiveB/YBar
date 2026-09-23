@@ -151,6 +151,26 @@ local spinner = require("helpers.spinner").attach(scan_label, {
   size = 10, align = "l", padding_left = 12,
 })
 
+-- Second line of the no-Location notice: the one-time opt-in that raises
+-- the prompt. Its own row because the whole sentence is wider than the
+-- popup at the label's size.
+local scan_hint = sbar.add("item", "widgets.wifi.scan.hint", {
+  position = popup_pos,
+  drawing = false,
+  width = line,
+  padding_left = 0,
+  padding_right = 0,
+  icon = {
+    string = "ybar --bar wifi_ssid_prompt=on",
+    align = "left",
+    color = colors.with_alpha(colors.white, 0.62),
+    font = { family = "Menlo", size = 11 },
+    width = line,
+    padding_left = 12,
+  },
+  label = { drawing = false },
+})
+
 local other_rows = {}
 for i = 1, max_rows do
   other_rows[i] = add_network_row("widgets.wifi.other.", i)
@@ -160,6 +180,9 @@ local scan_cache = {}
 local live_ssid = nil
 local is_connected = false
 local scan_running = false
+-- The last scan saw networks but could name none: macOS withholds every
+-- SSID until YBar holds the Location grant (wifi_scan exit code 3).
+local scan_redacted = false
 local disconnecting_name = nil
 local joining_name = nil
 local hovered_name = nil
@@ -372,11 +395,14 @@ local function paint()
   end
   if scan_running then
     scan_label:set({ drawing = true, icon = { string = "Looking for networks…" } })
+  elseif scan_redacted then
+    scan_label:set({ drawing = true, icon = { string = "Allow Location for YBar to list networks" } })
   elseif #other_list > 0 then
     scan_label:set({ drawing = true, icon = { string = "Other networks" } })
   else
     scan_label:set({ drawing = false })
   end
+  scan_hint:set({ drawing = scan_redacted and not scan_running })
 end
 
 local function run_scan()
@@ -384,9 +410,10 @@ local function run_scan()
   scan_running = true
   spinner.start()
   paint()
-  sbar.wifi_scan(function(output)
+  sbar.wifi_scan(function(output, code)
     scan_running = false
     spinner.stop()
+    scan_redacted = code == 3
     local nets = {}
     for line_text in (output or ""):gmatch("[^\r\n]+") do
       local cur, name, rssi, known, hotspot, secure =
