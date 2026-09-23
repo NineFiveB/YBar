@@ -258,8 +258,7 @@ public final class BarSurface {
         }
     }
 
-    /// Public style + interactive flag; optional private `_setVariant:` for
-    /// Dock / Control Center approximations. Does not (and cannot) force the
+    /// Public style + interactive flag. Does not (and cannot) force the
     /// active material on a non-key panel.
     #if compiler(>=6.2)
     @available(macOS 26.0, *)
@@ -269,7 +268,7 @@ public final class BarSurface {
         switch variant {
         case .regular:
             glass.style = .regular
-        case .clear, .dock, .controlCenter, .appIcons:
+        case .clear:
             // Clear: fully transparent + refractive. Regular's adaptive frost
             // reads as an opaque dark slab at bar/pill size; Metal fill tints.
             glass.style = .clear
@@ -283,12 +282,6 @@ public final class BarSurface {
             glass.effectIsInteractive = true
         }
         #endif
-        if let code = variant.privateVariantCode {
-            let sel = Selector(("_setVariant:"))
-            if glass.responds(to: sel) {
-                glass.perform(sel, with: NSNumber(value: code))
-            }
-        }
     }
     #endif
 

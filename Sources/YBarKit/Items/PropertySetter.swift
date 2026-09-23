@@ -664,7 +664,7 @@ public enum PropertySetter {
                 return nil
             }
             guard let variant = GlassVariant(rawValue: value) else {
-                return "[!] invalid glass_variant: \(value) (clear|regular|dock|control_center|app_icons)"
+                return "[!] invalid glass_variant: \(value) (clear|regular|default|off)"
             }
             item[keyPath: base.appending(path: \BackgroundStyle.glassVariant)] = variant
             ctx.invalidate()
