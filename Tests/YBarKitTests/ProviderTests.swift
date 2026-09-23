@@ -198,6 +198,30 @@ import Testing
         #expect(WifiScan.redacted("Failed to join Cafe.", password: nil) == "Failed to join Cafe.")
         #expect(WifiScan.redacted("Failed to join Cafe.", password: "") == "Failed to join Cafe.")
     }
+}
+
+@Suite struct WifiJoinVerdictTests {
+    @Test func silenceWithExitZeroIsTheOnlySuccess() {
+        #expect(!WifiScan.joinRejected(code: 0, output: ""))
+        // The trimmed child output can still carry a stray newline.
+        #expect(!WifiScan.joinRejected(code: 0, output: "\n"))
+    }
+
+    @Test func exitZeroRefusalsAreStillRefusals() {
+        // networksetup exits 0 for each of these; none says "failed".
+        for message in [
+            "Could not find network Cafe.",
+            "You cannot join a network when Wi-Fi power is off.",
+            "All Wi-Fi network services are disabled.",
+            "Failed to join network Cafe.",
+        ] {
+            #expect(WifiScan.joinRejected(code: 0, output: message), "\(message)")
+        }
+    }
+
+    @Test func nonZeroExitIsARefusalEvenWhenSilent() {
+        #expect(WifiScan.joinRejected(code: 1, output: ""))
+    }
 
     @Test func openNetworkStaysUnsecured() {
         let rows = WifiScan.merge(
