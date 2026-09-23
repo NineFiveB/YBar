@@ -1,7 +1,9 @@
 import AppKit
 import Metal
-import MetalKit
-// ScreenCaptureKit's Sendable annotations landed after the macOS 15 SDK.
+// @preconcurrency on both: MTKTextureLoader's async newTexture returns an
+// MTLTexture the macOS 15 SDK does not mark Sendable, and ScreenCaptureKit's
+// Sendable annotations landed after that SDK too.
+@preconcurrency import MetalKit
 @preconcurrency import ScreenCaptureKit
 
 /// Desktop strip behind each bar, about 8 times a second. The liquid-lens
