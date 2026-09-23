@@ -24,6 +24,9 @@ public final class BarSurface {
     /// Item hit-test frames for this surface (bar-local, top-left origin), set after layout.
     public var itemFrames: [(itemID: Int, frame: CGRect)] = []
     public var hoveredItemID: Int?
+    /// The last scene rendered here carried a sheen pill, whose pointer
+    /// specular must be redrawn as the cursor moves (BarManager.handleMouse).
+    var lastSceneHadSheen = false
     /// Per-item glass backdrops keyed by item id: NSGlassEffectView (real
     /// Liquid Glass) on macOS 26+, NSVisualEffectView blur before that.
     private var glassViews: [Int: NSView] = [:]
@@ -198,8 +201,7 @@ public final class BarSurface {
     /// `contentView`) so the existing glyph pipeline keeps working — AppKit
     /// only guarantees z-order for `contentView` children.
     public func syncGlassBackdrops(
-        _ specs: [(itemID: Int, rect: CGRect, cornerRadius: CGFloat, variant: GlassVariant?, tint: YColor?)],
-        lensCoversPills: Bool = false
+        _ specs: [(itemID: Int, rect: CGRect, cornerRadius: CGFloat, variant: GlassVariant?, tint: YColor?)]
     ) {
         guard let container = panel.contentView else { return }
         let containerHeight = container.bounds.height
@@ -229,9 +231,6 @@ public final class BarSurface {
                 glass.frame = frame
                 glass.cornerRadius = spec.cornerRadius
                 BarSurface.configureLiquidGlass(glass, variant: variant, tint: tint)
-                // System glass is the product backdrop; hide only while a
-                // ScreenCaptureKit lens texture is actively covering the pills.
-                glass.isHidden = lensCoversPills
                 handled = true
             }
             #endif
@@ -249,7 +248,6 @@ public final class BarSurface {
                 }
                 view.frame = frame
                 view.maskImage = BarSurface.roundedMask(radius: spec.cornerRadius)
-                view.isHidden = lensCoversPills
             }
         }
         for (itemID, view) in glassViews where !live.contains(itemID) {
