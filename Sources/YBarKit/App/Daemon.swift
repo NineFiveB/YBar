@@ -130,6 +130,17 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         scheduler.makeDisplayLink = { [weak self] target, selector in
             self?.barManager.surfaces.first?.hostView.displayLink(target: target, selector: selector)
         }
+        // Every hosted panel, not just the one the link is bound to: onFrame
+        // paints all of them, so the scheduler picks the slowest.
+        scheduler.hostRefreshRates = { [weak self] in
+            self?.barManager.surfaces.map(\.screen.maximumFramesPerSecond) ?? []
+        }
+        // The link callback is already on the main thread. Painting here keeps
+        // every interpolated sample; setNeedsRender stays the path for clicks
+        // and provider updates, which coalesce while the bar is idle.
+        scheduler.onFrame = { [weak self] in
+            self?.barManager.renderAll()
+        }
         // The link is bound to a surface's view; a rebuild (monitor plug/unplug,
         // display-policy change) would otherwise strand a running animation clock.
         barManager.onSurfacesRebuilt = { [weak self] in
@@ -264,11 +275,7 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
             self?.barManager.setNeedsRender()
         }
         barManager.onMarqueeDemand = { [weak self] active in
-            guard let self else { return }
-            self.scheduler.continuousDemand = active
-            if active, self.scheduler.onFrame == nil {
-                self.scheduler.onFrame = { [weak self] in self?.barManager.setNeedsRender() }
-            }
+            self?.scheduler.continuousDemand = active
         }
         barManager.onGlobalMouseEnter = { [weak self] in
             self?.eventBus.trigger(name: "mouse.entered.global")
