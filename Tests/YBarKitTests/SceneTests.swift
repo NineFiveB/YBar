@@ -256,6 +256,40 @@ struct HeadlessScene {
         #expect(BarManager.pointerPixels(in: popup.hostView, scale: 2, screenPoint: outside)
                 == DisplayList().pointer)
     }
+
+    /// A popup scene carries the cursor sampled in the POPUP's window. The
+    /// bar and its popup are separate panels with separate origins, so the
+    /// bar-local pixels the scene used to be built with could never light
+    /// the specular on the row under the pointer.
+    @Test func popupSceneCarriesAPopupLocalPointer() throws {
+        let manager = try BarManager()
+        let popup = try offscreenPopup(manager)
+        defer { popup.close() }
+        let frame = popup.panel.frame
+        let cursor = CGPoint(x: frame.minX + 30, y: frame.maxY - 20)
+
+        let scene = HeadlessScene()
+        scene.builder.pointer = BarManager.pointerPixels(
+            in: popup.hostView, scale: scene.scale, screenPoint: cursor)
+        let host = Item(name: "host", position: .left)
+        let row = Item(name: "row", position: .popup)
+        row.popupHost = host.name
+        row.label.string = "x"
+        let built = scene.builder.buildPopup(
+            host: host, members: [row], scale: scene.scale, atlas: scene.atlas)
+        #expect(built.list.pointer == SIMD2(60, 40))
+
+        // Sampled in the bar's window, as the scene used to be, that same
+        // cursor is "missing": the bar panel does not contain it.
+        let screen = try #require(NSScreen.screens.first)
+        let bar = BarSurface(screen: screen, arrangementIndex: 1)
+        #expect(BarManager.pointerPixels(
+            in: bar.hostView, scale: scene.scale, screenPoint: cursor) == DisplayList().pointer)
+        // A popup panel not yet presented reads as missing too.
+        let fresh = PopupSurface(hostItemID: -2, device: manager.device)
+        #expect(BarManager.pointerPixels(
+            in: fresh.hostView, scale: scene.scale, screenPoint: cursor) == DisplayList().pointer)
+    }
 }
 
 /// A glass label plate in a popup is recorded so the panel can sit an
