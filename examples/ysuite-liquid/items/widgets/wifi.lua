@@ -178,10 +178,18 @@ end
 
 local scan_cache = {}
 local live_ssid = nil
+-- Last wifi_change INFO: "" offline, the SSID on Wi-Fi with the Location
+-- grant, "connected" for any other online path (wired, or Wi-Fi without
+-- the grant).
+local live_info = ""
 local is_connected = false
 local scan_running = false
+-- A scan has landed since the last "connected" payload; until one does,
+-- that payload is taken at face value.
+local scan_seen = false
 -- The last scan saw networks but could name none: macOS withholds every
--- SSID until YBar holds the Location grant (wifi_scan exit code 3).
+-- SSID until YBar holds the Location grant (wifi_scan exit code 3). The
+-- joined network is still listed then, under the literal "<redacted>".
 local scan_redacted = false
 local disconnecting_name = nil
 local joining_name = nil
@@ -405,6 +413,35 @@ local function paint()
   scan_hint:set({ drawing = scan_redacted and not scan_running })
 end
 
+-- Whether the Wi-Fi interface is joined. wifi_change settles it outright
+-- when INFO is "" or an SSID. "connected" only says some path is up —
+-- wired, or Wi-Fi without the Location grant — and the scan's current row
+-- tells the two apart: the scan lists the joined network even without the
+-- grant. Until a scan lands the payload is taken at face value, the same
+-- generic connected state docs/INSTALL.md promises without Location.
+-- No ipconfig probe: en0 is the Wi-Fi interface on a laptop but Ethernet
+-- on a desktop Mac.
+local function wifi_connected()
+  if live_info == "" then return false end
+  if live_info ~= "connected" then return true end
+  if not scan_seen then return true end
+  for _, net in ipairs(scan_cache) do
+    if net.current then return true end
+  end
+  return false
+end
+
+local function refresh_pill()
+  is_connected = wifi_connected()
+  wifi:set({
+    icon = {
+      string = is_connected and icons.wifi.connected or icons.wifi.disconnected,
+      color = is_connected and colors.white or colors.grey,
+    },
+  })
+  paint()
+end
+
 local function run_scan()
   if scan_running then return end
   scan_running = true
@@ -413,6 +450,7 @@ local function run_scan()
   sbar.wifi_scan(function(output, code)
     scan_running = false
     spinner.stop()
+    scan_seen = true
     scan_redacted = code == 3
     local nets = {}
     for line_text in (output or ""):gmatch("[^\r\n]+") do
@@ -430,20 +468,7 @@ local function run_scan()
       end
     end
     scan_cache = nets
-    paint()
-  end)
-end
-
-local function refresh_pill()
-  sbar.exec("ipconfig getifaddr en0", function(ip)
-    is_connected = ip:match("%S") ~= nil
-    wifi:set({
-      icon = {
-        string = is_connected and icons.wifi.connected or icons.wifi.disconnected,
-        color = is_connected and colors.white or colors.grey,
-      },
-    })
-    paint()
+    refresh_pill()
   end)
 end
 
@@ -556,13 +581,25 @@ wifi:subscribe("mouse.clicked", toggle)
 wifi:subscribe("mouse.exited.global", hide)
 wifi:subscribe("wifi_change", function(env)
   local info = env.INFO or ""
-  if info ~= "" and info ~= "connected" and info ~= "disconnected" then
+  live_info = info
+  if info ~= "" and info ~= "connected" then
     live_ssid = info
-  elseif info == "disconnected" then
+  else
     live_ssid = nil
   end
+  -- Some path came up, or the Wi-Fi name went away: which interface is
+  -- joined is a fresh scan's call now, not the last pass's.
+  local settle = info == "connected"
+  if settle then scan_seen = false end
   refresh_pill()
+  if settle then run_scan() end
 end)
+
+-- Seed the state. A config reload keeps the provider armed and deduped,
+-- so nothing would arrive until the path next changed; the forced
+-- re-query publishes it now (on a fresh start the first path update
+-- follows on its own).
+sbar.trigger("wifi_change")
 
 sbar.add("item", "widgets.wifi.padding", {
   position = "right",

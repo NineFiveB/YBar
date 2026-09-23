@@ -40,6 +40,10 @@ enum WifiScan {
     /// Exit code of a scan whose every SSID was withheld: macOS gates the
     /// names behind the Location grant, which the popup then has to ask for.
     static let redactedCode: Int32 = 3
+    /// Name the joined network is listed under when the grant withholds it:
+    /// the literal Apple's own tools print, and one the sketchybar port
+    /// already treats as a name.
+    static let redactedName = "<redacted>"
 
     struct Sighting: Equatable, Sendable {
         var name: String
@@ -185,17 +189,33 @@ enum WifiScan {
         }
         if isRedacted(scanned: networks.count, named: sightings.count) {
             // The saved profiles lose their names the same way, so there is
-            // nothing to list; the popup says what to allow instead.
-            return ("", redactedCode)
+            // nothing to list; the popup says what to allow instead. Only
+            // the names are gated, though: the interface still says whether
+            // it is joined, so the current network keeps its row under the
+            // placeholder — Connected, Disconnect and the pill stay right,
+            // and Lua can tell Wi-Fi from a wired path without probing.
+            var rows: [WifiScanRow] = []
+            if iface.interfaceMode() == .station {
+                let sighting = currentSighting(on: iface, name: redactedName)
+                rows.append(WifiScanRow(
+                    name: sighting.name, rssi: sighting.rssi,
+                    current: true, known: true, hotspot: false, secure: sighting.secure))
+            }
+            return (tsv(rows), redactedCode)
         }
         if let current, !current.isEmpty,
            !sightings.contains(where: { sanitize($0.name) == current }) {
-            let rssi = iface.rssiValue()
-            let secure = iface.security() != .none
-            sightings.append(Sighting(
-                name: current, rssi: rssi == 0 ? -50 : rssi, secure: secure))
+            sightings.append(currentSighting(on: iface, name: current))
         }
         return (tsv(merge(sightings: sightings, currentSSID: current, profiles: profiles)), 0)
+    }
+
+    /// The joined network as the interface itself reports it, for when the
+    /// scan did not list it. `rssiValue()` is 0 with no reading; -50 keeps
+    /// the signal fan drawn.
+    private static func currentSighting(on iface: CWInterface, name: String) -> Sighting {
+        let rssi = iface.rssiValue()
+        return Sighting(name: name, rssi: rssi == 0 ? -50 : rssi, secure: iface.security() != .none)
     }
 
     /// Arguments for `networksetup -setairportnetwork`. A password is never
