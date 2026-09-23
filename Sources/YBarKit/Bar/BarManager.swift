@@ -342,12 +342,6 @@ public final class BarManager {
             // drawable at that one scale (a fresh panel's backingScaleFactor
             // reports the primary screen until it is ordered in).
             let scale = surface.scale
-            sceneBuilder.pointer = Self.pointerPixels(in: surface.hostView, scale: scale)
-            let scene = sceneBuilder.buildPopup(
-                host: host, members: members, scale: scale, atlas: atlas)
-            guard scene.sizePoints.width > 0, scene.sizePoints.height > 0 else { continue }
-            if scene.needsContinuousFrames { continuous = true }
-
             let popupSurface: PopupSurface
             if let existing = popupSurfaces[host.id] {
                 popupSurface = existing
@@ -361,6 +355,19 @@ public final class BarManager {
                 }
                 popupSurfaces[host.id] = popupSurface
             }
+            // The pointer is sampled in the popup's own window, not the
+            // bar's: the two panels have different origins, so bar pixels
+            // would light the sheen specular on the wrong row, or on none.
+            // A panel not yet presented cannot be under the cursor and reads
+            // as "missing"; the move that follows presentation resamples it.
+            sceneBuilder.pointer = Self.pointerPixels(in: popupSurface.hostView, scale: scale)
+            let scene = sceneBuilder.buildPopup(
+                host: host, members: members, scale: scale, atlas: atlas)
+            // An empty scene leaves the panel to the teardown pass below,
+            // which closes a never-presented one at once, without a fade.
+            guard scene.sizePoints.width > 0, scene.sizePoints.height > 0 else { continue }
+            if scene.needsContinuousFrames { continuous = true }
+
             popupSurface.itemFrames = scene.itemFrames
             popupSurface.lastSceneHadSheen = scene.list.hasSheen
             popupSurface.hidesInFullscreen = settings.fullscreenPolicy == .hide
