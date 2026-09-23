@@ -8,4 +8,6 @@ Full-bleed glass strip, 28pt capsule pills with traveling sheen, Apple menu and 
 ybar theme use ysuite-liquid
 ```
 
-Needs `examples/sketchybar-port` beside this directory.
+Needs `examples/sketchybar-port` beside this directory. Optional:
+`ybar --bar wifi_ssid_prompt=on` once for the Wi-Fi network names (Location
+Services).

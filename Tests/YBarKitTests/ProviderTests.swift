@@ -1,5 +1,7 @@
 import CoreLocation
+import CoreWLAN
 import Foundation
+import ObjectiveC
 import Testing
 @testable import YBarKit
 
@@ -175,6 +177,15 @@ import Testing
         #expect(rows.isEmpty)
     }
 
+    @Test func redactionIsNetworksOnTheAirThatNoneCouldName() {
+        #expect(WifiScan.isRedacted(scanned: 22, named: 0))
+        #expect(!WifiScan.isRedacted(scanned: 22, named: 22))
+        // One hidden-SSID network is a hidden network, not a missing grant.
+        #expect(!WifiScan.isRedacted(scanned: 22, named: 21))
+        // Wi-Fi off or a failed pass: nothing to name.
+        #expect(!WifiScan.isRedacted(scanned: 0, named: 0))
+    }
+
     @Test func tsvMatchesThePopupParser() {
         let rows = WifiScan.merge(
             sightings: [.init(name: "Home\tNet", rssi: -42)],
@@ -207,6 +218,55 @@ import Testing
         #expect(rows.count == 1)
         #expect(rows[0].secure == false)
         #expect(WifiScan.tsv(rows) == "0\tCafe\t-60\t0\t0\t0")
+    }
+}
+
+@Suite struct WifiHotspotFlagTests {
+    @Test func onlyAOneByteBoolEncodingIsRead() {
+        #expect(WifiScan.isBoolIvarEncoding("B"))
+        #expect(WifiScan.isBoolIvarEncoding("c"))
+        // A wider integer, an object, or no encoding: refuse rather than
+        // read the first byte of something else.
+        #expect(!WifiScan.isBoolIvarEncoding("i"))
+        #expect(!WifiScan.isBoolIvarEncoding("Q"))
+        #expect(!WifiScan.isBoolIvarEncoding("@"))
+        #expect(!WifiScan.isBoolIvarEncoding(""))
+        #expect(!WifiScan.isBoolIvarEncoding(nil))
+    }
+
+    @Test func theRealFlagStillPassesTheGuard() {
+        // If this SDK still declares the ivar, it must be the BOOL the peek
+        // expects — otherwise hotspot rows silently vanish and this is the
+        // test that says why. An SDK without the ivar has nothing to check.
+        guard let ivar = class_getInstanceVariable(CWNetworkProfile.self, "_isPersonalHotspot") else {
+            return
+        }
+        let encoding = ivar_getTypeEncoding(ivar).map { String(cString: $0) }
+        #expect(WifiScan.isBoolIvarEncoding(encoding), "encoding \(encoding ?? "nil")")
+    }
+}
+
+@Suite struct WifiJoinVerdictTests {
+    @Test func silenceWithExitZeroIsTheOnlySuccess() {
+        #expect(!WifiScan.joinRejected(code: 0, output: ""))
+        // The trimmed child output can still carry a stray newline.
+        #expect(!WifiScan.joinRejected(code: 0, output: "\n"))
+    }
+
+    @Test func exitZeroRefusalsAreStillRefusals() {
+        // networksetup exits 0 for each of these; none says "failed".
+        for message in [
+            "Could not find network Cafe.",
+            "You cannot join a network when Wi-Fi power is off.",
+            "All Wi-Fi network services are disabled.",
+            "Failed to join network Cafe.",
+        ] {
+            #expect(WifiScan.joinRejected(code: 0, output: message), "\(message)")
+        }
+    }
+
+    @Test func nonZeroExitIsARefusalEvenWhenSilent() {
+        #expect(WifiScan.joinRejected(code: 1, output: ""))
     }
 }
 
