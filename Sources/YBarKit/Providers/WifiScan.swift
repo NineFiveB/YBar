@@ -192,6 +192,15 @@ enum WifiScan {
         return output.replacingOccurrences(of: password, with: "")
     }
 
+    /// Pure: whether `networksetup -setairportnetwork` refused the join.
+    /// It prints nothing on success, but exits 0 for several refusals
+    /// ("Could not find network X.", "You cannot join a network when Wi-Fi
+    /// power is off.", "All Wi-Fi network services are disabled."), so any
+    /// output at all is a refusal — not only the "Failed to join" line.
+    static func joinRejected(code: Int32, output: String) -> Bool {
+        code != 0 || !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// Join a network. With `password == nil`, `networksetup` uses the
     /// keychain and can wake a saved personal hotspot. A non-nil password is
     /// written to the child's stdin and is not returned in `output`.
@@ -246,17 +255,15 @@ enum WifiScan {
         let code = process.terminationStatus
         if password != nil {
             let cleaned = redacted(raw, password: password)
-            let rejected = code != 0
-                || cleaned.range(of: "failed", options: .caseInsensitive) != nil
-            if rejected {
+            if joinRejected(code: code, output: cleaned) {
                 return ("", code == 0 ? 1 : code)
             }
             return ("", 0)
         }
-        if code != 0, raw.isEmpty {
-            return ("[!] could not join \(name)", code)
+        if joinRejected(code: code, output: raw) {
+            return (raw.isEmpty ? "[!] could not join \(name)" : raw, code == 0 ? 1 : code)
         }
-        return (raw, code)
+        return ("", 0)
     }
 
     /// Drop the current association. Wi-Fi stays on; this is not a power toggle.
