@@ -687,7 +687,8 @@ public final class LuaRuntime {
 
     /// CoreWLAN scan off the main thread. The callback matches `exec`:
     /// `(output, exitCode)`, where 3 means every SSID was withheld for want
-    /// of the Location grant (`WifiScan.redactedCode`).
+    /// of the Location grant (`WifiScan.redactedCode`); the joined network,
+    /// if any, is still listed then, under `WifiScan.redactedName`.
     private func scheduleWifiScan(ref: Int32) {
         let generation = stateGeneration
         DispatchQueue.global(qos: .utility).async {
