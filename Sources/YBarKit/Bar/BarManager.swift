@@ -685,16 +685,21 @@ public final class BarManager {
     }
 
     /// Cursor in a surface's Metal pixels (top-left, y-down). Far negative when
-    /// the pointer is outside that window.
-    private static func pointerPixels(in view: NSView, scale: CGFloat) -> SIMD2<Float> {
+    /// the pointer is outside that window. `screenPoint` is the live cursor
+    /// (AppKit global, y-up); the tests pass a point of their own.
+    static func pointerPixels(
+        in view: NSView, scale: CGFloat, screenPoint: CGPoint = NSEvent.mouseLocation
+    ) -> SIMD2<Float> {
         let missing = SIMD2<Float>(repeating: -1e6)
         guard let window = view.window else { return missing }
-        let screenPoint = NSEvent.mouseLocation
         guard window.frame.contains(screenPoint) else { return missing }
         let inWindow = window.convertPoint(fromScreen: screenPoint)
+        // MetalHostView is flipped, so the converted point is already
+        // top-left y-down: the pixel space the shader reads the pointer in.
+        // Flipping it once more here mirrored the specular within its
+        // surface — subtle in a 30 pt bar, the wrong row in a popup.
         let inView = view.convert(inWindow, from: nil)
-        let height = view.bounds.height
-        return SIMD2(Float(inView.x * scale), Float((height - inView.y) * scale))
+        return SIMD2(Float(inView.x * scale), Float(inView.y * scale))
     }
 
     private func scheduleRetry() {

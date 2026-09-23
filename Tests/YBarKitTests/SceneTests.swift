@@ -224,6 +224,40 @@ struct HeadlessScene {
     }
 }
 
+/// The cursor sample the sheen specular is lit from. MetalHostView is a
+/// flipped view, so the point converted into it is already top-left y-down,
+/// the pixel space Uniforms.pointer is documented in; flipping it once more
+/// (as the sample did) mirrored the specular vertically. The popup is
+/// presented far below every screen (on screen for AppKit, never in view)
+/// and the cursor is a point of the test's own, not the live mouse.
+@MainActor
+@Suite(.serialized) struct PointerSampleTests {
+    /// A 200 x 100 pt popup panel far below the screen.
+    private func offscreenPopup(_ manager: BarManager) throws -> PopupSurface {
+        let screen = try #require(NSScreen.screens.first)
+        let popup = PopupSurface(hostItemID: -1, device: manager.device)
+        popup.present(anchor: CGRect(x: 0, y: -100_000, width: 40, height: 25),
+                      size: CGSize(width: 200, height: 100), barPosition: .top, yOffset: 0,
+                      align: "l", screen: screen, edgeMargin: 0)
+        return popup
+    }
+
+    @Test func sampleIsTopLeftYDownPixels() throws {
+        let manager = try BarManager()
+        let popup = try offscreenPopup(manager)
+        defer { popup.close() }
+        let frame = popup.panel.frame
+        // 30 pt in from the left edge, 20 pt down from the top (AppKit y is up).
+        let cursor = CGPoint(x: frame.minX + 30, y: frame.maxY - 20)
+        #expect(BarManager.pointerPixels(in: popup.hostView, scale: 2, screenPoint: cursor)
+                == SIMD2(60, 40))
+        // Outside the window: the far-negative "missing" sentinel.
+        let outside = CGPoint(x: frame.minX - 1, y: frame.midY)
+        #expect(BarManager.pointerPixels(in: popup.hostView, scale: 2, screenPoint: outside)
+                == DisplayList().pointer)
+    }
+}
+
 /// A glass label plate in a popup is recorded so the panel can sit an
 /// NSGlassEffectView under the button. A plain label records nothing.
 @MainActor
