@@ -129,7 +129,7 @@ public final class SceneBuilder {
         public var sizePoints: CGSize = .zero
         /// A member scrolls its text: the panel needs the frame clock too.
         public var hasMarquee: Bool { list.hasMarquee }
-        /// Traveling sheen (or marquee) needs the display link.
+        /// Marquee text needs the display link.
         public var needsContinuousFrames: Bool { list.needsContinuousFrames }
     }
 
@@ -830,8 +830,8 @@ public final class SceneBuilder {
             quad.flags |= QuadInstance.flagGlass
         }
         // Painted lip/shade/specular is the pre-26 stand-in. On macOS 26 the
-        // system material is the glass; the Metal highlight reads as a fake
-        // shine and would keep the display link running.
+        // system material is the glass, and a Metal highlight over it reads
+        // as a fake shine.
         if background.sheen, !nativeGlassBackdrops {
             quad.flags |= QuadInstance.flagSheen
         }
