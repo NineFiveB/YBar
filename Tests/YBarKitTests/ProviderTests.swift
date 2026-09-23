@@ -209,6 +209,16 @@ import Testing
         #expect(WifiScan.redacted("Failed to join Cafe.", password: nil) == "Failed to join Cafe.")
         #expect(WifiScan.redacted("Failed to join Cafe.", password: "") == "Failed to join Cafe.")
     }
+
+    @Test func openNetworkStaysUnsecured() {
+        let rows = WifiScan.merge(
+            sightings: [.init(name: "Cafe", rssi: -60, secure: false)],
+            currentSSID: nil,
+            profiles: [])
+        #expect(rows.count == 1)
+        #expect(rows[0].secure == false)
+        #expect(WifiScan.tsv(rows) == "0\tCafe\t-60\t0\t0\t0")
+    }
 }
 
 @Suite struct WifiHotspotFlagTests {
@@ -257,16 +267,6 @@ import Testing
 
     @Test func nonZeroExitIsARefusalEvenWhenSilent() {
         #expect(WifiScan.joinRejected(code: 1, output: ""))
-    }
-
-    @Test func openNetworkStaysUnsecured() {
-        let rows = WifiScan.merge(
-            sightings: [.init(name: "Cafe", rssi: -60, secure: false)],
-            currentSSID: nil,
-            profiles: [])
-        #expect(rows.count == 1)
-        #expect(rows[0].secure == false)
-        #expect(WifiScan.tsv(rows) == "0\tCafe\t-60\t0\t0\t0")
     }
 }
 
