@@ -180,6 +180,50 @@ struct HeadlessScene {
     }
 }
 
+/// The painted sheen's pointer specular is damage-driven, not a display-link
+/// demand: a bar with a sheen pill and no marquee goes fully idle between
+/// pointer moves, and a move (or exit) over a surface whose last scene
+/// carried the sheen schedules exactly the one frame that resamples the
+/// pointer. The manager is headless (no begin(), no settings write), so
+/// nothing else has a frame scheduled when the moves arrive.
+@MainActor
+@Suite(.serialized) struct SheenDemandTests {
+    private func move(_ kind: MouseEventKind) -> MouseEventInfo {
+        MouseEventInfo(kind: kind, point: CGPoint(x: 5, y: 5), button: "left",
+                       modifier: "none", scrollDelta: 0)
+    }
+
+    @Test func sheenAloneIsNotAContinuousDemand() {
+        var list = DisplayList()
+        list.hasSheen = true
+        #expect(!list.needsContinuousFrames)
+        list.hasMarquee = true
+        #expect(list.needsContinuousFrames)
+    }
+
+    @Test func pointerMovesRedrawABarWhoseSceneHasSheen() throws {
+        let manager = try BarManager()
+        let screen = try #require(NSScreen.screens.first)
+        let surface = BarSurface(screen: screen, arrangementIndex: 1)
+        manager.handleMouse(move(.moved), on: surface)
+        #expect(!manager.renderScheduled)
+        surface.lastSceneHadSheen = true
+        manager.handleMouse(move(.moved), on: surface)
+        #expect(manager.renderScheduled)
+    }
+
+    @Test func pointerExitRedrawsAPopupWhoseSceneHasSheen() throws {
+        let manager = try BarManager()
+        let popup = PopupSurface(hostItemID: -1, device: manager.device)
+        manager.handlePopupMouse(move(.moved), on: popup)
+        manager.handlePopupMouse(move(.exited), on: popup)
+        #expect(!manager.renderScheduled)
+        popup.lastSceneHadSheen = true
+        manager.handlePopupMouse(move(.exited), on: popup)
+        #expect(manager.renderScheduled)
+    }
+}
+
 /// A glass label plate in a popup is recorded so the panel can sit an
 /// NSGlassEffectView under the button. A plain label records nothing.
 @MainActor

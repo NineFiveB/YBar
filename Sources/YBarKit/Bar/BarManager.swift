@@ -31,7 +31,7 @@ public final class BarManager {
     public private(set) var surfaces: [BarSurface] = []
     private var popupSurfaces: [Int: PopupSurface] = [:]
     private var atlases: [CGFloat: GlyphAtlas] = [:]
-    private var renderScheduled = false
+    private(set) var renderScheduled = false
     private(set) var retryScheduled = false
     /// Scales / displays whose no-render condition was already reported —
     /// the retry runs every second, the stderr line must not.
@@ -274,11 +274,11 @@ public final class BarManager {
     }
 
     public func renderAll() {
-        // Continuous demand (marquee or traveling sheen) belongs to the whole
-        // frame: every bar surface and every popup panel is accumulated and
-        // reported once. Reporting per surface let whichever scene rendered
-        // last decide, and popups never reported at all, so a display link
-        // could be torn down under text that was still scrolling.
+        // Continuous demand (marquee text) belongs to the whole frame: every
+        // bar surface and every popup panel is accumulated and reported
+        // once. Reporting per surface let whichever scene rendered last
+        // decide, and popups never reported at all, so a display link could
+        // be torn down under text that was still scrolling.
         var continuous = false
         for surface in surfaces {
             if render(surface: surface) { continuous = true }
@@ -362,6 +362,7 @@ public final class BarManager {
                 popupSurfaces[host.id] = popupSurface
             }
             popupSurface.itemFrames = scene.itemFrames
+            popupSurface.lastSceneHadSheen = scene.list.hasSheen
             popupSurface.hidesInFullscreen = settings.fullscreenPolicy == .hide
 
             // Host frame (bar-local, y-down) -> global AppKit coords (y-up).
@@ -499,9 +500,15 @@ public final class BarManager {
             // Same item on every move: a chart still has to name the bar
             // under the pointer, which the item-level enter/exit does not.
             updateGraphHover(item: hovered, localX: info.point.x, frames: popup.itemFrames)
+            // The sheen specular follows the pointer, which every render
+            // samples afresh: one damage-driven frame per move, no display
+            // link while the pointer rests.
+            if popup.lastSceneHadSheen { setNeedsRender() }
         case .exited:
             pointerInsideSurfaces.remove(ObjectIdentifier(popup))
             releaseHover(in: popup)
+            // Once more with the pointer gone, so the specular clears.
+            if popup.lastSceneHadSheen { setNeedsRender() }
             scheduleGlobalExitCheck()
         }
     }
@@ -669,8 +676,11 @@ public final class BarManager {
             // was already consumed, so reschedule or the update is never shown.
             scheduleRetry()
         }
-        // Marquee text and traveling sheen need continuous frames; everything
-        // else stays damage-driven.
+        // The sheen's pointer specular is damage-driven: handleMouse redraws
+        // on moves over a surface whose scene carries it.
+        surface.lastSceneHadSheen = list.hasSheen
+        // Marquee text needs continuous frames; everything else stays
+        // damage-driven.
         return list.needsContinuousFrames
     }
 
@@ -799,9 +809,15 @@ public final class BarManager {
             noteSurfaceEntered(ObjectIdentifier(surface))
             let hovered = hitTest(point: info.point, on: surface)
             updateHover(surface: surface, to: hovered)
+            // The sheen specular follows the pointer, which every render
+            // samples afresh: one damage-driven frame per move, no display
+            // link while the pointer rests.
+            if surface.lastSceneHadSheen { setNeedsRender() }
         case .exited:
             pointerInsideSurfaces.remove(ObjectIdentifier(surface))
             updateHover(surface: surface, to: nil)
+            // Once more with the pointer gone, so the specular clears.
+            if surface.lastSceneHadSheen { setNeedsRender() }
             scheduleGlobalExitCheck()
         }
     }

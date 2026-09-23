@@ -163,15 +163,17 @@ public struct DisplayList {
     /// This scene contains scrolling text: the frame clock must keep running
     /// while any scene of the frame (bar or popup) carries it.
     public var hasMarquee = false
-    /// Per-pill Metal lip/shade/pointer specular: same continuous display-link
-    /// demand so hover specular tracks the cursor without damage lag.
+    /// Per-pill Metal lip/shade/pointer specular. Not a continuous-frame
+    /// demand: the specular only changes when the pointer does, so
+    /// BarManager redraws on pointer moves over a surface whose last scene
+    /// carried it, and an idle bar stays idle.
     public var hasSheen = false
     /// Cursor in this surface's pixels (top-left, y-down).
     public var pointer: SIMD2<Float> = SIMD2(repeating: -1e6)
 
     public init() {}
 
-    public var needsContinuousFrames: Bool { hasMarquee || hasSheen }
+    public var needsContinuousFrames: Bool { hasMarquee }
 
     public var isEmpty: Bool { quads.isEmpty && triangles.isEmpty && glyphs.isEmpty }
 }
