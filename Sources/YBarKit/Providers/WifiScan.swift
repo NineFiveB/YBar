@@ -316,10 +316,23 @@ enum WifiScan {
         return profiles
     }
 
-    /// The header stores the flag as a private `BOOL` ivar and publishes no
-    /// accessor. Missing ivar returns nil so the caller does not guess.
+    /// Pure: whether an ivar's ObjC type encoding is a one-byte `BOOL` —
+    /// "B" (C99 bool, arm64) or "c" (signed char, x86_64). Anything else,
+    /// including no encoding at all, is refused so a changed layout is
+    /// never read as a flag.
+    static func isBoolIvarEncoding(_ encoding: String?) -> Bool {
+        encoding == "B" || encoding == "c"
+    }
+
+    /// Read-only ObjC-runtime peek at a `BOOL` ivar. The SDK header declares
+    /// `_isPersonalHotspot` under `@private`, and the accessor that exists
+    /// for it is private too, so there is no supported way to ask. The read
+    /// is presence- and type-checked and degrades to nil — no hotspot rows —
+    /// when either check fails.
     private static func boolIvar(_ object: AnyObject, name: String) -> Bool? {
-        guard let ivar = class_getInstanceVariable(type(of: object), name) else { return nil }
+        guard let ivar = class_getInstanceVariable(type(of: object), name),
+              isBoolIvarEncoding(ivar_getTypeEncoding(ivar).map { String(cString: $0) })
+        else { return nil }
         let pointer = Unmanaged.passUnretained(object).toOpaque().advanced(by: ivar_getOffset(ivar))
         return pointer.load(as: UInt8.self) != 0
     }
