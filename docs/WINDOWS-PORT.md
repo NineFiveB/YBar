@@ -423,10 +423,10 @@ independent instance.
   - `restart` = `stop` (quiet when nothing runs) + `start`; `status` prints
     running/instance/socket/exe/config-a-fresh-start-would-pick (labelled with
     the theme when the recorded theme produced it)/autostart/log, plus notes.
-  - Of the staged macOS verbs (`wip/process-control-cli`), `start`, `stop`,
-    `restart` and `autostart enable`/`disable` refuse to run as root, while
-    `status` and `autostart status` run and print a note that they describe
-    root's session (`main`'s `theme` and `autostart` do not check the uid);
+  - Of the macOS verbs, `start`, `stop`, `restart` and `autostart
+    enable`/`disable` refuse to run as root, while `status` and `autostart
+    status` run and print a note that they describe root's session (`theme`
+    does not check the uid);
     the Windows ones do **not** refuse elevation. The reason there is TCC
     attribution, which has no analogue here, and an elevated bar is a
     legitimate setup next to an elevated tiler.
@@ -1623,8 +1623,8 @@ backdrops and Mica popup panels (§7.6; both surfaces moved to
 Windows.UI.Composition for them, DirectComposition remains only as the
 frame pump's clock), `ybar theme
 list|current|use|reset`, `ybar autostart enable|disable|status`, `ybar
-start|stop|restart|status` with the 0/1/2 exit codes of the verbs the
-reference stages on `wip/process-control-cli` (§5), the windowless
+start|stop|restart|status` with the reference's 0/1/2 exit codes (§5),
+the windowless
 `ybarw.exe` launcher (§5), the
 `AppUserModelID`, the shipped `examples/catppuccin-komorebi` theme, and CI
 packaging of `examples/` + app-local `d3dcompiler_47.dll`.
