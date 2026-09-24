@@ -11,7 +11,6 @@ final class WifiPasswordPrompt: NSObject, NSWindowDelegate, NSTextFieldDelegate 
     private var field: NSSecureTextField?
     private var message: NSTextField?
     private var joinButton: NSButton?
-    private var cancelButton: NSButton?
     private var ssid = ""
     private var onFinish: ((Bool) -> Void)?
     private var joining = false
@@ -134,7 +133,6 @@ final class WifiPasswordPrompt: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         self.field = field
         self.message = message
         self.joinButton = join
-        self.cancelButton = cancel
         return window
     }
 
@@ -210,8 +208,9 @@ final class WifiPasswordPrompt: NSObject, NSWindowDelegate, NSTextFieldDelegate 
 
     /// Mid-join, the bumped `requestID` makes the completion below discard
     /// the result; the child runs on until it finishes or the watchdog
-    /// fires, so a join cancelled late may still land — Lua hears "cancelled"
-    /// and the pill catches up on the wifi_change.
+    /// fires, so a join cancelled late may still land — Lua only hears the
+    /// close (exit code 2, from scheduleWifiPrompt) and the pill catches up
+    /// on the wifi_change.
     @objc private func cancelPressed() {
         requestID += 1
         dismiss(joined: false)
