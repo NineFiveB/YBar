@@ -261,7 +261,9 @@ event-specific variables (`FOCUSED_WORKSPACE`, `MEDIA_TITLE`, `CPU_USAGE`,
   and `ybar --tray <name> invoke|close` activates or closes one.
   `ybar --query windows` lists running app windows with their `hwnd`, and
   `ybar --window <hwnd> close|kill` posts `WM_CLOSE` to one or terminates
-  its process. All are Windows extensions; the macOS build rejects them.
+  its process. `--tray`, `--window` and `--query windows|tray|audio` are
+  Windows extensions, as is the app token on `--volume`; the macOS build
+  rejects them.
 - **Bluetooth.** `ybar --query bluetooth` returns `{"radio": ..., "scanning":
   ..., "devices": [...]}`. `radio` is `on`, `off`, `disabled`, `unknown` or
   `none` (no radio). Each device has `id`, `name`, `address`, `kind`
