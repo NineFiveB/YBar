@@ -287,9 +287,30 @@ import Testing
         return (process, pipe)
     }
 
-    @Test func aChildThatOutlivesTheTimeoutIsKilledAndReadsAsTimedOut() throws {
+    /// reap() blocks its thread until the child is gone. Run it on a thread
+    /// of its own: held on a cooperative-pool thread it starves the other
+    /// suites and the watchdog timers on a small runner.
+    private final class Reaper: @unchecked Sendable {
+        let process: Process
+        let pipe: Pipe
+        let timeout: TimeInterval
+        init(_ process: Process, _ pipe: Pipe, _ timeout: TimeInterval) {
+            self.process = process; self.pipe = pipe; self.timeout = timeout
+        }
+        func run() async -> (output: String, code: Int32) {
+            await withCheckedContinuation { continuation in
+                let thread = Thread { [self] in
+                    continuation.resume(
+                        returning: WifiScan.reap(process, output: pipe, timeout: timeout))
+                }
+                thread.start()
+            }
+        }
+    }
+
+    @Test func aChildThatOutlivesTheTimeoutIsKilledAndReadsAsTimedOut() async throws {
         let (process, pipe) = try spawn(["echo started; exec sleep 300"])
-        let result = WifiScan.reap(process, output: pipe, timeout: 0.2)
+        let result = await Reaper(process, pipe, 0.2).run()
         // The exit is the watchdog's, and what the child printed before it
         // was killed is not returned as if it were a verdict.
         #expect(result.code == WifiScan.timedOutCode)
@@ -298,16 +319,16 @@ import Testing
         #expect(process.terminationReason == .uncaughtSignal)
     }
 
-    @Test func aChildThatExitsInTimeKeepsItsOutputAndStatus() throws {
+    @Test func aChildThatExitsInTimeKeepsItsOutputAndStatus() async throws {
         // networksetup's shape for an exit-0 refusal: a line, status 0. The
         // helper passes both through untouched; the verdict is join's.
         let (refusal, refusalPipe) = try spawn(["echo 'Could not find network Cafe.'; exit 0"])
-        let refused = WifiScan.reap(refusal, output: refusalPipe, timeout: 5)
+        let refused = await Reaper(refusal, refusalPipe, 5).run()
         #expect(refused.output == "Could not find network Cafe.")
         #expect(refused.code == 0)
 
         let (failure, failurePipe) = try spawn(["exit 3"])
-        let failed = WifiScan.reap(failure, output: failurePipe, timeout: 5)
+        let failed = await Reaper(failure, failurePipe, 5).run()
         #expect(failed.output == "")
         #expect(failed.code == 3)
     }
