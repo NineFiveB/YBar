@@ -91,8 +91,14 @@ local function add_card(title, aside)
 end
 
 local mem_card = add_card("Memory", "Free Up")
-local cpu_card = add_card("CPU", "—°C")
-local gpu_card = add_card("GPU", "—°C")
+-- The temperature asides start empty rather than at a "—°C" placeholder.
+-- system_stats_rich.sh emits CPU_TEMP only when a temperature tool it can
+-- find answers (none ships with the theme), and it has no GPU temperature
+-- at all: its GPU key is the same IOAccelerator utilisation the engine's
+-- system_stats event already puts in the card title below, so the GPU aside
+-- stays empty instead of repeating the load.
+local cpu_card = add_card("CPU", "")
+local gpu_card = add_card("GPU", "")
 gpu_card:set({ drawing = false })
 
 local footer = sbar.add("item", "widgets.cpu.footer", {
@@ -134,9 +140,11 @@ local function fmt_rate(bytes_per_sec)
   return string.format("%.1f MB/s", bytes_per_sec / (1024 * 1024))
 end
 
+-- Empty when the helper had no reading. A zero counts as none: the one
+-- tool the helper knows reports 0.0 °C on Apple Silicon.
 local function temp_label(raw)
   local n = tonumber(raw)
-  if not n then return "—°C" end
+  if not n or n <= 0 then return "" end
   return string.format("%d°C", n)
 end
 
@@ -159,9 +167,6 @@ local function update_from_helper(out)
     },
   })
   cpu_card:set({ label = { string = temp_label(stats.CPU_TEMP) } })
-  if stats.GPU_TEMP then
-    gpu_card:set({ label = { string = temp_label(stats.GPU_TEMP) } })
-  end
 
   local disk_pct = (stats.DISK_PCT or ""):gsub("%%", "")
   local net_in = tonumber(stats.NET_IN)
