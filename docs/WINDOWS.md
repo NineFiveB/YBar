@@ -10,73 +10,30 @@ manager adapter.
 
 [WINDOWS-PORT.md](WINDOWS-PORT.md) is the design document and the platform
 contract between the two engines. The branch's own
-[README](../../../blob/windows/README.md) has the source-tree map, the full
-porting table and the packaging details. This page is the short version:
-what to install, what is native, and what the GIFs show.
-
-To check the branch out beside the macOS tree:
-
-```powershell
-git worktree add ..\ybar-win windows
-```
+[README](https://github.com/NineFiveB/YBar/blob/windows/README.md) owns
+install, uninstall and build, and has the source-tree map, the full porting
+table and the packaging details. This page is the short version: how to
+start, what is native, and what the GIFs show.
 
 ## Requirements
 
-Windows 11, 22H2 or later. Windows 10 is untested.
+Windows 11 (21H2 or later; tested on 22H2 and later), x64.
 
 ## Install
 
-Three channels. The installer and Scoop put `ybar` on your `PATH`; with the
-zip you do it yourself.
-
-**PowerShell, one line, no admin rights:**
+One line in PowerShell, no admin rights:
 
 ```powershell
 irm https://raw.githubusercontent.com/NineFiveB/YBar/windows/scripts/install.ps1 | iex
 ```
 
-The script downloads the latest signed `win-v*` release into
-`%LOCALAPPDATA%\Programs\ybar`, checks the SHA256 the release publishes and
-the Authenticode signature, and adds the directory to your `PATH`.
-Environment variables steer it: `$env:YBAR_START=1` launches the bar when
-done, `$env:YBAR_AUTOSTART=1` registers it to run at login,
-`$env:YBAR_VERSION=0.1.0` pins a version, and `$env:YBAR_UNINSTALL=1`
-removes it with the same one-liner. Uninstall leaves `~\.config\ybar` alone.
-
-**Scoop:**
-
-```powershell
-scoop install https://raw.githubusercontent.com/NineFiveB/YBar/windows/packaging/scoop/ybar-win.json
-```
-
-The shim lands on your `PATH` as `ybar`, and `scoop update ybar-win` follows
-new releases.
-
-**Release zip:** download `ybar-win-<version>-x64.zip` from a
-[`win-v*` release](../../../releases) and unpack it anywhere. It is
-self-contained: `ybar.exe`, `ybarw.exe` (a windowless launcher that runs
-`ybar start` with no console, for shortcuts and schedulers), the shader the
-engine compiles at runtime, the shipped themes and an app-local
-`d3dcompiler_47.dll`. Put the folder on your `PATH` so config scripts can
-call `ybar` back.
-
-Release binaries are Authenticode-signed through Azure Trusted Signing in
-CI. SmartScreen may still warn until the certificate accrues reputation. A
-winget manifest is staged under `packaging/` on the `windows` branch for
-submission; it is not published yet.
-
-Then the same verbs as on the Mac:
-
-```powershell
-ybar start               # launch the bar in the background, no console window
-ybar autostart enable    # run at every login (an HKCU Run entry; shows in Task Manager > Startup apps)
-ybar status              # bar, config and autostart state
-ybar stop                # stop it; ybar restart [-c <path>] stops and relaunches
-ybar theme use sketchybar-glass
-```
-
-A bar started this way writes its stderr to `%LOCALAPPDATA%\ybar\stderr.log`,
-rotated at 1 MB; `ybar status` names it.
+Then `ybar start`. Install, uninstall and build live in the
+[branch README](https://github.com/NineFiveB/YBar/blob/windows/README.md):
+the script's options, Scoop, the release zip, autostart, and the CMake
+build. The installer puts `ybar` on your `PATH` for your terminal. Config
+scripts do not need that: the daemon prepends its own directory to the
+`PATH` of every script it spawns. A winget manifest is staged under
+`packaging/` on the branch, not published yet.
 
 ## What it looks like
 
@@ -174,15 +131,22 @@ as the Mica one.*
   connectivity-hint notifications; the Wi-Fi flyout's network list shells
   `netsh`), now-playing media (GSMTC), in-process CPU and memory stats, tray
   icons and a foreground hook for `front_app_switched`, all mapped to the
-  same event names as macOS.
-- **Look.** The flagship `sketchybar-glass` theme is ported and restyled to
-  Windows 11 Fluent: Mica pills and popup panels over a flat near-black
-  strip, and Fluent Wi-Fi, Bluetooth, system-monitor and calendar popups.
-  `catppuccin-komorebi` is a declarative JSONC bar.
-- **Grammar extensions.** Windows adds `--komorebi`, `--tray`, `--window`, a
-  per-app second token on `--volume`, and `--query windows|tray|audio`. The
-  `alias` component (menu-bar-extra capture) is accepted by the grammar but
-  not supported there.
+  same event names as macOS. Bluetooth has no macOS counterpart. It finds
+  nearby devices and runs confirm-only pairing through WinRT device
+  watchers. `--bluetooth scan|pair` drives it, `--query bluetooth` reads it
+  back, and it fires its own `bluetooth_change` and `bluetooth_pair` events.
+- **Look.** Two themes ship on Windows. `sketchybar-glass` is ported and
+  restyled to Windows 11 Fluent: Mica pills and popup panels over a flat
+  near-black strip, and Fluent Wi-Fi, Bluetooth, system-monitor and
+  calendar popups. What changed and why is in the branch's
+  [`PORTING-WIN.md`](https://github.com/NineFiveB/YBar/blob/windows/examples/sketchybar-glass/PORTING-WIN.md).
+  `catppuccin-komorebi` is a declarative JSONC bar. The other themes on
+  `main` are not ported.
+- **Grammar extensions.** `--volume` exists on both engines. Windows adds
+  `--komorebi`, `--tray`, `--window`, `--bluetooth scan|pair`, a per-app
+  second token on `--volume`, and `--query windows|tray|audio|bluetooth`.
+  The `alias` component (menu-bar-extra capture) is accepted by the grammar
+  but not supported there.
 
 ## Porting a macOS config
 
@@ -195,21 +159,8 @@ Glass. Scripts run under `sh` (Git Bash on `PATH`, or Git for Windows'
 `sh.exe` found through the registry), else PowerShell; `YBAR_SHELL`
 overrides. The branch README has the full table.
 
-## Build
-
-Windows 11 22H2 or later, Visual Studio 2022 C++ tools, CMake 3.25 or later,
-and [vcpkg](https://github.com/microsoft/vcpkg) with `VCPKG_ROOT` set:
-
-```powershell
-cmake --preset default
-cmake --build --preset default
-ctest --preset default
-```
-
-The contract tests are Catch2 ports of the platform-neutral Swift tests.
-
 ## Read more
 
 - [WINDOWS-PORT.md](WINDOWS-PORT.md): the port's design and platform contract
-- [The `windows` branch README](../../../blob/windows/README.md): source-tree map, porting table, packaging
+- [The `windows` branch README](https://github.com/NineFiveB/YBar/blob/windows/README.md): install, uninstall, build, source-tree map, porting table, packaging
 - [CONFIG.md](CONFIG.md): the config surfaces shared by both engines
