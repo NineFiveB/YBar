@@ -1,0 +1,2 @@
+# The shell helpers run as scripts: a UTF-16 or CRLF resave is not executable.
+scripts/* text eol=lf
