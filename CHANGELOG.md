@@ -135,6 +135,9 @@ Nothing yet.
 
 ### Docs
 
+- README rewritten as a landing page; the Windows and configuration
+  material moved to docs/WINDOWS.md and docs/CONFIG.md, the make targets to
+  docs/BUILDING.md.
 - README GIFs re-shot on ysuite-liquid, with placeholder network and device
   names.
 - README, docs/INSTALL.md, docs/ARCHITECTURE.md, docs/EXTENDING.md and
