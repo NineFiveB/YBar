@@ -64,10 +64,12 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
   `slider.interactive=off` makes a slider a read-only fill meter (a press is an
   ordinary click; sets still apply)
 - **Graph styles** — `graph.style=line|bars`: a sparkline, or a vertical
-  histogram with a y-axis strip. For bars, `graph.plot_width` (points; 0 = one
-  point per sample) stretches the `width` samples the graph holds evenly across
-  a wider plot, `graph.axis_max` (percent, ≥ 1; 100 is a level plot, 150
-  matches System Settings' 10-day energy chart) sets the top of the axis,
+  histogram with a y-axis strip. For either style, `graph.plot_width` (points;
+  0 = one point per sample) is the width of the plot box, and the `width`
+  samples the graph holds are spread evenly across it — a wider plot
+  stretches the line or the bars rather than adding samples. For bars,
+  `graph.axis_max` (percent, ≥ 1; 100 is a level plot, 150 matches System
+  Settings' 10-day energy chart) sets the top of the axis,
   `graph.tick=<index>|off` draws one under-mark beneath a bar (oldest first)
   and `graph.marks="1 0 1 …"` flags samples in the same order (padded with 0
   to the width; `off` clears) to reserve a below-axis band of charging stubs
