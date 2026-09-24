@@ -4,8 +4,9 @@
 
 | Version | Supported |
 |---|---|
-| latest tagged release (0.1.x) | ✅ |
-| `main` (`--HEAD` installs) | ✅ |
+| latest tagged macOS release (0.2.x) | ✅ |
+| latest tagged Windows release (`win-v*`, off the `windows` branch) | ✅ |
+| tip of `main` (`--HEAD` installs) or of `windows` | ✅ |
 | anything older | ❌ — upgrade first |
 
 ## Reporting a vulnerability
@@ -32,8 +33,12 @@ CoreWLAN's private `_isPersonalHotspot` flag through the public Objective-C
 runtime (`Sources/YBarKit/Providers/WifiScan.swift`). The interesting
 surfaces are:
 
-- **The IPC socket** (`/tmp/ybar_$USER.socket`): anything that lets a
-  *different* local user drive the daemon or execute code through it.
+- **The IPC socket** — `/tmp/ybar_$USER.socket` on macOS (`chmod 0600`), and
+  on Windows an AF_UNIX socket at `%LOCALAPPDATA%\ybar\ybar_%USERNAME%.sock`
+  (falling back to `%TEMP%`, then to `C:\Windows\Temp` when `%TEMP%` is
+  unset), restricted after bind by an explicit DACL to the current user's
+  SID: anything that lets a *different* local user drive the daemon or
+  execute code through it.
 - **Config-adjacent execution**: the daemon runs user-authored Lua and
   shell handlers by design — that is not a vulnerability. Escalation
   *beyond* what the config author wrote (e.g. injection through externally
@@ -44,7 +49,9 @@ surfaces are:
 - **The Homebrew formula / release pipeline** (`packaging/homebrew/ybar.rb`,
   pinned to the tag's own tarball by `.github/workflows/release.yml`):
   anything that could make `brew install ybar` deliver something other than
-  the tagged source.
+  the tagged source. On Windows, the same bar for `scripts/install.ps1`, the
+  Scoop and winget manifests under `packaging/`, or the Authenticode-signed
+  `win-v*` zip delivering something other than that tag's build.
 
 Out of scope: issues requiring the attacker to already control the user's
 config file or session (they can already run arbitrary code as that user),
