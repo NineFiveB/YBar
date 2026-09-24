@@ -349,6 +349,26 @@ public final class BarManager {
             // drawable at that one scale (a fresh panel's backingScaleFactor
             // reports the primary screen until it is ordered in).
             let scale = surface.scale
+            // The pointer is sampled in the popup's own window, not the
+            // bar's: the two panels have different origins, so bar pixels
+            // would light the sheen specular on the wrong row, or on none.
+            // A host with no panel yet reads as "missing" outright rather
+            // than through a panel made for the sample: a fresh BarPanel
+            // keeps a real 10 pt placeholder frame at the primary screen's
+            // origin until it is presented, and the move that follows
+            // presentation resamples anyway.
+            sceneBuilder.pointer = popupSurfaces[host.id].map {
+                Self.pointerPixels(in: $0.hostView, scale: scale)
+            } ?? Self.missingPointer
+            let scene = sceneBuilder.buildPopup(
+                host: host, members: members, scale: scale, atlas: atlas)
+            // An empty scene (every member drawing=off) leaves an existing
+            // panel to the teardown pass below, and a host without one is
+            // not given one: the NSPanel and its glass view would be
+            // allocated for nothing to show.
+            guard scene.sizePoints.width > 0, scene.sizePoints.height > 0 else { continue }
+            if scene.needsContinuousFrames { continuous = true }
+
             let popupSurface: PopupSurface
             if let existing = popupSurfaces[host.id] {
                 popupSurface = existing
@@ -362,19 +382,6 @@ public final class BarManager {
                 }
                 popupSurfaces[host.id] = popupSurface
             }
-            // The pointer is sampled in the popup's own window, not the
-            // bar's: the two panels have different origins, so bar pixels
-            // would light the sheen specular on the wrong row, or on none.
-            // A panel not yet presented cannot be under the cursor and reads
-            // as "missing"; the move that follows presentation resamples it.
-            sceneBuilder.pointer = Self.pointerPixels(in: popupSurface.hostView, scale: scale)
-            let scene = sceneBuilder.buildPopup(
-                host: host, members: members, scale: scale, atlas: atlas)
-            // An empty scene leaves the panel to the teardown pass below,
-            // which closes a never-presented one at once, without a fade.
-            guard scene.sizePoints.width > 0, scene.sizePoints.height > 0 else { continue }
-            if scene.needsContinuousFrames { continuous = true }
-
             popupSurface.itemFrames = scene.itemFrames
             popupSurface.lastSceneHadSheen = scene.list.hasSheen
             popupSurface.hidesInFullscreen = settings.fullscreenPolicy == .hide
@@ -698,15 +705,21 @@ public final class BarManager {
         return list.needsContinuousFrames
     }
 
+    /// The `pointerPixels` result for a cursor that is not over the surface:
+    /// far negative, the same value `DisplayList.pointer` starts out with.
+    static let missingPointer = SIMD2<Float>(repeating: -1e6)
+
     /// Cursor in a surface's Metal pixels (top-left, y-down). Far negative when
-    /// the pointer is outside that window. `screenPoint` is the live cursor
-    /// (AppKit global, y-up); the tests pass a point of their own.
+    /// the pointer is outside that window, or the window is not ordered in:
+    /// a panel that has never been presented still owns the placeholder
+    /// frame it was created with, a real rectangle at the primary screen's
+    /// origin that the cursor can sit inside. `screenPoint` is the live
+    /// cursor (AppKit global, y-up); the tests pass a point of their own.
     static func pointerPixels(
         in view: NSView, scale: CGFloat, screenPoint: CGPoint = NSEvent.mouseLocation
     ) -> SIMD2<Float> {
-        let missing = SIMD2<Float>(repeating: -1e6)
-        guard let window = view.window else { return missing }
-        guard window.frame.contains(screenPoint) else { return missing }
+        guard let window = view.window, window.isVisible else { return missingPointer }
+        guard window.frame.contains(screenPoint) else { return missingPointer }
         let inWindow = window.convertPoint(fromScreen: screenPoint)
         // MetalHostView is flipped, so the converted point is already
         // top-left y-down: the pixel space the shader reads the pointer in.
