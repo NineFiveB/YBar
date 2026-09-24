@@ -184,12 +184,26 @@ enum ThemeVerbs {
             return 0
         }
 
-        // No daemon: use the process-control start path. It locates an
-        // installed YBar.app even when this command came from a Homebrew
-        // symlink or a bare build product, and preserves the bundle's TCC
-        // identity while passing the selected entry as one argv element.
-        let started = LocalVerbs.run(
-            arguments: ["start", "-c", match.entry.path], instanceName: instanceName) ?? 1
+        // No daemon: hand it to `start`, which kickstarts a loaded login job
+        // rather than standing an unmanaged bar beside it, and otherwise
+        // launches YBar.app with the bundle's TCC identity. With no `-c` the
+        // daemon's own discovery picks the recorded name up — the same
+        // resolution the next login uses — so `-c` is kept only for what that
+        // discovery cannot reach: a renamed instance (it never reads
+        // current-theme) and a theme that is on the search path only through
+        // YBAR_THEME_ROOTS, which neither launchd nor LaunchServices passes on.
+        let discoverable = daemonWouldResolve(name, to: match.entry, instanceName: instanceName)
+        let arguments = startArguments(
+            entry: match.entry, instanceName: instanceName, discoverable: discoverable)
+        if instanceName == "ybar", !discoverable {
+            FileHandle.standardError.write(Data("""
+                note: \(name) is outside the daemon's theme search path, so it is passed \
+                with -c for this run only; a login job will not pick it up. Copy it under \
+                ~/.config/ybar/themes to make the selection stick.
+
+                """.utf8))
+        }
+        let started = LocalVerbs.run(arguments: arguments, instanceName: instanceName) ?? 1
         guard started == 0 else {
             FileHandle.standardError.write(
                 Data("note: theme \(name) was recorded but could not be started\n".utf8))
@@ -197,6 +211,24 @@ enum ThemeVerbs {
         }
         print("theme: \(name)")
         return started
+    }
+
+    /// Pure: the `start` invocation for a recorded theme. `-c` only when the
+    /// daemon's own discovery would not land on the same entry.
+    static func startArguments(entry: URL, instanceName: String, discoverable: Bool) -> [String] {
+        instanceName == "ybar" && discoverable ? ["start"] : ["start", "-c", entry.path]
+    }
+
+    /// Whether a daemon started without `-c` would resolve `name` to `entry`.
+    /// The daemon's roots are this binary's minus YBAR_THEME_ROOTS — the one
+    /// variable a source checkout's shim sets and a launched daemon lacks.
+    static func daemonWouldResolve(_ name: String, to entry: URL, instanceName: String) -> Bool {
+        var environment = ProcessInfo.processInfo.environment
+        environment["YBAR_THEME_ROOTS"] = nil
+        guard let resolution = ConfigLocator.resolve(
+            explicitPath: nil, instanceName: instanceName, environment: environment, home: home)
+        else { return false }
+        return resolution.theme == name && resolution.url.path == entry.path
     }
 
     static func install(_ gitURL: String) -> Int32 {
