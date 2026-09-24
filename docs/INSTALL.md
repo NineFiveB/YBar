@@ -130,10 +130,11 @@ script it spawns. Only the features you actually configure ask for anything:
   a generic connected state. The Wi-Fi popup's scan needs the same grant:
   until it lands CoreWLAN withholds every network name from the daemon
   (`ybar.wifi_scan` reports code 3 and the popup can only offer the opt-in
-  above), so a join picked from that list waits on it too. Joining a locked
-  network you have not saved (`ybar.wifi_prompt`) raises YBar's own password
-  panel — a key window of the daemon, not a system dialog, so no further
-  grant; the password goes to `networksetup` and nowhere else.
+  above), so nothing can be joined from the popup until the grant lands.
+  Joining a locked network you have not saved (`ybar.wifi_prompt`) raises
+  YBar's own password panel — a key window of the daemon, not a system
+  dialog, so no further grant; the password goes to `networksetup` and
+  nowhere else.
 - **Screen Recording** — needed by the `alias` component, which screenshots
   other apps' menu bar items via ScreenCaptureKit. macOS prompts on first
   capture; if you dismissed it, grant manually under Privacy & Security →
