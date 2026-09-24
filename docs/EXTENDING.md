@@ -30,6 +30,26 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
 - `background.shadow.blur` (points, animatable) softens a plate's shadow into a
   falloff; a light shadow colour at distance 0 with a blur is a glow (brackets
   and slider tracks included)
+- **Liquid Glass** — `--bar glass=on` puts the strip on a real
+  `NSGlassEffectView` backdrop on macOS 26+ (the blur fallback before it);
+  `glass_variant=clear|regular` picks the public `NSGlassEffectView.Style`
+  (`default`/`off` restore the built-in `clear`) and `glass_tint=<color>`
+  tints it, alpha as intensity. Per plate, `background.glass=on` gives a pill
+  or popup its own backdrop (an in-shader approximation on 14/15),
+  `background.glass_variant` overrides the bar-wide variant for that plate
+  and `background.glass_tint` its tint (`default`/`off` — or `0x00000000` for
+  the tint — drop the override so the plate inherits the bar's); the same
+  `glass`/`sheen`/`glass_tint` keys exist under `popup.background`. `--query`
+  reports all of them, `default` where a plate inherits
+- `background.sheen=on` (opt-in) is the painted glass highlight — lip, shade
+  and a specular that follows the pointer — for macOS 14/15, where the shader
+  is the material. It is damage-driven: one frame per pointer move over a
+  surface whose scene carries a sheen plate, no display link while the
+  pointer rests. On macOS 26 the native glass supplies the highlight and the
+  flag is ignored, so no fake shine is drawn over system glass
+- `x_offset` (item-level, animatable) slides an item horizontally without
+  changing the flow — the next item stays where layout put it, so a pill can
+  travel across its neighbors
 - Five-cursor item layout (`left right center q e`, notch-aware), fixed widths
   with align slack and clipping, `--default` prototypes
 - Per-setup notch handling: the `q`/`e` dead zone exists only on physically
@@ -43,6 +63,19 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
   interactive on the bar and inside popups (click + drag deliver `PERCENTAGE`);
   `slider.interactive=off` makes a slider a read-only fill meter (a press is an
   ordinary click; sets still apply)
+- **Graph styles** — `graph.style=line|bars`: a sparkline, or a vertical
+  histogram with a y-axis strip. For bars, `graph.plot_width` (points; 0 = one
+  point per sample) stretches the `width` samples the graph holds evenly across
+  a wider plot, `graph.axis_max` (percent, ≥ 1; 100 is a level plot, 150
+  matches System Settings' 10-day energy chart) sets the top of the axis,
+  `graph.tick=<index>|off` draws one under-mark beneath a bar (oldest first)
+  and `graph.marks="1 0 1 …"` flags samples in the same order (padded with 0
+  to the width; `off` clears) to reserve a below-axis band of charging stubs
+  in place of the tick; `--query` reports every one of them
+- Slider tracks take a ring: `slider.background.border_color` /
+  `border_width` (either turns the track's `drawing` on) and
+  `slider.background.drawing` to switch it explicitly — set-only, not in
+  `--query`'s `slider` block
 - **Alias items** — live ScreenCaptureKit captures of other apps' menu bar items
   (`--add alias "App[,Window]"`, Screen Recording); a click on an alias with no
   script or Lua handler is forwarded to the captured item (Accessibility —
@@ -87,6 +120,32 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
   string. A number is *always* absolute: `ybar.volume(current - 10)` saturates
   into 0-100 (so an undershoot mutes) and never becomes a step — only the
   string form `"-10"` steps
+- **Wi-Fi from Lua**: `ybar.wifi_scan(fn)`, `ybar.wifi_join(ssid, fn)`,
+  `ybar.wifi_prompt(ssid, fn)`, `ybar.wifi_disconnect(fn)` (the compat shim
+  exposes them as `sbar.wifi_*`), each calling back the way `ybar.exec` does:
+  `fn(output, code)`. The scan runs CoreWLAN in-process, off the main thread,
+  so the names are readable under YBar's own Location grant rather than a
+  child's, and returns TSV, one network per line — `current \t name \t rssi
+  \t known \t hotspot \t secure` (1/0 flags; `rssi=-999` is a saved personal
+  hotspot that is not broadcasting) — the joined network first, then by
+  signal. Code 3 means macOS withheld every SSID until YBar holds the Location
+  grant ([INSTALL.md](INSTALL.md#permissions)); only the joined network is
+  listed then, as `<redacted>`. `wifi_join` goes through `networksetup` with
+  the keychain password (which is what wakes a saved iPhone hotspot) and
+  returns its exit status, a refusal it merely prints reported as 1;
+  `wifi_prompt` raises YBar's own key panel for a locked network's password —
+  the panel keeps the password, pipes it to `networksetup`'s stdin, owns the
+  retries (a wrong password keeps it open; its join runs under a 30 s
+  watchdog whose kill is exit 124, shown as a timeout rather than blamed on
+  the password) and calls back once when it closes, with `""` and 0 (joined)
+  or 2 (cancelled) — the password never reaches Lua or a log.
+  `wifi_disconnect` drops the association and leaves Wi-Fi on. The reference
+  consumer is
+  [`examples/ysuite-liquid/items/widgets/wifi.lua`](../examples/ysuite-liquid/items/widgets/wifi.lua).
+  Saved-hotspot rows come from a read of CoreWLAN's private
+  `_isPersonalHotspot` flag through the public Objective-C runtime — the
+  engine's one undocumented-ABI read, presence- and type-checked; when either
+  check fails the list simply has no hotspot rows
 - Running apps, permission-free: `ybar --query apps` → `[{name, bundle_id, pid,
   active, hidden}]` (also `ybar.query_table("apps")` as a Lua table; `apps` is a
   reserved query target like `bar`/`displays`, so it shadows an item of that
