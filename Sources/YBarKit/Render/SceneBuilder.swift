@@ -1060,9 +1060,21 @@ public final class SceneBuilder {
                     // measurement's rounding slack split evenly — otherwise up
                     // to 1.5pt of slack pools on the right and single glyphs
                     // (the apple symbol) sit visibly left of center.
-                    let glyphPenX = ((penX + passOffset + positions[index].x
-                                      - shaped.inkMinX + roundingSlack)
-                                     * scale).rounded()
+                    let penDevice = (penX + passOffset + positions[index].x
+                                     - shaped.inkMinX + roundingSlack) * scale
+                    // Static text snaps to whole device pixels: stem widths
+                    // stay even and the glyph is as crisp as the rasterizer
+                    // made it. Marquee text is moving every frame, and there
+                    // snapping is what the eye reads as judder — at a default
+                    // scroll_duration the advance is ~2.2 device px per frame
+                    // on a 120 Hz panel, so rounding alternates 2,2,3 and the
+                    // text visibly changes speed twice a cycle. Placing the
+                    // moving copy at its true sub-pixel pen costs nothing: the
+                    // glyph's atlas cell is padded (`GlyphAtlas.padding`), so
+                    // linear sampling at a fractional origin stays inside its
+                    // own transparent border, and the crispness that is lost
+                    // is only lost while the text is in motion.
+                    let glyphPenX = marqueeCycle > 0 ? penDevice : penDevice.rounded()
                     placements.append((entry, SIMD2(Float(glyphPenX) + entry.bearingPx.x,
                                                     Float(baselinePx) + entry.bearingPx.y)))
                 }
