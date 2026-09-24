@@ -1,106 +1,30 @@
 # YBar
 
-[![CI](https://github.com/NineFiveB/YBar/actions/workflows/ci.yml/badge.svg)](https://github.com/NineFiveB/YBar/actions/workflows/ci.yml)
+A GPU-rendered, scriptable status bar for macOS. This is the macOS development branch; the full README is on main.
 
-**[Install](docs/INSTALL.md)** · **[Configure](docs/CONFIG.md)** · **[Themes](docs/THEMES.md)** · **[Extend](docs/EXTENDING.md)** · **[Build](docs/BUILDING.md)** · **[Architecture](docs/ARCHITECTURE.md)** · **[Windows](docs/WINDOWS.md)** · **[Changelog](CHANGELOG.md)** · **[Security](SECURITY.md)** · **[Contributing](CONTRIBUTING.md)**
+## Build (macOS)
 
-**A status bar your GPU draws.** Script it from the shell or from Lua. Runs on macOS and Windows 11.
-
-It does nothing at rest. Your config is Lua running inside it. A sketchybar config ports over with the same commands.
-
-![YBar in use: AeroSpace workspace pills, then the app menus opening in the bar](docs/media/ybar-demo.gif?v=20260922)
-
-*The `ysuite-liquid` theme on macOS: AeroSpace workspace pills, then the app menus opening in the bar and folding back. The stock menu bar is hidden underneath. (The menu swap is an opt-in helper built from a source checkout with `make helpers`; Homebrew does not ship it.)*
-
-![Calendar, system monitor, battery, Wi-Fi and Bluetooth popups on Liquid Glass](docs/media/ybar-popups.gif?v=20260922)
-
-*Five popups, all real glass: calendar, system monitor, battery, Wi-Fi and Bluetooth. Network and device names in this recording are placeholders.*
-
-## Twenty seconds to a live bar
+Runs on macOS 14+. Building needs a Swift 6 toolchain; the Liquid Glass
+backdrops additionally need the macOS 26 SDK (Xcode 26 / CLT 26) — on older
+toolchains they compile out and the blur fallback carries the look. Shaders
+compile at runtime, so Command Line Tools are enough — full Xcode is not
+required.
 
 ```sh
-ybar start
-ybar --bar height=32 color=0xdd1e1e2e topmost=on            # covers the stock menu bar; omit to keep it
-ybar --add item hello left --set hello icon=sf:sparkles label="YBar is alive"
-ybar --animate tanh 45 --set hello label.color=0xfff38ba8   # every change after --animate glides
-ybar --query hello                                          # live state as JSON
+make build       # swift build (scratch path outside iCloud-synced dirs)
+make test
+make app         # ~/Applications/YBar.app — the recommended way to run the daemon
+open -g ~/Applications/YBar.app --args -c <your ybarrc.lua>
 ```
 
-The bar is a set of live objects. Add one, set a property, and it redraws. One binary does both jobs. Run `ybar` and it is the bar. Run it with `--` commands and it is the remote control: a local socket, driven from any shell, script or REPL. Write the whole bar as Lua, as a shell script, or as JSON with comments; it is the same engine underneath ([docs/CONFIG.md](docs/CONFIG.md)). Turn on `--hotload on` and the bar reloads in place when you save your config.
+## Config
 
-## Why YBar
+Three surfaces, mixable at will:
 
-- **Nothing changes, nothing draws.** There is no draw loop. A frame is drawn only when something changed, so at rest the GPU does no work. When something does move, it moves at your display's refresh rate, up to 120 Hz, and stops the moment it is done. Pills, gradients, shadows and glows are math in a shader, not bitmaps, so they stay sharp at any size on any display.
-- **Real Liquid Glass.** On macOS 26 the pills and popups sit on the system's own glass backdrops. macOS 14 and 15 get a blur that looks the part.
-- **Hide the stock menu bar and put yours in its place.** `topmost=on` puts the bar above the native one. No SIP changes. Public APIs only, so an OS update should not take it down. The one exception: the Wi-Fi popup reads a single private flag to list saved hotspots; if Apple moves it, that list is empty and nothing else changes ([SECURITY.md](SECURITY.md)).
-- **Your sketchybar config ports mechanically.** Same commands, same property names, same JSON from `--query`. `sbar = require("sketchybar")` and most SbarLua configs run nearly unchanged.
-- **Your config is Lua and it runs inside the bar.** A click calls your function directly. No socket, no shell, no fork.
-- **Popups are just items.** A calendar grid or a Wi-Fi list is more items, drawn by the same engine. Graphs, sliders, arc gauges, app icons, marquees and tooltips are built in.
-- **Batteries included.** Battery, volume, Wi-Fi, now-playing, CPU and memory come from the engine itself. Volume, Wi-Fi, now-playing and the stats sampler wake up the first time a widget asks for them; battery is always on and costs nothing. Nothing shells out every second.
+- **Lua**: point the daemon at a `ybarrc.lua`; it runs inside the daemon with an `ybar.*` API (items as live objects, closures as event handlers, `animate`/`exec`/`delay`), plus a sketchybar-compatibility shim exposing the `sbar` API for existing SbarLua configs.
+- **CLI**: any shell script or REPL can drive the same live-object model over the socket at runtime — the bar is not a parsed file.
+- **JSONC**: point `-c` at a `.jsonc` file for a declarative bar — comments and trailing commas allowed, translated through the same command layer ([example](examples/jsonc-demo/ybar.jsonc)).
 
-## Install
+The example config's workspace pills speak both **AeroSpace** and **yabai** (native macOS Spaces) and pick the one actually running — the two can coexist installed side by side; see [examples/yabai-skhd](examples/yabai-skhd) for the yabai/skhd setup, including what needs yabai's scripting addition and what works without it.
 
-Requirements: macOS 14 or later (Liquid Glass on macOS 26); Windows 11.
-
-### macOS
-
-```sh
-brew tap NineFiveB/ybar
-brew install ybar           # tagged release; --HEAD builds current main
-ybar start
-ybar theme use darxk        # any name from `ybar theme list`
-```
-
-First install from a third-party tap asks for confirmation; `brew trust NineFiveB/ybar` pre-approves it. `ybar autostart enable` brings the bar back at every login. Privacy prompts say "YBar", not "Terminal", and only the widgets you turn on ask for anything. The full walkthrough is in [docs/INSTALL.md](docs/INSTALL.md).
-
-### Windows 11
-
-One line in PowerShell, no admin rights:
-
-```powershell
-irm https://raw.githubusercontent.com/NineFiveB/YBar/windows/scripts/install.ps1 | iex
-```
-
-Or with Scoop:
-
-```powershell
-scoop install https://raw.githubusercontent.com/NineFiveB/YBar/windows/packaging/scoop/ybar-win.json
-```
-
-Then `ybar start`. The release zip and autostart are in [docs/WINDOWS.md](docs/WINDOWS.md).
-
-## Eleven themes, one command
-
-`ybar theme use darxk` switches a running bar in place, no restart; with no bar running it starts one.
-
-- `sketchybar-glass`: the flagship. A near-black Liquid Glass bar with glass pills and popups and the full widget suite.
-- `ysuite`: the maintainer's daily driver. The same glass suite, full width, covering the native menu bar edge to edge.
-- `ysuite-liquid`: a clear full-bleed strip with glass capsule pills. The theme in the GIFs above.
-- `darxk`: a replication of 00Darxk's Waybar setup. The smallest complete Lua theme and the place to start your own.
-- `sketchybar-port`: the full sketchybar setup port in its original styling. The tree the flagships layer on.
-- `jsonc-demo`: a clock and a battery in JSON with comments. No Lua.
-- `nord`: a flat opaque Nord strip. Frost icons, aurora battery colors, thin separators.
-- `gruvbox`: retro powerline. Gruvbox segments joined by arrow glyphs.
-- `tokyonight`: a floating rounded island in Tokyo Night blues and purples.
-- `dracula`: colorful blocks. Every module gets its own bright background.
-- `rose-pine`: whisper-minimal. Workspace dots, lowercase text, no backgrounds.
-
-Modules probe for optional tools such as AeroSpace or Homebrew and hide themselves when one is missing, so one config works across machines. Gallery, verbs and how to publish your own: [docs/THEMES.md](docs/THEMES.md).
-
-## The same bar on Windows 11
-
-YBar has a native Windows 11 port on the [`windows` branch](../../tree/windows): a C++ engine on Direct3D 11. It speaks the same commands, the same socket protocol and the same Lua API. Themes, configs and scripts move over with only the OS-specific bits changed: shell commands, glyph fonts, the window manager adapter. Workspace pills follow komorebi or YTile. Pills sit on Mica. Battery, volume, Wi-Fi, media and the tray come from Windows' own APIs under the same event names as the Mac.
-
-![The Windows bar: workspace pills tracking komorebi or YTile, CPU and battery fill meters, the tray widget](docs/media/ybar-win-bar.gif)
-
-*The `sketchybar-glass` theme on Windows 11, restyled to Fluent: workspace pills, CPU and battery pills as fill meters, and the tray widget. Flat pills, recorded before Mica landed.*
-
-Install channels, materials, depth effects and the build: [docs/WINDOWS.md](docs/WINDOWS.md).
-
-## Acknowledgments
-
-YBar stands on [sketchybar](https://github.com/FelixKratz/SketchyBar) by [Felix Kratz](https://github.com/FelixKratz). The daemon and CLI architecture, the command grammar and the script contract all come from there, and YBar stays compatible with them, [SbarLua](https://github.com/FelixKratz/SbarLua) included. [Waybar](https://github.com/Alexays/Waybar) shaped the feature set: tooltips, the idle inhibitor and the sense that a bar should come with batteries included.
-
-## License
-
-[GPL-3.0](LICENSE). Copyright (C) 2026 YSuite. Vendored third-party code is credited in [THIRD_PARTY.md](THIRD_PARTY.md).
+**Themes**: ship-selectable presets — `ybar theme list|current|use <name>|reset|install <git-url>` (`use` re-points a running bar in place through `--reload <path>`, and config discovery honours the choice on every later start; `scripts/ybar-theme` remains as a shim for a source checkout). See [docs/THEMES.md](docs/THEMES.md) for the gallery (Liquid Glass flagship, the darxk Waybar replication, and more) and how to publish your own. [examples/yabai-skhd](examples/yabai-skhd) has the yabai signal recipes (instant window-level updates; the CLI folds `$YABAI_*` signal vars into `--trigger` env) and an skhd setup driving the bar's hotkey-mode indicator pill.
