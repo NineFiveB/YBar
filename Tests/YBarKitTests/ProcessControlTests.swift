@@ -249,6 +249,87 @@ private func makeTemporaryDirectory() throws -> URL {
         #expect(LaunchAgent.read(at: url)?["Label"] as? String == "com.ybar.YBar")
         #expect(LaunchAgent.read(at: root.appendingPathComponent("absent.plist")) == nil)
     }
+
+    /// Written as XML and read back through `LaunchAgent.read`, the way a
+    /// hand-rolled ~/Library/LaunchAgents plist reaches the verbs.
+    private func keepAlive(_ xml: String?) throws -> LaunchAgent.KeepAlivePolicy {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("com.ybar.YBar.plist")
+        let keepAlive = xml.map { "<key>KeepAlive</key>\n\($0)" } ?? ""
+        try """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+            <plist version="1.0">
+            <dict>
+                <key>Label</key>
+                <string>com.ybar.YBar</string>
+                <key>ProgramArguments</key>
+                <array><string>/Applications/YBar.app/Contents/MacOS/ybar</string></array>
+                <key>RunAtLoad</key>
+                <true/>
+                \(keepAlive)
+            </dict>
+            </plist>
+            """.write(to: url, atomically: true, encoding: .utf8)
+        let plist = try #require(LaunchAgent.read(at: url))
+        return LaunchAgent.keepAlivePolicy(in: plist)
+    }
+
+    /// A hand-rolled agent usually says `<true/>`, which has launchd relaunch
+    /// after ANY exit — a `stop` that only sent `--exit` reported success
+    /// over a bar that was back within seconds.
+    @Test func keepAliveShapesAreToldApart() throws {
+        #expect(try keepAlive("<true/>") == .always)
+        #expect(try keepAlive("<false/>") == .never)
+        #expect(try keepAlive(nil) == .never)
+        // What `enable` writes, and the other condition a clean exit fails.
+        #expect(try keepAlive("<dict><key>SuccessfulExit</key><false/></dict>") == .onFailure)
+        #expect(try keepAlive("<dict><key>Crashed</key><true/></dict>") == .onFailure)
+        #expect(try keepAlive(
+            "<dict><key>SuccessfulExit</key><false/><key>Crashed</key><true/></dict>") == .onFailure)
+        // Conditions a clean exit satisfies; launchd ORs them, so one is enough.
+        #expect(try keepAlive("<dict><key>SuccessfulExit</key><true/></dict>") == .always)
+        #expect(try keepAlive("<dict><key>Crashed</key><false/></dict>") == .always)
+        #expect(try keepAlive("""
+            <dict><key>SuccessfulExit</key><false/>
+            <key>PathState</key><dict><key>/tmp/flag</key><true/></dict></dict>
+            """) == .always)
+        #expect(try keepAlive("<dict/>") == .always)
+        // Not a shape launchd documents; read on the safe side.
+        #expect(try keepAlive("<string>yes</string>") == .always)
+    }
+
+    @Test func theEnabledPlistIsTheOneThatRespectsAStop() throws {
+        let plist = LaunchAgent.plist(
+            label: "com.ybar.YBar", programArguments: ["/bin/true"], standardErrorPath: "/dev/null")
+        #expect(LaunchAgent.keepAlivePolicy(in: plist) == .onFailure)
+        // Through the serializer too: Bools that come back as numbers are the
+        // classic plist trap.
+        let decoded = try #require(PropertyListSerialization.propertyList(
+            from: try LaunchAgent.xmlData(plist), options: [], format: nil) as? [String: Any])
+        #expect(LaunchAgent.keepAlivePolicy(in: decoded) == .onFailure)
+    }
+
+    /// The kickstart branches point at, and roll, the log the job actually
+    /// writes — which a hand-written plist can put anywhere.
+    @Test func theJobsLogIsReadFromItsPlist() throws {
+        #expect(LaunchAgent.standardErrorPath(in: ["StandardErrorPath": "/Users/me/Library/Logs/bar.log"])
+            == "/Users/me/Library/Logs/bar.log")
+        #expect(LaunchAgent.standardErrorPath(in: ["StandardErrorPath": ""]) == nil)
+        #expect(LaunchAgent.standardErrorPath(in: ["Label": "com.ybar.YBar"]) == nil)
+
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fallback = root.appendingPathComponent("ybar.log")
+        let plistURL = root.appendingPathComponent("com.ybar.YBar.plist")
+        #expect(LocalVerbs.jobLogURL(plistURL: plistURL, fallback: fallback).path == fallback.path)
+        let custom = root.appendingPathComponent("elsewhere/bar.log")
+        try LaunchAgent.xmlData(LaunchAgent.plist(
+            label: "com.ybar.YBar", programArguments: ["/bin/true"],
+            standardErrorPath: custom.path)).write(to: plistURL)
+        #expect(LocalVerbs.jobLogURL(plistURL: plistURL, fallback: fallback).path == custom.path)
+    }
 }
 
 // MARK: - Verb arguments
@@ -367,6 +448,93 @@ private func makeTemporaryDirectory() throws -> URL {
         #expect(Launchctl.bootoutSucceeded(113))
         #expect(!Launchctl.bootoutSucceeded(5))
         #expect(!Launchctl.bootoutSucceeded(112))
+    }
+
+    /// Captured from `launchctl print gui/<uid>/<label>`: the pid sits on a
+    /// line of its own, `pid-local endpoints = {` opens a block further down,
+    /// and the nested blocks carry a `state` of their own.
+    static let runningJob = """
+        gui/501/com.ybar.YBar = {
+        \tactive count = 7
+        \tpath = /Users/me/Library/LaunchAgents/com.ybar.YBar.plist
+        \ttype = LaunchAgent
+        \tstate = running
+        \tbundle id = com.ybar.YBar
+
+        \tprogram = /Users/me/Applications/YBar.app/Contents/MacOS/ybar
+        \targuments = {
+        \t\t/Users/me/Applications/YBar.app/Contents/MacOS/ybar
+        \t}
+
+        \tdomain = gui/501 [100015]
+        \tminimum runtime = 1
+        \texit timeout = 5
+        \truns = 1
+        \tpid = 1299
+        \timmediate reason = non-ipc demand
+        \tlast exit code = (never exited)
+
+        \tpid-local endpoints = {
+        \t\t"com.apple.tsm.portname" = {
+        \t\t\tstate = active
+        \t\t\tactive count = 1
+        \t\t}
+        \t}
+        \tjob state = running
+        }
+        """
+
+    static let downJob = """
+        gui/501/com.ybar.YBar = {
+        \tactive count = 0
+        \tpath = /Users/me/Library/LaunchAgents/com.ybar.YBar.plist
+        \ttype = LaunchAgent
+        \tstate = not running
+
+        \tprogram = /Users/me/Applications/YBar.app/Contents/MacOS/ybar
+        \truns = 3
+        \tlast exit code = 0
+        }
+        """
+
+    static let missingJob = """
+        Bad request.
+        Could not find service "com.ybar.YBar" in domain for user gui: 501
+        """
+
+    /// The exit code cannot tell a loaded job that is down from one whose
+    /// process is alive and silent; the pid line can.
+    @Test func pidIsReadFromPrintOutput() {
+        #expect(Launchctl.pid(inPrintOutput: Self.runningJob) == 1299)
+        #expect(Launchctl.pid(inPrintOutput: Self.downJob) == nil)
+        #expect(Launchctl.pid(inPrintOutput: Self.missingJob) == nil)
+        #expect(Launchctl.pid(inPrintOutput: "") == nil)
+        // A line that only starts like the pid line, and pids launchd never prints.
+        #expect(Launchctl.pid(inPrintOutput: "\tpid = \n\tpid-local endpoints = {\n") == nil)
+        #expect(Launchctl.pid(inPrintOutput: "\tpid = 0\n") == nil)
+        #expect(Launchctl.pid(inPrintOutput: "\tpid = 12a\n") == nil)
+    }
+
+    /// The shape `enable` writes says nothing extra; the two that change what
+    /// `stop` and a crash do are named.
+    @Test func autostartSummaryNamesAKeepAliveThatUndoesAStop() {
+        let label = "com.ybar.YBar"
+        #expect(LocalVerbs.autostartSummary(label: label, hasPlist: true, state: .loaded,
+                                            policy: .onFailure)
+            == "enabled (job \(label) loaded)")
+        #expect(LocalVerbs.autostartSummary(label: label, hasPlist: true, state: .loaded,
+                                            policy: .always)
+            == "enabled (job \(label) loaded, KeepAlive: always)")
+        #expect(LocalVerbs.autostartSummary(label: label, hasPlist: true, state: .notLoaded,
+                                            policy: .always)
+            .hasSuffix("KeepAlive: always)"))
+        #expect(LocalVerbs.autostartSummary(label: label, hasPlist: true, state: .loaded,
+                                            policy: .never)
+            .contains("KeepAlive: off"))
+        // Nothing to add about a job whose plist is gone.
+        #expect(LocalVerbs.autostartSummary(label: label, hasPlist: false, state: .loaded,
+                                            policy: .always)
+            == "disabled (job \(label) is still loaded until you log out)")
     }
 
     @Test func autostartSummaryCoversEveryCombination() {

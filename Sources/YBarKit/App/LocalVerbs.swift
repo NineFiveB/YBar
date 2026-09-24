@@ -450,6 +450,50 @@ public enum LaunchAgent {
         else { return nil }
         return program[flag + 1]
     }
+
+    /// Where the job's stderr goes, when the plist says. A hand-written agent
+    /// can name any path, and a verb that points at "the log" has to mean
+    /// that one, not the one `enable` would have chosen.
+    public static func standardErrorPath(in plist: [String: Any]) -> String? {
+        guard let path = plist["StandardErrorPath"] as? String, !path.isEmpty else { return nil }
+        return path
+    }
+
+    /// What a plist's `KeepAlive` does after the daemon exits 0 — the exit
+    /// `--exit` produces, and the one `stop` relies on to stick.
+    public enum KeepAlivePolicy: Equatable {
+        /// Absent or `false`: launchd never respawns it.
+        case never
+        /// `SuccessfulExit = false` (what `enable` writes) or `Crashed = true`:
+        /// back after a crash, left alone after a clean exit.
+        case onFailure
+        /// `true`, or any condition a clean exit satisfies: back after ANY
+        /// exit, so only booting the job out keeps it down.
+        case always
+    }
+
+    /// launchd ORs the keys of a KeepAlive dictionary, so a clean exit sticks
+    /// only when every condition listed is one a clean exit fails:
+    /// `SuccessfulExit = false` and `Crashed = true`. Everything else — `true`
+    /// (the shape a hand-rolled plist usually has), `SuccessfulExit = true`,
+    /// `Crashed = false`, a `PathState`/`NetworkState`/`OtherJob*` condition,
+    /// an empty dictionary — reads as "comes back", the safe way to be wrong.
+    public static func keepAlivePolicy(in plist: [String: Any]) -> KeepAlivePolicy {
+        guard let keepAlive = plist["KeepAlive"] else { return .never }
+        switch keepAlive {
+        case let flag as Bool:
+            return flag ? .always : .never
+        case let conditions as [String: Any]:
+            guard !conditions.isEmpty else { return .always }
+            let staysDown = conditions.allSatisfy { key, value in
+                (key == "SuccessfulExit" && value as? Bool == false)
+                    || (key == "Crashed" && value as? Bool == true)
+            }
+            return staysDown ? .onFailure : .always
+        default:
+            return .always
+        }
+    }
 }
 
 // MARK: - Subprocesses
@@ -514,11 +558,46 @@ enum Launchctl {
         Spawn.run("/bin/launchctl", arguments)
     }
 
+    /// What `launchctl print` said about a label, and the process it named.
+    struct Job: Equatable {
+        let state: JobState
+        /// The process launchd is supervising right now. nil for a loaded job
+        /// that is down, and for anything that is not loaded — which is why
+        /// "loaded" alone never means "running".
+        let pid: pid_t?
+    }
+
     /// launchctl exits with the errno-style number itself and prints its
-    /// diagnostic to stderr; `print`'s own output is not officially structured,
-    /// so only the code is read.
+    /// diagnostic to stderr. `print`'s own output is not officially
+    /// structured; the exit code decides the state, and the one line read
+    /// from the text is the pid, because the code cannot tell a loaded job
+    /// that is down from one whose process is alive and wedged.
+    static func inspect(_ label: String) -> Job {
+        let printed = run(["print", target(label)])
+        let state = classify(printStatus: printed.status)
+        return Job(state: state, pid: state == .loaded ? pid(inPrintOutput: printed.output) : nil)
+    }
+
     static func state(of label: String) -> JobState {
-        classify(printStatus: run(["print", target(label)]).status)
+        inspect(label).state
+    }
+
+    /// A loaded job prints `pid = N` while its process is alive and no such
+    /// line while it is down. Anchored to a whole trimmed line, so `pid-local
+    /// endpoints = {` and the nested blocks cannot match, and a parse miss
+    /// only costs the -k that would have replaced a wedged process.
+    static func pid(inPrintOutput output: String) -> pid_t? {
+        let prefix = "pid = "
+        for line in output.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix(prefix) else { continue }
+            let digits = trimmed.dropFirst(prefix.count)
+            guard digits.allSatisfy({ $0.isASCII && $0.isNumber }),
+                  let pid = pid_t(String(digits)), pid > 0
+            else { continue }
+            return pid
+        }
+        return nil
     }
 
     static func classify(printStatus: Int32) -> JobState {
@@ -771,6 +850,7 @@ public enum LocalVerbs {
         let socketPath = WireFormat.socketPath(instanceName: instanceName)
         let label = LaunchAgent.label(instanceName: instanceName)
         let logURL = LaunchAgent.logURL(instanceName: instanceName, home: home)
+        let plistURL = LaunchAgent.plistURL(instanceName: instanceName, home: home)
 
         if SocketClient.isListening(socketPath: socketPath) {
             // Saying "already running" and dropping the config would be the same
@@ -784,35 +864,91 @@ public enum LocalVerbs {
             return 0
         }
 
-        // Before either route, and only while the bar is confirmed down so no
-        // process holds the file: the launchd job's log is the one that actually
-        // grows, and rotating it only on the unmanaged path would leave it
-        // rolled exactly once, on the day autostart was enabled.
-        try? FileManager.default.createDirectory(
-            at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        rotateLog(at: logURL)
-
         // When launchd owns this bar, start it through launchd. Otherwise a
         // `stop` followed by a `start` leaves an unmanaged orphan running
         // alongside a loaded-but-down login job.
-        if preferLaunchd, configOverride == nil, Launchctl.state(of: label) == .loaded {
-            let kick = Launchctl.run(["kickstart", Launchctl.target(label)])
-            switch kick.status {
-            case 0:
-                guard waitForDaemon(socketPath: socketPath, timeout: launchdReadyTimeout,
-                                    noticeAfter: readyTimeout,
-                                    waitingNotice: launchdWaitingNotice) else {
-                    return fail("the login job started but the bar did not answer within "
-                        + "\(Int(launchdReadyTimeout)) s — see \(logURL.path)")
+        let job = preferLaunchd
+            ? Launchctl.inspect(label)
+            : Launchctl.Job(state: .notLoaded, pid: nil)
+        if let pid = job.pid, configOverride != nil {
+            // The probe above said nothing answers, and launchd says the
+            // job's process is alive: `open` would put a second bar beside
+            // it. A kickstart cannot carry -c, so this is restart's job.
+            return fail("\(instanceName) is running (pid \(pid)) under the login job \(label) "
+                + "but not answering — `\(instanceName) restart` replaces it")
+        }
+        if preferLaunchd, configOverride == nil {
+            // The log the job writes, which a hand-written plist can put
+            // anywhere; the messages and the roll below have to mean that one.
+            let jobLog = jobLogURL(plistURL: plistURL, fallback: logURL)
+            switch job.state {
+            case .loaded:
+                let kick: Spawn.Result
+                if let pid = job.pid {
+                    // Alive under launchd and not answering — the probe above
+                    // ruled out a healthy bar. A plain kickstart on a running
+                    // service is a no-op that exits 0; only -k swaps the
+                    // process out. SIGKILL, so no teardown: acceptable for a
+                    // bar that never bound its socket.
+                    note("\(instanceName) is running (pid \(pid)) but not answering — replacing it")
+                    kick = Launchctl.run(["kickstart", "-k", Launchctl.target(label)])
+                } else {
+                    // Down, so nothing holds the file: the moment to roll it.
+                    rotateLog(at: jobLog)
+                    kick = Launchctl.run(["kickstart", Launchctl.target(label)])
                 }
-                print("\(instanceName) started (launchd job \(label))")
+                switch kick.status {
+                case 0:
+                    if let failure = awaitKickstartedJob(
+                        label: label, socketPath: socketPath, forced: job.pid != nil, log: jobLog) {
+                        return fail(failure)
+                    }
+                    print("\(instanceName) started (launchd job \(label))")
+                    return 0
+                case 3, 113:
+                    break  // the job went away between the probe and the kickstart
+                default:
+                    return fail("launchctl kickstart failed (\(kick.status)): \(kick.output)")
+                }
+
+            case .notLoaded where FileManager.default.fileExists(atPath: plistURL.path):
+                // A plist with no job behind it: `stop` booted it out because
+                // its KeepAlive would have put the bar straight back, or
+                // someone ran bootout by hand. Loading it again is what "start
+                // brings it back" means; an unmanaged bar beside a plist that
+                // the next login loads would be a second bar then. A
+                // persistent disable override (Login Items, off) is the one
+                // case that must stay unmanaged: the user turned the job off.
+                if Launchctl.isDisabled(label: label) {
+                    note("the login job \(label) is switched off in launchd (Login Items) — "
+                        + "starting \(instanceName) unmanaged")
+                    break
+                }
+                rotateLog(at: jobLog)
+                let bootstrap = Launchctl.run(["bootstrap", Launchctl.domain, plistURL.path])
+                guard Launchctl.bootstrapSucceeded(bootstrap.status) else {
+                    note("the login job could not be loaded (launchctl bootstrap "
+                        + "\(bootstrap.status): \(bootstrap.output)) — starting \(instanceName) "
+                        + "unmanaged; `\(instanceName) autostart enable` rewrites the job")
+                    break
+                }
+                if let failure = awaitKickstartedJob(
+                    label: label, socketPath: socketPath, forced: false, log: jobLog) {
+                    return fail(failure)
+                }
+                print("\(instanceName) started (launchd job \(label), loaded from \(plistURL.path))")
                 return 0
-            case 3, 113:
-                break  // the job went away between the probe and the kickstart
+
             default:
-                return fail("launchctl kickstart failed (\(kick.status)): \(kick.output)")
+                break
             }
         }
+
+        // Only while the bar is confirmed down so no process holds the file,
+        // and only on this route: the job's own log was rolled above.
+        try? FileManager.default.createDirectory(
+            at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        rotateLog(at: logURL)
 
         // Only the `open` route below is instance-blind: LaunchServices execs the
         // bundle's CFBundleExecutable, so a renamed bar would come up as `ybar`
@@ -870,26 +1006,71 @@ public enum LocalVerbs {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let socketPath = WireFormat.socketPath(instanceName: instanceName)
         let label = LaunchAgent.label(instanceName: instanceName)
-        let state = Launchctl.state(of: label)
+        let job = Launchctl.inspect(label)
+        let plistURL = LaunchAgent.plistURL(instanceName: instanceName, home: home)
         // A job whose plist is gone stays registered until logout but does NOT
         // come back at the next login. Promising otherwise would point the user
         // at a verb they have already run.
-        let hasPlist = FileManager.default.fileExists(
-            atPath: LaunchAgent.plistURL(instanceName: instanceName, home: home).path)
+        let hasPlist = FileManager.default.fileExists(atPath: plistURL.path)
+        // What the loaded job does after a clean exit is in its plist, not in
+        // launchctl's exit code. `enable` writes KeepAlive.SuccessfulExit=false,
+        // which lets `--exit` stick; a hand-rolled `<key>KeepAlive</key><true/>`
+        // has launchd put the bar straight back, and the only stop that holds
+        // against it is booting the job out. An unreadable plist is read the
+        // same way: the wrong guess there costs one bootout, the other a bar
+        // that "stopped" and is back within seconds.
+        let policy = LaunchAgent.read(at: plistURL).map(LaunchAgent.keepAlivePolicy(in:))
+        let respawns = job.state == .loaded && hasPlist && policy != .onFailure && policy != .never
+
+        /// The line after "stopped": what the next login does.
+        func nextLogin() {
+            if hasPlist {
+                print("autostart is enabled — it will start again at your next login "
+                    + "(`\(instanceName) autostart disable` to turn that off)")
+            } else if job.state == .loaded {
+                print("the login job \(label) is still loaded, but its plist is gone — "
+                    + "it will not come back at your next login")
+            }
+        }
+
+        /// launchd's own stop for a job it supervises: SIGTERM, then SIGKILL
+        /// after the job's exit timeout, and no respawn because the job is
+        /// gone from the domain. The plist stays, so `start` or the next login
+        /// loads it again — said in full, because "stopped" alone would be
+        /// read as "and it stays stopped".
+        func bootout(reason: String) -> Int32 {
+            let result = Launchctl.run(["bootout", Launchctl.target(label)])
+            guard Launchctl.bootoutSucceeded(result.status) else {
+                return fail("launchctl bootout failed (\(result.status)): \(result.output)")
+            }
+            let gone = job.pid.map(waitForProcessGone(pid:)) ?? true
+            guard gone, waitForDaemonGone(socketPath: socketPath) else {
+                return fail("\(instanceName) did not exit within \(Int(stopTimeout)) s of "
+                    + "`launchctl bootout \(Launchctl.target(label))`")
+            }
+            print("\(instanceName) stopped — the login job \(label) was booted out \(reason)")
+            if hasPlist {
+                print("its plist stays in place: `\(instanceName) start` or your next login loads "
+                    + "the job again (`\(instanceName) autostart disable` removes it)")
+            }
+            return 0
+        }
 
         guard SocketClient.isListening(socketPath: socketPath) else {
+            // The process launchd names is alive but never bound its socket,
+            // or lost it: a boot that hung, or a wedge. There is no `--exit`
+            // to send it, and a signal would only have launchd respawn it, so
+            // the job goes with it.
+            if let pid = job.pid {
+                print("\(instanceName) is running (pid \(pid)) but not answering on \(socketPath)")
+                return bootout(reason: "to stop a process that was not answering")
+            }
             print("\(instanceName) is not running")
             // The plist, not the loaded flag, is what decides the next login:
             // launchd loads ~/Library/LaunchAgents by itself. A job that is
             // loaded from a plist that has since gone survives until logout and
             // then does not come back.
-            if hasPlist {
-                print("it starts again at your next login "
-                    + "(`\(instanceName) autostart disable` to turn that off)")
-            } else if state == .loaded {
-                print("the login job \(label) is still loaded, but its plist is gone — "
-                    + "it will not come back at your next login")
-            }
+            nextLogin()
             return 0
         }
 
@@ -897,20 +1078,40 @@ public enum LocalVerbs {
         // the reply is not a failure to stop.
         _ = try? SocketClient.send(arguments: ["--exit"], socketPath: socketPath)
         guard waitForDaemonGone(socketPath: socketPath) else {
-            // Deliberately no escalation to a signal: there is no pid here, and
-            // killing by process-path match is the `pkill -f` bug this verb
-            // exists to replace.
-            return fail("\(instanceName) did not exit within \(Int(stopTimeout)) s — "
-                + "\(socketPath) still answers")
+            // Deliberately no escalation to a signal on an unmanaged bar:
+            // there is no pid to send one to, and killing by process-path
+            // match is the `pkill -f` bug this verb exists to replace. A
+            // supervised one is launchd's to kill.
+            guard job.pid != nil else {
+                return fail("\(instanceName) did not exit within \(Int(stopTimeout)) s — "
+                    + "\(socketPath) still answers")
+            }
+            return bootout(reason: "to stop a process that ignored --exit")
+        }
+        // The clean exit above is what the daemon prefers; the bootout is what
+        // keeps launchd from undoing it. In between, launchd may already have
+        // spawned the next copy, which the bootout then takes down mid-boot —
+        // hence the second wait.
+        if respawns {
+            let result = Launchctl.run(["bootout", Launchctl.target(label)])
+            guard Launchctl.bootoutSucceeded(result.status),
+                  waitForDaemonGone(socketPath: socketPath)
+            else {
+                return fail("\(instanceName) exited but its login job \(label) could not be "
+                    + "booted out (\(result.status)): \(result.output) — launchd will start it "
+                    + "again; `\(instanceName) autostart disable` removes the job")
+            }
+            let shape = policy == nil
+                ? "its plist could not be read"
+                : "its plist keeps it alive after any exit"
+            print("\(instanceName) stopped — the login job \(label) was booted out too: \(shape)")
+            print("its plist stays in place: `\(instanceName) start` or your next login loads "
+                + "the job again; `\(instanceName) autostart enable` rewrites it so a plain stop "
+                + "holds (`\(instanceName) autostart disable` removes it)")
+            return 0
         }
         print("\(instanceName) stopped")
-        if hasPlist {
-            print("autostart is enabled — it will start again at your next login "
-                + "(`\(instanceName) autostart disable` to turn that off)")
-        } else if state == .loaded {
-            print("the login job \(label) is still loaded, but its plist is gone — "
-                + "it will not come back at your next login")
-        }
+        nextLogin()
         return 0
     }
 
@@ -921,21 +1122,27 @@ public enum LocalVerbs {
         let label = LaunchAgent.label(instanceName: instanceName)
         let socketPath = WireFormat.socketPath(instanceName: instanceName)
         let logURL = LaunchAgent.logURL(instanceName: instanceName, home: home)
-        let state = Launchctl.state(of: label)
+        let plistURL = LaunchAgent.plistURL(instanceName: instanceName, home: home)
+        let job = Launchctl.inspect(label)
+        let state = job.state
 
         // A launchd-owned bar is restarted through launchd, so the job keeps its
         // identity, its supervision and its log rather than being replaced by an
         // unmanaged copy. A `-c` cannot ride along: kickstart re-executes the
         // job's own ProgramArguments.
         if configOverride == nil, state == .loaded {
+            // The log the job writes — a hand-written plist can put it
+            // anywhere, and the roll and the messages have to mean that one.
+            let jobLog = jobLogURL(plistURL: plistURL, fallback: logURL)
             let kick: Spawn.Result
+            var forced = false
             if SocketClient.isListening(socketPath: socketPath) {
                 _ = try? SocketClient.send(arguments: ["--exit"], socketPath: socketPath)
                 if waitForDaemonGone(socketPath: socketPath) {
                     // It went of its own accord, so no kill is needed — and with
                     // the process gone nothing holds the log open, so this is
                     // the moment to roll it.
-                    rotateLog(at: logURL)
+                    rotateLog(at: jobLog)
                     kick = Launchctl.run(["kickstart", Launchctl.target(label)])
                 } else {
                     // It is still holding the job slot, and a plain kickstart on
@@ -945,27 +1152,29 @@ public enum LocalVerbs {
                     // reported everywhere to be SIGKILL, so the daemon skips its
                     // Metal and Lua teardown; acceptable only here, for a bar
                     // that ignored a clean request to quit.
+                    forced = true
                     kick = Launchctl.run(["kickstart", "-k", Launchctl.target(label)])
                 }
+            } else if let pid = job.pid {
+                // Alive as far as launchd is concerned, silent on the socket:
+                // a boot that hung, or a wedge. Same no-op trap as above, and
+                // the same answer.
+                note("\(instanceName) is running (pid \(pid)) but not answering — replacing it")
+                forced = true
+                kick = Launchctl.run(["kickstart", "-k", Launchctl.target(label)])
             } else {
-                // Nothing is listening, so the job is loaded but down, nothing
-                // holds the log, and a plain kickstart simply starts it.
-                rotateLog(at: logURL)
+                // Nothing is listening and launchd names no process, so the
+                // job is loaded but down, nothing holds the log, and a plain
+                // kickstart simply starts it.
+                rotateLog(at: jobLog)
                 kick = Launchctl.run(["kickstart", Launchctl.target(label)])
             }
 
             switch kick.status {
             case 0:
-                // launchd will not respawn a job more often than its
-                // ThrottleInterval, and a kickstart inside that window is
-                // accepted and then queued — waiting less than the throttle
-                // would report a failure for a bar doing nothing wrong, and
-                // point at a log with nothing in it.
-                guard waitForDaemon(socketPath: socketPath, timeout: launchdReadyTimeout,
-                                    noticeAfter: readyTimeout,
-                                    waitingNotice: launchdWaitingNotice) else {
-                    return fail("the login job restarted but the bar did not answer within "
-                        + "\(Int(launchdReadyTimeout)) s — check \(logURL.path)")
+                if let failure = awaitKickstartedJob(
+                    label: label, socketPath: socketPath, forced: forced, log: jobLog) {
+                    return fail(failure)
                 }
                 print("\(instanceName) restarted (launchd job \(label))")
                 return 0
@@ -988,8 +1197,7 @@ public enum LocalVerbs {
         }
 
         if configOverride != nil, state == .loaded,
-           let plist = LaunchAgent.read(
-            at: LaunchAgent.plistURL(instanceName: instanceName, home: home)),
+           let plist = LaunchAgent.read(at: plistURL),
            let program = plist["ProgramArguments"] as? [String] {
             print("note: the login job runs \(program.joined(separator: " ")) — "
                 + "-c applies to this run only")
@@ -1016,7 +1224,10 @@ public enum LocalVerbs {
         let label = LaunchAgent.label(instanceName: instanceName)
         let plistURL = LaunchAgent.plistURL(instanceName: instanceName, home: home)
         let hasPlist = FileManager.default.fileExists(atPath: plistURL.path)
-        let state = Launchctl.state(of: label)
+        let plist = hasPlist ? LaunchAgent.read(at: plistURL) : nil
+        let policy = plist.map(LaunchAgent.keepAlivePolicy(in:))
+        let job = Launchctl.inspect(label)
+        let state = job.state
         let brew = instanceName == "ybar" ? Launchctl.homebrewServiceLabel(formula: "ybar") : nil
 
         // First, not last: everything below describes root's session, not the
@@ -1024,16 +1235,27 @@ public enum LocalVerbs {
         if getuid() == 0 {
             print("note: running as root — this is root's session (uid 0), not yours.")
         }
-        print(field(instanceName, running ? "running" : "not running"))
+        // launchd's pid is the third answer: a process that is alive and not
+        // answering is neither "running" nor "not running", and calling it the
+        // latter sends the user to `start`, which then finds the slot taken.
+        let liveness: String
+        if running {
+            liveness = "running"
+        } else if let pid = job.pid {
+            liveness = "running (pid \(pid)) but not answering on the socket"
+        } else {
+            liveness = "not running"
+        }
+        print(field(instanceName, liveness))
         print(field("instance", instanceName))
         print(field("socket", socketPath))
         print(field("bundle", bundle?.path ?? "not found"))
         var configLine = config?.path ?? "none found"
         if let theme = resolution?.theme { configLine += " (theme: \(theme))" }
         print(field("config", configLine))
-        print(field("autostart", autostartSummary(label: label, hasPlist: hasPlist, state: state)))
-        if hasPlist, let plist = LaunchAgent.read(at: plistURL),
-           let log = plist["StandardErrorPath"] as? String {
+        print(field("autostart", autostartSummary(
+            label: label, hasPlist: hasPlist, state: state, policy: policy)))
+        if let plist, let log = LaunchAgent.standardErrorPath(in: plist) {
             print(field("log", log))
         }
 
@@ -1042,6 +1264,15 @@ public enum LocalVerbs {
         if running {
             print("note: `config` is what a fresh start would pick; "
                 + "a running bar may have been started with -c.")
+        }
+        if !running, job.pid != nil {
+            print("note: `\(instanceName) restart` replaces it (launchctl kickstart -k "
+                + "\(Launchctl.target(label))); `\(instanceName) stop` boots the job out.")
+        }
+        if policy == .always {
+            print("note: the plist's KeepAlive brings the bar back after any exit, so "
+                + "`\(instanceName) stop` boots the job out; `\(instanceName) autostart enable` "
+                + "rewrites it so a plain stop holds.")
         }
         if let brew {
             print("note: Homebrew also manages a login job (\(brew)) — two jobs will fight over "
@@ -1326,13 +1557,16 @@ public enum LocalVerbs {
         let plistURL = LaunchAgent.plistURL(instanceName: instanceName, home: home)
         let hasPlist = FileManager.default.fileExists(atPath: plistURL.path)
         let state = Launchctl.state(of: label)
+        let plist = hasPlist ? LaunchAgent.read(at: plistURL) : nil
+        let policy = plist.map(LaunchAgent.keepAlivePolicy(in:))
 
         // First, like `status`: everything below describes root's LaunchAgents
         // and root's gui/0 domain, not the user's.
         if getuid() == 0 {
             print("note: running as root — this is root's session (uid 0), not yours.")
         }
-        print("autostart: \(autostartSummary(label: label, hasPlist: hasPlist, state: state))")
+        print("autostart: " + autostartSummary(
+            label: label, hasPlist: hasPlist, state: state, policy: policy))
         if instanceName == "ybar", let brew = Launchctl.homebrewServiceLabel(formula: "ybar") {
             print("note: Homebrew also manages a login job (\(brew)) — "
                 + "run `brew services stop ybar` unless that is the one you want.")
@@ -1346,25 +1580,40 @@ public enum LocalVerbs {
         print(field("plist", plistURL.path))
         // Reported from the file rather than from what this code would write, so
         // a hand-edited plist shows its own contents.
-        guard let plist = LaunchAgent.read(at: plistURL) else {
+        guard let plist else {
             print(field("plist", "unreadable — rewrite it with `\(instanceName) autostart enable`"))
             return 0
         }
         if let program = plist["ProgramArguments"] as? [String] {
             print(field("program", program.joined(separator: " ")))
         }
-        if let log = plist["StandardErrorPath"] as? String {
+        if let log = LaunchAgent.standardErrorPath(in: plist) {
             print(field("log", log))
         }
         if LaunchAgent.configArgument(in: plist) != nil {
             print("the job pins that config — `ybar theme use` will not change "
                 + "what starts at login.")
         }
+        switch policy {
+        case .always:
+            print("KeepAlive brings the bar back after any exit, so `\(instanceName) stop` "
+                + "boots the job out; `\(instanceName) autostart enable` rewrites the plist "
+                + "so a plain stop holds.")
+        case .never:
+            print("no KeepAlive: the bar is not restarted after a crash "
+                + "(`\(instanceName) autostart enable` rewrites the plist).")
+        default:
+            break
+        }
         return 0
     }
 
+    /// `policy` is the plist's KeepAlive when there is a readable plist; the
+    /// shape `enable` writes says nothing extra, the other two are named,
+    /// because they change what `stop` and a crash do.
     static func autostartSummary(label: String, hasPlist: Bool,
-                                 state: Launchctl.JobState) -> String {
+                                 state: Launchctl.JobState,
+                                 policy: LaunchAgent.KeepAlivePolicy? = nil) -> String {
         if state == .noDomain {
             return "unknown — launchctl reports no GUI session for uid \(getuid()) "
                 + "(run this from a normal login session)"
@@ -1374,9 +1623,15 @@ public enum LocalVerbs {
         if case .unknown(let code) = state {
             return "unknown — `launchctl print \(Launchctl.target(label))` exited \(code)"
         }
+        let shape: String
+        switch policy {
+        case .always: shape = ", KeepAlive: always"
+        case .never: shape = ", KeepAlive: off"
+        default: shape = ""
+        }
         switch (hasPlist, state == .loaded) {
-        case (true, true): return "enabled (job \(label) loaded)"
-        case (true, false): return "enabled (job \(label) starts at your next login)"
+        case (true, true): return "enabled (job \(label) loaded\(shape))"
+        case (true, false): return "enabled (job \(label) starts at your next login\(shape))"
         // A job loaded from a plist that is now gone survives until logout.
         case (false, true): return "disabled (job \(label) is still loaded until you log out)"
         case (false, false): return "disabled"
@@ -1433,6 +1688,63 @@ public enum LocalVerbs {
         return SocketClient.ping(socketPath: socketPath)
     }
 
+    /// The wait after a kickstart launchd accepted. launchd will not respawn a
+    /// job more often than its ThrottleInterval, and a kickstart inside that
+    /// window is accepted and then queued — waiting less than the throttle
+    /// would report a failure for a bar doing nothing wrong, and point at a
+    /// log with nothing in it. When the bar still has not answered after that
+    /// and the kick was a plain one, one `kickstart -k` follows: a process
+    /// that came up and hung before binding the socket is alive as far as
+    /// launchd is concerned, and only -k replaces it. `forced` says the first
+    /// kick was already -k, so there is nothing further to try. Returns the
+    /// failure to print, or nil once the bar answers.
+    static func awaitKickstartedJob(label: String, socketPath: String,
+                                    forced: Bool, log: URL) -> String? {
+        let target = Launchctl.target(label)
+        var forced = forced
+        if waitForDaemon(socketPath: socketPath, timeout: launchdReadyTimeout,
+                         noticeAfter: readyTimeout, waitingNotice: launchdWaitingNotice) {
+            return nil
+        }
+        if !forced {
+            note("no answer after \(Int(launchdReadyTimeout)) s — retrying with "
+                + "launchctl kickstart -k \(target)")
+            let kick = Launchctl.run(["kickstart", "-k", target])
+            forced = kick.succeeded
+            if forced, waitForDaemon(socketPath: socketPath, timeout: launchdReadyTimeout,
+                                     noticeAfter: readyTimeout,
+                                     waitingNotice: launchdWaitingNotice) {
+                return nil
+            }
+        }
+        return "the login job \(label) was kickstarted\(forced ? " with -k" : "") but the bar "
+            + "did not answer within \(Int(launchdReadyTimeout)) s — see \(log.path); "
+            + "`launchctl kickstart -k \(target)` is the manual equivalent"
+    }
+
+    /// The log a loaded job actually writes, from its plist; `fallback` (the
+    /// path `enable` chooses) when the plist is unreadable or names none.
+    static func jobLogURL(plistURL: URL, fallback: URL) -> URL {
+        guard let plist = LaunchAgent.read(at: plistURL),
+              let path = LaunchAgent.standardErrorPath(in: plist)
+        else { return fallback }
+        return URL(fileURLWithPath: path)
+    }
+
+    /// For a job launchd is tearing down: bootout returns once the job has
+    /// been signalled, and the pid launchd printed is what says when the
+    /// process has actually gone. `kill(pid, 0)` asks without signalling;
+    /// ESRCH is the answer wanted.
+    static func waitForProcessGone(pid: pid_t) -> Bool {
+        func gone() -> Bool { kill(pid, 0) != 0 && errno == ESRCH }
+        let deadline = Date().addingTimeInterval(stopTimeout)
+        while Date() < deadline {
+            if gone() { return true }
+            Thread.sleep(forTimeInterval: pollInterval)
+        }
+        return gone()
+    }
+
     /// Polls the socket FILE, not a connect. A daemon that exits unlinks its
     /// endpoint, so the file going away is the signal — and every probe connect
     /// parks a connection on the listener's accept queue until it is accepted,
@@ -1467,6 +1779,12 @@ public enum LocalVerbs {
     static func fail(_ message: String) -> Int32 {
         FileHandle.standardError.write(Data("[!] \(message)\n".utf8))
         return 1
+    }
+
+    /// Progress and asides go to stderr, so a script capturing stdout only
+    /// ever sees the verb's answer.
+    static func note(_ message: String) {
+        FileHandle.standardError.write(Data("note: \(message)\n".utf8))
     }
 
     static func failBundleMissing() -> Int32 {
