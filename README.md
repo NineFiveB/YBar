@@ -67,7 +67,7 @@ Or with Scoop:
 scoop install https://raw.githubusercontent.com/NineFiveB/YBar/windows/packaging/scoop/ybar-win.json
 ```
 
-Then `ybar start`. The release zip and autostart are in [docs/WINDOWS.md](docs/WINDOWS.md).
+Then `ybar start`. The release zip and autostart are in the [`windows` branch README](https://github.com/NineFiveB/YBar/blob/windows/README.md).
 
 ## Eleven themes, one command
 
