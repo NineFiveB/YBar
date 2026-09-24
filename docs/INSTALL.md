@@ -25,13 +25,13 @@ This builds YBar from source and installs:
 
 - `$(brew --prefix)/opt/ybar/YBar.app` — the app bundle (the daemon's TCC
   identity, see [Permissions](#first-run-permissions))
-- `ybar` on your PATH — the CLI client (`ybar --help`, sketchybar-compatible
-  messages)
+- `ybar` on your PATH — the CLI: process control (`ybar start|stop|restart|
+  status|autostart`), sketchybar-compatible messages, and `ybar --help`
 
 Launch:
 
 ```sh
-open -g "$(brew --prefix)/opt/ybar/YBar.app" --args -c ~/.config/ybar/ybarrc.lua
+ybar start
 ```
 
 Heed the formula's caveats: upgrades re-sign the app, which voids previously
@@ -78,19 +78,47 @@ a git clone has them in `examples/`:
 
 ```sh
 mkdir -p ~/.config/ybar
+
 # Homebrew install:
 cp "$(brew --prefix)/share/ybar/examples/ybarrc.lua" ~/.config/ybar/ybarrc.lua
-open -g "$(brew --prefix)/opt/ybar/YBar.app" --args -c ~/.config/ybar/ybarrc.lua
-# Manual build (from the clone):
+ybar start
+
+# Manual build (from the clone) — nothing puts ybar on your PATH here:
 cp examples/ybarrc.lua ~/.config/ybar/ybarrc.lua
-open -g ~/Applications/YBar.app --args -c ~/.config/ybar/ybarrc.lua
+make start          # or: ~/Applications/YBar.app/Contents/MacOS/ybar start
 ```
 
-Always launch through the app bundle (`open -g … --args …`), not the bare
-binary from a terminal: the bundle is what gives the daemon its own privacy
-identity. Stop it with `ybar --exit`
-(`~/Applications/YBar.app/Contents/MacOS/ybar --exit` if the CLI is not on
-your PATH).
+`ybar start` finds YBar.app and launches it in the background, because the
+bundle is what gives the daemon its own privacy identity — running the bare
+binary from a terminal does not. It looks for the bundle it is running from
+first, then `~/Applications`, `/Applications`, then the Homebrew prefixes —
+`$HOMEBREW_PREFIX` first when your shell exports it, then `/opt/homebrew` and
+`/usr/local`. If none of those holds a bundle it falls back to whatever
+LaunchServices has registered for `com.ybar.YBar`, which is how a copy
+installed somewhere unusual is found. Pass `-c <path>` to name a config; with
+no `-c` the discovery order at the top of this section applies. Once a login
+job owns the bar ([Autostart](#autostart-launchagent)), `start` goes through
+launchd instead — the job is kickstarted, or loaded again after a `stop` that
+had to boot it out — so there is one supervised bar and never an unmanaged
+copy beside it.
+
+The rest of the process-control verbs:
+
+```sh
+ybar stop        # stop the running bar
+ybar restart     # stop it and launch it again (a supervised bar: through launchd)
+ybar status      # running or not, which bundle, which config, autostart state
+```
+
+`ybar --exit` still works and does the same thing as `ybar stop`; `stop` also
+waits for the process to actually go, and tells you if a login agent will
+bring it back. A bar that is alive but has stopped answering is reported as
+such (`status` says `running (pid N) but not answering`), and `restart`
+replaces it rather than waiting on it. The escape hatch for a hung bar, when
+you would rather not go through the verb, is
+`launchctl kickstart -k gui/$(id -u)/com.ybar.YBar` — the same command
+`restart` reaches for. If the CLI is not on your PATH, every verb works
+through the bundle too: `~/Applications/YBar.app/Contents/MacOS/ybar status`.
 
 `ybar --version` names the build — quote it in bug reports: `make app`,
 `make release` and `brew install --HEAD` stamp the commit into the bundle
@@ -121,8 +149,8 @@ script it spawns. Only the features you actually configure ask for anything:
   bar item they mirror. macOS does not prompt for the event monitor and may
   prompt on the first forwarded click; otherwise grant it manually under
   System Settings → Privacy & Security → Accessibility → **+** → select
-  YBar.app, then restart YBar (`ybar --exit` and relaunch). Closing popups by
-  clicking outside them needs no permission.
+  YBar.app, then `ybar restart`. Closing popups by clicking outside them
+  needs no permission.
 - **Location (Wi-Fi network name)** — macOS gates the SSID behind Location
   Services. Opt in once with `ybar --bar wifi_ssid_prompt=on` and click
   Allow; the network name is re-published the moment the grant lands (no
@@ -138,7 +166,7 @@ script it spawns. Only the features you actually configure ask for anything:
 - **Screen Recording** — needed by the `alias` component, which screenshots
   other apps' menu bar items via ScreenCaptureKit. macOS prompts on first
   capture; if you dismissed it, grant manually under Privacy & Security →
-  Screen & System Audio Recording, then restart YBar.
+  Screen & System Audio Recording, then `ybar restart`.
 
 ### Keeping permissions across rebuilds
 
@@ -181,10 +209,36 @@ restart; `enable` refuses when nothing is discoverable rather than write an
 agent with nothing to start. With `-c`, that file wins on every restart even
 after `ybar theme use` has reloaded the running bar.
 
-Restart a supervised bar with
-`launchctl kickstart -k gui/$(id -u)/com.ybar.YBar`, never `pkill`:
-`KeepAlive.SuccessfulExit = false` restarts YBar after a crash (or a kill)
-but respects a deliberate `ybar --exit`.
+Once the job is loaded, the process verbs go through launchd. `ybar restart`
+asks the bar to quit and kickstarts the job — a bar that ignores the request,
+or is alive but not answering, is replaced with `launchctl kickstart -k`, and
+a kickstarted job that has not come up after launchd's 30 s throttle is kicked
+once more with `-k` before `restart` gives up and names the log. `ybar stop`
+sends `--exit` and leaves the job loaded: `KeepAlive.SuccessfulExit = false`
+restarts YBar after a crash (or a kill) but respects that clean exit. `ybar
+start` kickstarts a stopped job. Never `pkill`: launchd reads a kill as a
+crash and brings the bar straight back. The manual escape hatch for a hung
+bar is the same `launchctl kickstart -k gui/$(id -u)/com.ybar.YBar`.
+
+A hand-written plist with `<key>KeepAlive</key><true/>` relaunches after
+*any* exit, a `--exit` included, so against one `ybar stop` boots the job out
+instead and says so; `ybar status` shows the shape as `autostart: enabled (…,
+KeepAlive: always)`. The plist stays, and `ybar start` or the next login loads
+the job again. Re-run `ybar autostart enable` to rewrite it so a plain stop
+holds, or `ybar autostart disable` to remove it.
+
+`brew services start ybar` is deliberately not wired up. Two agents both set
+to run at login race for the same socket, and the loser exits quietly enough
+that launchd records it as a clean quit and never retries. `ybar status`
+reports a Homebrew job when it sees one, and `ybar autostart enable` refuses
+until you run `brew services stop ybar`.
+
+macOS 13 and later list the agent under System Settings → General → Login
+Items. Turning it off there leaves the plist on disk and records a persistent
+override inside launchd instead, which survives reinstalling the plist and
+reboots. `ybar autostart status` reports the override when it sees one, `ybar
+start` launches an unmanaged bar for the session while it stands, and `ybar
+autostart enable` is what clears it.
 
 What `enable` writes, for reference — a hand-written copy works too,
 substituting absolute paths (launchd does not expand `~`; Homebrew users:
@@ -196,24 +250,45 @@ point at `$(brew --prefix)/opt/ybar/YBar.app/...`). `-c <path>` joins
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>Label</key>
-    <string>com.ybar.YBar</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/Users/you/Applications/YBar.app/Contents/MacOS/ybar</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <dict>
-        <key>SuccessfulExit</key>
-        <false/>
-    </dict>
-    <key>ProcessType</key>
-    <string>Interactive</string>
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>com.ybar.YBar</string>
+	</array>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>Label</key>
+	<string>com.ybar.YBar</string>
+	<key>LimitLoadToSessionType</key>
+	<string>Aqua</string>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/you/Applications/YBar.app/Contents/MacOS/ybar</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/Users/you/Library/Logs/ybar.log</string>
+	<key>ThrottleInterval</key>
+	<integer>30</integer>
 </dict>
 </plist>
 ```
+
+| Key | Value | Why |
+|---|---|---|
+| `ProgramArguments` | `…/YBar.app/Contents/MacOS/ybar`, plus `-c <path>` if you passed one to `enable` | absolute: launchd expands no `~` and inherits no working directory; the binary inside the bundle keeps the app's TCC identity |
+| `RunAtLoad` | `true` | start it at login |
+| `KeepAlive` | `SuccessfulExit = false` | restart after a crash, but respect a deliberate `ybar stop`, which exits cleanly |
+| `ProcessType` | `Interactive` | exempt from the throttling launchd applies to background work |
+| `LimitLoadToSessionType` | `Aqua` | the bar draws windows, so it needs a real GUI session |
+| `AssociatedBundleIdentifiers` | `com.ybar.YBar` | System Settings' Login Items row reads "YBar", not a raw label |
+| `ThrottleInterval` | `30` | a boot failure the daemon cannot recover from exits 1, and `KeepAlive` retries every non-zero code — this is what keeps that from becoming a respawn storm |
+| `StandardErrorPath` | `~/Library/Logs/ybar.log` | a failure at login is otherwise invisible: the bar simply never appears. `start` and `restart` roll it past 1 MB and point at it when a kickstarted job does not come up |
 
 ```sh
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.ybar.YBar.plist   # what enable runs

@@ -203,7 +203,7 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                         [!] modifier_change needs Accessibility: without it modifier keys are \
                         only seen while the pointer is over the bar. Grant it under \
                         System Settings > Privacy & Security > Accessibility > + > YBar.app, \
-                        then restart YBar (ybar --exit and relaunch).
+                        then `ybar restart`.
 
                         """.utf8))
                 }
