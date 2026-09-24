@@ -884,10 +884,10 @@ public enum LocalVerbs {
         let logURL = LaunchAgent.logURL(instanceName: instanceName, home: home)
         let plistURL = LaunchAgent.plistURL(instanceName: instanceName, home: home)
 
-        if SocketClient.isListening(socketPath: socketPath) {
-            // Saying "already running" and dropping the config would be the same
-            // silent-wrong-config failure `open` has when it reactivates an
-            // instance and discards everything after --args.
+        /// The bar is up. Saying "already running" and dropping the config
+        /// would be the same silent-wrong-config failure `open` has when it
+        /// reactivates an instance and discards everything after --args.
+        func alreadyRunning() -> Int32 {
             guard configOverride == nil else {
                 return fail("\(instanceName) is already running — use "
                     + "`\(instanceName) restart -c <path>` to start it with a different config")
@@ -895,6 +895,7 @@ public enum LocalVerbs {
             print("\(instanceName) is already running")
             return 0
         }
+        if SocketClient.isListening(socketPath: socketPath) { return alreadyRunning() }
 
         // When launchd owns this bar, start it through launchd. Otherwise a
         // `stop` followed by a `start` leaves an unmanaged orphan running
@@ -902,12 +903,19 @@ public enum LocalVerbs {
         let job = preferLaunchd
             ? Launchctl.inspect(label)
             : Launchctl.Job(state: .notLoaded, pid: nil)
-        if let pid = job.pid, configOverride != nil {
-            // The probe above said nothing answers, and launchd says the
-            // job's process is alive: `open` would put a second bar beside
-            // it. A kickstart cannot carry -c, so this is restart's job.
-            return fail("\(instanceName) is running (pid \(pid)) under the login job \(label) "
-                + "but not answering — `\(instanceName) restart` replaces it")
+        if let pid = job.pid {
+            // Silent on the socket, but launchd names a live process: a bar
+            // still booting as often as one that hung, so it gets its grace
+            // before anything below replaces it.
+            if bootingBarAnswers(instanceName: instanceName, pid: pid, socketPath: socketPath) {
+                return alreadyRunning()
+            }
+            if configOverride != nil {
+                // `open` would put a second bar beside it, and a kickstart
+                // cannot carry -c, so this is restart's job.
+                return fail(silentThroughGrace(instanceName: instanceName, pid: pid)
+                    + " under the login job \(label) — `\(instanceName) restart` replaces it")
+            }
         }
         if preferLaunchd, configOverride == nil {
             // The log the job writes, which a hand-written plist can put
@@ -917,12 +925,12 @@ public enum LocalVerbs {
             case .loaded:
                 let kick: Spawn.Result
                 if let pid = job.pid {
-                    // Alive under launchd and not answering — the probe above
-                    // ruled out a healthy bar. A plain kickstart on a running
-                    // service is a no-op that exits 0; only -k swaps the
-                    // process out. SIGKILL, so no teardown: acceptable for a
-                    // bar that never bound its socket.
-                    note("\(instanceName) is running (pid \(pid)) but not answering — replacing it")
+                    // Alive under launchd and silent through its grace — the
+                    // wait above ruled out a bar still booting. A plain
+                    // kickstart on a running service is a no-op that exits 0;
+                    // only -k swaps the process out. SIGKILL, so no teardown:
+                    // acceptable for a bar that never bound its socket.
+                    note(silentThroughGrace(instanceName: instanceName, pid: pid) + " — replacing it")
                     kick = Launchctl.run(["kickstart", "-k", Launchctl.target(label)])
                 } else {
                     // Down, so nothing holds the file: the moment to roll it.
@@ -997,6 +1005,18 @@ public enum LocalVerbs {
 
         guard let bundle = AppBundle.locate(home: home) else { return failBundleMissing() }
 
+        if configOverride != nil, job.state == .loaded {
+            // The job is loaded and down, and -c cannot ride a kickstart, so
+            // what `open` starts is an unmanaged bar beside it. Said out loud
+            // (restart -c comes through here too), so the run is never
+            // mistaken for the job coming up.
+            let program = LaunchAgent.read(at: plistURL)
+                .flatMap { $0["ProgramArguments"] as? [String] }
+                .map { "runs \($0.joined(separator: " "))" } ?? "\(label) is loaded"
+            note("the login job \(program) — -c applies to this run only; "
+                + "the job itself stays down")
+        }
+
         // The socket file is deliberately never removed here: SocketServer
         // already unlinks a confirmed-dead socket before binding, and unlinking
         // from the client can delete a live daemon's endpoint and brick its IPC
@@ -1053,15 +1073,39 @@ public enum LocalVerbs {
         // that "stopped" and is back within seconds.
         let policy = LaunchAgent.read(at: plistURL).map(LaunchAgent.keepAlivePolicy(in:))
         let respawns = job.state == .loaded && hasPlist && policy != .onFailure && policy != .never
+        // A plist alone does not make the next login: a persistent disable
+        // override (Login Items, off) has launchd skip it, and `status`
+        // already says so. Same check, so the promise below is true.
+        let disabled = hasPlist && job.state != .noDomain && Launchctl.isDisabled(label: label)
 
         /// The line after "stopped": what the next login does.
         func nextLogin() {
-            if hasPlist {
+            if disabled {
+                print("autostart is switched off in launchd (Login Items) — the login job "
+                    + "\(label) will not start at your next login, whatever its plist says "
+                    + "(`\(instanceName) autostart enable` turns it back on)")
+            } else if hasPlist {
                 print("autostart is enabled — it will start again at your next login "
                     + "(`\(instanceName) autostart disable` to turn that off)")
             } else if job.state == .loaded {
                 print("the login job \(label) is still loaded, but its plist is gone — "
                     + "it will not come back at your next login")
+            }
+        }
+
+        /// The line after a bootout: the plist is still there, and what that
+        /// means for `start` and the next login depends on whether launchd
+        /// will load it. `tail` is what to add when it will.
+        func plistStays(_ tail: String) {
+            guard hasPlist else { return }
+            if disabled {
+                print("its plist stays in place, but launchd holds a disable override for "
+                    + "\(label) (Login Items, off): your next login will not load the job, and "
+                    + "`\(instanceName) start` runs the bar unmanaged until "
+                    + "`\(instanceName) autostart enable` clears it")
+            } else {
+                print("its plist stays in place: `\(instanceName) start` or your next login loads "
+                    + "the job again\(tail)")
             }
         }
 
@@ -1081,10 +1125,7 @@ public enum LocalVerbs {
                     + "`launchctl bootout \(Launchctl.target(label))`")
             }
             print("\(instanceName) stopped — the login job \(label) was booted out \(reason)")
-            if hasPlist {
-                print("its plist stays in place: `\(instanceName) start` or your next login loads "
-                    + "the job again (`\(instanceName) autostart disable` removes it)")
-            }
+            plistStays(" (`\(instanceName) autostart disable` removes it)")
             return 0
         }
 
@@ -1137,9 +1178,8 @@ public enum LocalVerbs {
                 ? "its plist could not be read"
                 : "its plist keeps it alive after any exit"
             print("\(instanceName) stopped — the login job \(label) was booted out too: \(shape)")
-            print("its plist stays in place: `\(instanceName) start` or your next login loads "
-                + "the job again; `\(instanceName) autostart enable` rewrites it so a plain stop "
-                + "holds (`\(instanceName) autostart disable` removes it)")
+            plistStays("; `\(instanceName) autostart enable` rewrites it so a plain stop holds "
+                + "(`\(instanceName) autostart disable` removes it)")
             return 0
         }
         print("\(instanceName) stopped")
@@ -1168,7 +1208,14 @@ public enum LocalVerbs {
             let jobLog = jobLogURL(plistURL: plistURL, fallback: logURL)
             let kick: Spawn.Result
             var forced = false
-            if SocketClient.isListening(socketPath: socketPath) {
+            // A process launchd names that is silent on the socket gets its
+            // boot grace first: if it binds it is a live bar and is asked to
+            // quit like any other, and only one that stays silent is replaced.
+            let answering = SocketClient.isListening(socketPath: socketPath)
+                || job.pid.map({
+                    bootingBarAnswers(instanceName: instanceName, pid: $0, socketPath: socketPath)
+                }) == true
+            if answering {
                 _ = try? SocketClient.send(arguments: ["--exit"], socketPath: socketPath)
                 if waitForDaemonGone(socketPath: socketPath) {
                     // It went of its own accord, so no kill is needed — and with
@@ -1188,10 +1235,10 @@ public enum LocalVerbs {
                     kick = Launchctl.run(["kickstart", "-k", Launchctl.target(label)])
                 }
             } else if let pid = job.pid {
-                // Alive as far as launchd is concerned, silent on the socket:
-                // a boot that hung, or a wedge. Same no-op trap as above, and
-                // the same answer.
-                note("\(instanceName) is running (pid \(pid)) but not answering — replacing it")
+                // Alive as far as launchd is concerned, silent through its
+                // grace: a boot that hung, or a wedge. Same no-op trap as
+                // above, and the same answer.
+                note(silentThroughGrace(instanceName: instanceName, pid: pid) + " — replacing it")
                 forced = true
                 kick = Launchctl.run(["kickstart", "-k", Launchctl.target(label)])
             } else {
@@ -1228,13 +1275,8 @@ public enum LocalVerbs {
             }
         }
 
-        if configOverride != nil, state == .loaded,
-           let plist = LaunchAgent.read(at: plistURL),
-           let program = plist["ProgramArguments"] as? [String] {
-            print("note: the login job runs \(program.joined(separator: " ")) — "
-                + "-c applies to this run only")
-        }
-
+        // With -c and a loaded job, `start` below says the run is unmanaged
+        // and the job stays down.
         let stopped = stop(instanceName: instanceName)
         guard stopped == 0 else { return stopped }
         return start(configOverride: configOverride, instanceName: instanceName)
@@ -1686,6 +1728,19 @@ public enum LocalVerbs {
     static let launchdWaitingNotice =
         "still waiting — launchd throttles restarts to one every "
         + "\(LaunchAgent.throttleInterval) s...\n"
+    /// The second wait after a plain kickstart that never answered: `-k`
+    /// kills and respawns at once, so the retry gets a bar's boot allowance,
+    /// not another throttle's worth. 45 s + 15 s is the most a kickstart
+    /// can cost, where a second `launchdReadyTimeout` made it 90 s.
+    static let kickstartRetryTimeout: TimeInterval = readyTimeout
+    /// What a process launchd names gets to bind its socket before it is read
+    /// as wedged. A bar in its first seconds — dyld, AppKit, a cold cache — is
+    /// "pid present, socket silent" exactly like one that hung, and only time
+    /// tells them apart: without this a login script, or a `start` typed
+    /// right after login, would `kickstart -k` a bar that was about to
+    /// answer. Shorter than `readyTimeout` because the bind is the first
+    /// thing the daemon does, before Metal and the config run.
+    static let bootGrace: TimeInterval = 5
     static let noticeAfter: TimeInterval = 2
     static let stopTimeout: TimeInterval = 5
     static let pollInterval: TimeInterval = 0.1
@@ -1705,19 +1760,55 @@ public enum LocalVerbs {
         noticeAfter: TimeInterval = LocalVerbs.noticeAfter,
         waitingNotice: String = "still waiting for the bar to come up...\n"
     ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        let notice = Date().addingTimeInterval(noticeAfter)
+        poll(timeout: timeout, noticeAfter: noticeAfter,
+             // stderr, so a script capturing stdout is unaffected.
+             notice: { FileHandle.standardError.write(Data(waitingNotice.utf8)) },
+             until: { SocketClient.ping(socketPath: socketPath) })
+    }
+
+    /// The loop behind the waits here: `condition` every `every` seconds until
+    /// it holds or `timeout` has passed, one last look at the deadline, and
+    /// `notice` once, the first time a poll finds it still false after
+    /// `noticeAfter`. `clock` and `sleep` are real time unless a test hands
+    /// in a scripted pair.
+    static func poll(timeout: TimeInterval, noticeAfter: TimeInterval = .infinity,
+                     every: TimeInterval = pollInterval,
+                     clock: () -> Date = { Date() },
+                     sleep: (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) },
+                     notice: () -> Void = {},
+                     until condition: () -> Bool) -> Bool {
+        let start = clock()
+        let deadline = start.addingTimeInterval(timeout)
+        let noticeAt = start.addingTimeInterval(noticeAfter)
         var noticed = false
-        while Date() < deadline {
-            if SocketClient.ping(socketPath: socketPath) { return true }
-            if !noticed, Date() >= notice {
+        while clock() < deadline {
+            if condition() { return true }
+            if !noticed, clock() >= noticeAt {
                 noticed = true
-                // stderr, so a script capturing stdout is unaffected.
-                FileHandle.standardError.write(Data(waitingNotice.utf8))
+                notice()
             }
-            Thread.sleep(forTimeInterval: pollInterval)
+            sleep(every)
         }
-        return SocketClient.ping(socketPath: socketPath)
+        return condition()
+    }
+
+    /// launchd names a process and the socket is silent: a bar in its first
+    /// seconds of boot, or one that hung. Gives it `bootGrace` to bind before
+    /// the caller reads it as wedged and reaches for `kickstart -k`; true the
+    /// moment something listens. `isListening`, not `ping`: the bind is what
+    /// is waited for, and a bar mid-config-run cannot answer a ping.
+    static func bootingBarAnswers(instanceName: String, pid: pid_t, socketPath: String) -> Bool {
+        poll(timeout: bootGrace, noticeAfter: noticeAfter,
+             notice: {
+                 note("\(instanceName) is running (pid \(pid)) but not answering yet — "
+                     + "giving it \(Int(bootGrace)) s to come up...")
+             },
+             until: { SocketClient.isListening(socketPath: socketPath) })
+    }
+
+    /// The other outcome of that grace, for the messages that act on it.
+    static func silentThroughGrace(instanceName: String, pid: pid_t) -> String {
+        "\(instanceName) is running (pid \(pid)) but did not answer within \(Int(bootGrace)) s"
     }
 
     /// The wait after a kickstart launchd accepted. launchd will not respawn a
@@ -1727,31 +1818,37 @@ public enum LocalVerbs {
     /// log with nothing in it. When the bar still has not answered after that
     /// and the kick was a plain one, one `kickstart -k` follows: a process
     /// that came up and hung before binding the socket is alive as far as
-    /// launchd is concerned, and only -k replaces it. `forced` says the first
-    /// kick was already -k, so there is nothing further to try. Returns the
-    /// failure to print, or nil once the bar answers.
+    /// launchd is concerned, and only -k replaces it. The retry waits
+    /// `kickstartRetryTimeout`, a bar's boot allowance, not a second throttle:
+    /// -k replaces the process at once. `forced` says the first kick was
+    /// already -k, so there is nothing further to try. Returns the failure to
+    /// print, or nil once the bar answers.
     static func awaitKickstartedJob(label: String, socketPath: String,
                                     forced: Bool, log: URL) -> String? {
         let target = Launchctl.target(label)
-        var forced = forced
+        let manual = "see \(log.path); `launchctl kickstart -k \(target)` is the manual equivalent"
         if waitForDaemon(socketPath: socketPath, timeout: launchdReadyTimeout,
                          noticeAfter: readyTimeout, waitingNotice: launchdWaitingNotice) {
             return nil
         }
-        if !forced {
-            note("no answer after \(Int(launchdReadyTimeout)) s — retrying with "
-                + "launchctl kickstart -k \(target)")
-            let kick = Launchctl.run(["kickstart", "-k", target])
-            forced = kick.succeeded
-            if forced, waitForDaemon(socketPath: socketPath, timeout: launchdReadyTimeout,
-                                     noticeAfter: readyTimeout,
-                                     waitingNotice: launchdWaitingNotice) {
-                return nil
-            }
+        guard !forced else {
+            return "the login job \(label) was kickstarted with -k but the bar did not answer "
+                + "within \(Int(launchdReadyTimeout)) s — \(manual)"
         }
-        return "the login job \(label) was kickstarted\(forced ? " with -k" : "") but the bar "
-            + "did not answer within \(Int(launchdReadyTimeout)) s — see \(log.path); "
-            + "`launchctl kickstart -k \(target)` is the manual equivalent"
+        note("no answer after \(Int(launchdReadyTimeout)) s — retrying with "
+            + "launchctl kickstart -k \(target), \(Int(kickstartRetryTimeout)) s more")
+        let kick = Launchctl.run(["kickstart", "-k", target])
+        guard kick.succeeded else {
+            return "the login job \(label) was kickstarted but the bar did not answer within "
+                + "\(Int(launchdReadyTimeout)) s, and the retry failed (launchctl kickstart -k "
+                + "\(kick.status): \(kick.output)) — \(manual)"
+        }
+        if waitForDaemon(socketPath: socketPath, timeout: kickstartRetryTimeout) {
+            return nil
+        }
+        return "the login job \(label) was kickstarted, then kicked again with -k after "
+            + "\(Int(launchdReadyTimeout)) s, and the bar did not answer within the "
+            + "\(Int(kickstartRetryTimeout)) s after that — \(manual)"
     }
 
     /// The log a loaded job actually writes, from its plist; `fallback` (the
@@ -1768,13 +1865,7 @@ public enum LocalVerbs {
     /// process has actually gone. `kill(pid, 0)` asks without signalling;
     /// ESRCH is the answer wanted.
     static func waitForProcessGone(pid: pid_t) -> Bool {
-        func gone() -> Bool { kill(pid, 0) != 0 && errno == ESRCH }
-        let deadline = Date().addingTimeInterval(stopTimeout)
-        while Date() < deadline {
-            if gone() { return true }
-            Thread.sleep(forTimeInterval: pollInterval)
-        }
-        return gone()
+        poll(timeout: stopTimeout) { kill(pid, 0) != 0 && errno == ESRCH }
     }
 
     /// Polls the socket FILE, not a connect. A daemon that exits unlinks its
