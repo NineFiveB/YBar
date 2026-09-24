@@ -953,3 +953,48 @@ struct HeadlessScene {
         #expect(!manager.retryScheduled)
     }
 }
+
+/// The marquee is a function of the frame's presentation time, not of how
+/// many times the clock ticked: a ProMotion panel sampling twice as often
+/// must scroll the text at exactly the same speed as a 60 Hz one.
+@MainActor
+@Suite struct MarqueeClockTests {
+    private func scrollingItem() -> Item {
+        let item = Item(name: "m", position: .left)
+        item.label.string = "a long now playing title that overflows its slot"
+        item.label.customWidth = 120
+        item.label.scrollDuration = 100
+        item.scrollTexts = true
+        return item
+    }
+
+    @Test func aTimeStepIsTheSameDistanceAtEitherTickRate() {
+        let slow = HeadlessScene()
+        let fast = HeadlessScene()
+        let item = scrollingItem()
+
+        slow.builder.clock = 100
+        _ = slow.build([item])
+        slow.builder.clock = 100 + 1.0 / 60
+        let slowFrame = slow.build([item]).list
+
+        fast.builder.clock = 100
+        _ = fast.build([item])
+        fast.builder.clock = 100 + 1.0 / 120
+        _ = fast.build([item])
+        fast.builder.clock = 100 + 2.0 / 120
+        let fastFrame = fast.build([item]).list
+
+        #expect(!slowFrame.glyphs.isEmpty)
+        #expect(slowFrame.glyphs.map(\.origin) == fastFrame.glyphs.map(\.origin))
+    }
+
+    @Test func aFrameThatDoesNotAdvanceTheClockDoesNotScroll() {
+        let scene = HeadlessScene()
+        let item = scrollingItem()
+        scene.builder.clock = 100
+        let first = scene.build([item]).list
+        let second = scene.build([item]).list
+        #expect(first.glyphs.map(\.origin) == second.glyphs.map(\.origin))
+    }
+}

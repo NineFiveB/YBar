@@ -279,8 +279,19 @@ public final class BarManager {
     /// invalidate raised inside the tick (an interpolated value, a completion)
     /// is consumed by the tick's own paint that follows it. Damage raised
     /// while painting is left standing and repaints on the next turn.
-    public func renderAll() {
+    ///
+    /// `frameTime` is when this frame will be on screen. Off the display link
+    /// that is the link's own `targetTimestamp`, the same clock the property
+    /// animations interpolate against, so the marquee advances by display time
+    /// rather than by "whenever the main thread reached this surface": it used
+    /// to read CACurrentMediaTime() per surface, AFTER layout, the bracket
+    /// frames, the hit snapshot and the glass sync had already run, which
+    /// scrolled two bars out of phase within one frame and left popups reusing
+    /// whatever the last bar surface happened to leave behind. A damage-driven
+    /// paint has no better estimate than now, and no jitter to accumulate.
+    public func renderAll(at frameTime: CFTimeInterval = CACurrentMediaTime()) {
         renderScheduled = false
+        sceneBuilder.clock = frameTime
         // Continuous demand (marquee text) belongs to the whole frame: every
         // bar surface and every popup panel is accumulated and reported
         // once. Reporting per surface let whichever scene rendered last
@@ -683,7 +694,6 @@ public final class BarManager {
         }
         surface.syncGlassBackdrops(glassSpecs)
 
-        sceneBuilder.clock = CACurrentMediaTime()
         sceneBuilder.pointer = Self.pointerPixels(in: surface.hostView, scale: scale)
         let list = sceneBuilder.build(
             items: items,

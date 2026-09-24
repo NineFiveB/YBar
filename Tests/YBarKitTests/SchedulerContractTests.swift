@@ -1,4 +1,5 @@
 import Foundation
+import QuartzCore
 import Testing
 @testable import YBarKit
 
@@ -73,7 +74,7 @@ import Testing
         // marquee hook counts paints without a window to draw into.
         var paints = 0
         barManager.onMarqueeDemand = { _ in paints += 1 }
-        scheduler.onFrame = { barManager.renderAll() }
+        scheduler.onFrame = { barManager.renderAll(at: $0) }
         scheduler.animate(key: "k", from: .float(0), to: .float(1), durationFrames: 6,
                           curve: .linear, apply: { _ in barManager.setNeedsRender() })
 
@@ -137,7 +138,7 @@ import Testing
     @Test func onFrameFiresOnEveryTickIncludingTheLandingOne() {
         let scheduler = AnimationScheduler()
         var frames = 0
-        scheduler.onFrame = { frames += 1 }
+        scheduler.onFrame = { _ in frames += 1 }
         scheduler.animate(key: "k", from: .float(0), to: .float(1), durationFrames: 6,
                           curve: .linear, apply: { _ in })
         scheduler.tick(now: 0)
@@ -152,7 +153,7 @@ import Testing
         // every frame must still reach onFrame so the scene re-encodes.
         let scheduler = AnimationScheduler()
         var frames = 0
-        scheduler.onFrame = { frames += 1 }
+        scheduler.onFrame = { _ in frames += 1 }
         scheduler.continuousDemand = true
         #expect(!scheduler.isAnimating)
         scheduler.tick(now: 1)
@@ -190,5 +191,40 @@ import Testing
         #expect(!scheduler.isAnimating)
         scheduler.tick(now: 10)
         #expect(completed == 0)
+    }
+}
+
+/// One presentation clock per frame. The property animations always
+/// interpolated on the link's `targetTimestamp`; the marquee sampled
+/// CACurrentMediaTime() per surface, after layout, the bracket frames, the hit
+/// snapshot and the glass sync had run, so it carried all of that jitter and
+/// two bars scrolled the same text out of phase inside one frame.
+@MainActor
+@Suite struct FrameClockTests {
+    @Test func theFramesPresentationTimeReachesThePaint() {
+        let scheduler = AnimationScheduler()
+        var stamps: [TimeInterval] = []
+        scheduler.onFrame = { stamps.append($0) }
+        scheduler.animate(key: "k", from: .float(0), to: .float(1), durationFrames: 60,
+                          curve: .linear, apply: { _ in })
+        scheduler.tick(now: 10)
+        scheduler.tick(now: 10.05)
+        #expect(stamps == [10, 10.05])
+    }
+
+    @Test func oneFrameStampsOneClockForEverySurfaceAndPopup() throws {
+        let barManager = try BarManager()
+        barManager.renderAll(at: 1234.5)
+        #expect(barManager.sceneBuilder.clock == 1234.5)
+        // Painted again at the same instant: nothing in the frame may advance
+        // the clock on its own, or a second surface scrolls out of phase with
+        // the first and a popup reuses whatever the last bar left behind.
+        barManager.renderAll(at: 1234.5)
+        #expect(barManager.sceneBuilder.clock == 1234.5)
+        // A damage-driven paint has no presentation time to carry and no
+        // jitter to accumulate: it stamps now.
+        let before = CACurrentMediaTime()
+        barManager.renderAll()
+        #expect(barManager.sceneBuilder.clock >= before)
     }
 }

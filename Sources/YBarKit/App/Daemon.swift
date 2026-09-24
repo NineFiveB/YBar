@@ -148,8 +148,8 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         // The link callback is already on the main thread. Painting here keeps
         // every interpolated sample; setNeedsRender stays the path for clicks
         // and provider updates, which coalesce while the bar is idle.
-        scheduler.onFrame = { [weak self] in
-            self?.barManager.renderAll()
+        scheduler.onFrame = { [weak self] frameTime in
+            self?.barManager.renderAll(at: frameTime)
         }
         // The link is bound to a surface's view; a rebuild (monitor plug/unplug,
         // display-policy change) would otherwise strand a running animation clock.

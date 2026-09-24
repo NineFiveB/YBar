@@ -136,7 +136,10 @@ public final class AnimationScheduler {
     /// animations have completed. The daemon paints here, on the display-link
     /// callback: the sample is on screen the same turn it was computed, and
     /// the paint retires any coalesced redraw the updates raised on the way.
-    public var onFrame: (() -> Void)?
+    /// It is handed the frame's presentation time — the link's
+    /// `targetTimestamp`, the same clock the property animations interpolate
+    /// against — so everything in one frame is sampled at one instant.
+    public var onFrame: ((TimeInterval) -> Void)?
 
     public init() {}
 
@@ -277,7 +280,7 @@ public final class AnimationScheduler {
         }
         for entry in finished { animations.removeValue(forKey: entry.key) }
         for entry in finished { entry.onComplete?() }
-        onFrame?()
+        onFrame?(now)
         stopLinkIfIdle()
     }
 }
