@@ -4,10 +4,11 @@
   sources, MIT, Copyright (C) 1994-2025 Lua.org, PUC-Rio; the full notice is
   at the end of `Sources/CLua/include/lua.h`. It is linked into `ybar` as the
   embedded config runtime. The `windows` branch vendors the same sources under
-  `src/lua/vendor/`. Its other dependencies (nlohmann/json and Catch2 for the
-  tests) are fetched through vcpkg under their own licenses rather than
-  vendored here; `wil` is listed in `vcpkg.json` but nothing in the tree
-  includes it.
+  `src/lua/vendor/`. Its other dependencies are fetched through vcpkg under
+  their own licenses rather than vendored here: nlohmann/json, which the
+  daemon links at runtime (IPC replies, the JSONC config, serialization and
+  the providers' JSON payloads), and Catch2, for the tests only; `wil` is
+  listed in `vcpkg.json` but nothing in the tree includes it.
 - `examples/sketchybar-port/helpers/menus/menus.c` and its makefile are
   adapted (with small memory-management fixes) from
   [FelixKratz/dotfiles](https://github.com/FelixKratz/dotfiles), GPL-3.0,
