@@ -26,7 +26,11 @@ advisory (unless you prefer otherwise). There is no bug bounty.
 ## Scope — what counts as a vulnerability here
 
 YBar runs entirely as the logged-in user with no elevated privileges, no
-network services, and no private API usage. The interesting surfaces are:
+network services, and no private API linked or dlsym-resolved; the single
+undocumented read is the Wi-Fi scan's presence- and type-checked peek at
+CoreWLAN's private `_isPersonalHotspot` flag through the public Objective-C
+runtime (`Sources/YBarKit/Providers/WifiScan.swift`). The interesting
+surfaces are:
 
 - **The IPC socket** (`/tmp/ybar_$USER.socket`): anything that lets a
   *different* local user drive the daemon or execute code through it.
