@@ -125,8 +125,10 @@ public struct BackgroundStyle: Equatable, Sendable {
     /// designed to sit over a blurred backdrop (item blur_radius > 0).
     public var glass: Bool = false
     /// Pre-26 painted lip, shade, and pointer specular. Ignored where
-    /// NSGlassEffectView is the material, so it does not draw a fake shine
-    /// over system glass or keep the display link running.
+    /// NSGlassEffectView is the material: native glass supplies the
+    /// highlight on 26+, and a painted one over it reads as a fake shine.
+    /// Where it does draw, the specular is damage-driven — repainted on
+    /// pointer moves, never a reason to keep the display link running.
     public var sheen: Bool = false
     /// Overrides the bar-wide glass variant for this plate when `glass` is on.
     public var glassVariant: GlassVariant? = nil
