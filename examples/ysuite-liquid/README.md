@@ -13,8 +13,10 @@ Needs `examples/sketchybar-port` beside this directory. Optional:
 Services).
 
 Prerequisites: [Symbols Nerd Font](https://www.nerdfonts.com) for the
-Bluetooth pill and the port's glyphs, and `blueutil` (`brew install blueutil`)
-for the Bluetooth popup. The app-menus swap needs the port's `menus` helper,
-which only `make helpers` from a clone builds — a `brew install` never has
-it, so the swap is a no-op there (see
+Bluetooth pill's logo glyph (this theme's own `items/widgets/bluetooth.lua`
+is its only user; the port's Wi-Fi and Bluetooth files, the port's only
+users, are replaced by the ones in this directory), and `blueutil`
+(`brew install blueutil`) for the Bluetooth popup. The app-menus swap needs
+the port's `menus` helper, which only `make helpers` from a clone builds — a
+`brew install` never has it, so the swap is a no-op there (see
 [`../sketchybar-port/README.md`](../sketchybar-port/README.md)).
