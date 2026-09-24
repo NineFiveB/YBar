@@ -32,7 +32,7 @@ ybar --query hello                    # live state as JSON
 
 - Keeps **sketchybar's command grammar and script contract** — existing configs port mechanically, and a pure-Lua compatibility shim runs SbarLua configs nearly verbatim.
 - **GPU-rendered**: instanced SDF quads + a glyph atlas, damage-driven — zero GPU work while the bar is static (Metal on macOS, Direct3D 11 on Windows).
-- **100% public APIs** in v1, so OS updates don't break it.
+- **Public APIs only** — the engine links and dlsym-resolves nothing private, so OS updates don't break it. The one exception is a read, not a call: the Wi-Fi popup lists saved personal hotspots by peeking CoreWLAN's private `_isPersonalHotspot` flag through the public Objective-C runtime, presence- and type-checked, so a changed layout only loses those rows.
 - On macOS 26+, pills and popups sit on **real Liquid Glass** (`NSGlassEffectView` backdrops — clear for bar pills, frosted for popups); older systems get an in-shader approximation. On Windows they map to a Mica backdrop — the blurred wallpaper composed under the pill or panel, which paints whether or not Transparency effects are on — under the same in-shader rim; bar-level `glass` maps to DWM Acrylic, which does follow that setting.
 
 ## What's here
