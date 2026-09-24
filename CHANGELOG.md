@@ -6,7 +6,11 @@ port on the `windows` branch has its own git history. Each release heading is
 `## [<version>] — <date>`: the release workflow refuses a tag that has no such
 section and publishes the section as the GitHub Release notes.
 
-## [Unreleased] — 0.2.1
+## [Unreleased]
+
+Nothing yet.
+
+## [0.2.1] — 2026-09-24
 
 ### Added
 
@@ -260,6 +264,7 @@ with the next release.
 
 First tagged release.
 
-[Unreleased]: https://github.com/NineFiveB/YBar/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/NineFiveB/YBar/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/NineFiveB/YBar/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/NineFiveB/YBar/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/NineFiveB/YBar/releases/tag/v0.1.0
