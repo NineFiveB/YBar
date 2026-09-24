@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/NineFiveB/YBar/actions/workflows/ci.yml/badge.svg)](https://github.com/NineFiveB/YBar/actions/workflows/ci.yml)
 
+**[Install](docs/INSTALL.md)** · **[Configure](docs/CONFIG.md)** · **[Themes](docs/THEMES.md)** · **[Extend](docs/EXTENDING.md)** · **[Build](docs/BUILDING.md)** · **[Architecture](docs/ARCHITECTURE.md)** · **[Windows](docs/WINDOWS.md)** · **[Changelog](CHANGELOG.md)** · **[Security](SECURITY.md)** · **[Contributing](CONTRIBUTING.md)**
+
 **A status bar your GPU draws.** Script it from the shell or from Lua. Runs on macOS and Windows 11.
 
 It does nothing at rest. Your config is Lua running inside it. A sketchybar config ports over with the same commands.
