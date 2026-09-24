@@ -169,6 +169,11 @@ On Windows the event and provider set maps one-to-one to native equivalents
 - `make app` builds a minimal **app bundle** so the daemon owns its TCC identity —
   Bluetooth, Calendar, and Apple Events prompts attribute to YBar instead of your
   terminal, and grants cover every helper the daemon spawns
+- `ybar start|stop|restart|status` drive that bundle from the command line:
+  `start` launches YBar.app (or kickstarts the login job when one owns the
+  bar), `stop` waits for the process to go, `restart` replaces even a bar that
+  has stopped answering, `status` reports bar, config and autostart state;
+  exit codes 0 / 1 failed / 2 usage
 - `ybar autostart enable [-c <config>]|disable|status` writes and bootstraps the
   `com.ybar.YBar` LaunchAgent (bundle binary, KeepAlive on crash only, config
   discovered at each start unless pinned)

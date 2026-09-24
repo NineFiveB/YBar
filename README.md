@@ -18,7 +18,7 @@ backdrops. Network names and device names in this recording are placeholders.*
 
 
 ```sh
-ybar                                  # start the daemon
+ybar start                            # launch the bar (ybar stop, ybar restart, ybar status)
 ybar --bar height=32 color=0xdd1e1e2e topmost=on
 ybar --add item hello left \
      --set hello icon=sf:sparkles label="YBar is alive" \
@@ -49,7 +49,7 @@ brew install ybar           # latest tagged release; --HEAD builds current main
 (Recent Homebrew asks you to confirm trusting a third-party tap on first
 install — that prompt is expected; `brew trust NineFiveB/ybar` pre-approves it.)
 
-`ybar autostart enable` then registers the bar as a login LaunchAgent (KeepAlive on crash, config discovered at each start). See [docs/INSTALL.md](docs/INSTALL.md) for the first-run privacy-permission walkthrough, stable local signing (keeps TCC grants across rebuilds), and what autostart writes.
+`ybar start` launches the bar — YBar.app, so privacy prompts attribute to YBar — and `ybar stop`, `ybar restart` and `ybar status` drive it by name. `ybar autostart enable` then registers the bar as a login LaunchAgent (KeepAlive on crash, config discovered at each start); from then on the verbs go through launchd. See [docs/INSTALL.md](docs/INSTALL.md) for the first-run privacy-permission walkthrough, stable local signing (keeps TCC grants across rebuilds), and what autostart writes.
 
 (Windows users: see [Windows](#windows) below.)
 
@@ -65,8 +65,15 @@ required.
 make build       # swift build (scratch path outside iCloud-synced dirs)
 make test
 make app         # ~/Applications/YBar.app — the recommended way to run the daemon
-open -g ~/Applications/YBar.app --args -c <your ybarrc.lua>
+make start       # launch it in the background (also: make restart, make stop, make status)
 ```
+
+Once `ybar` is on your PATH, the bar is driven by name rather than by path:
+`ybar start`, `ybar stop`, `ybar restart`, `ybar status`, and
+`ybar autostart enable` to have it come up at every login. The ones that
+launch anything launch YBar.app rather than the bare binary, which is what
+keeps privacy prompts attributed to YBar — and go through launchd once a login
+job owns the bar; the rest talk to the running bar or just report on it.
 
 ## Windows
 
