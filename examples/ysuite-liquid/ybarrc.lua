@@ -1,8 +1,8 @@
 -- Liquid Glass mock from ysuite-web ("Liquid Glass on Metal").
--- Full-bleed glass strip, capsule pills, and the webpage's right-hand order:
--- CPU sparkline, Wi-Fi, Bluetooth, battery, clock. Item scripts come from
--- the sketchybar port; this directory only overrides bar, colors, defaults,
--- and which widgets load.
+-- Full-bleed strip kept clear over per-pill glass capsules (sheen off), and
+-- the webpage's right-hand order: CPU sparkline, Wi-Fi, Bluetooth, battery,
+-- clock. Item scripts come from the sketchybar port; this directory only
+-- overrides bar, colors, defaults, and which widgets load.
 --
 -- Install: `ybar theme use ysuite-liquid` (see docs/THEMES.md).
 

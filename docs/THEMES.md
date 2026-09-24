@@ -52,12 +52,18 @@ no longer spawn `osascript` for it), click volume/battery/wifi for the
 matching Settings pane, click the clock for Calendar (`helpers/mac.lua` has
 the shared pieces).
 
-To hide the native macOS menu bar entirely, set `topmost = "on"` on the bar
-(the glass theme does). With menu-bar auto-hide enabled, macOS still reveals
-its bar when the pointer hits the top edge; at status-bar level YBar covers
-it, so it is never visible - no private APIs or SIP changes required. The
-native status items become unclickable while covered, which is why the
-themes ship replacements for them.
+To hide the native macOS menu bar, set `topmost = "on"` on the bar (the
+Liquid Glass themes do). With menu-bar auto-hide enabled, macOS still
+reveals its bar when the pointer hits the top edge; at status-bar level
+YBar draws over it - no private APIs or SIP changes required. The cover is
+only the panel's own rect, though: the engine paints nothing outside it, so
+the native bar stays visible wherever the panel is inset. The
+`sketchybar-glass` island (`margin = 10`, `y_offset = 6`, `corner_radius =
+9`) leaves it showing in the top band, the side columns and the corner
+cutouts - and the auto-hide reveal lands exactly in that band - while
+`ysuite` keeps `margin = 0` / `y_offset = 0` so the cover is complete.
+The native status items become unclickable while covered, which is why
+the themes ship replacements for them.
 
 ## Writing a theme
 

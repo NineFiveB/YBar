@@ -13,10 +13,12 @@ development Mac ([NineFiveB/YBar](https://github.com/NineFiveB/YBar)).
 
 ## vs `sketchybar-glass`
 
-Same colors, fonts, and item files. This setup keeps `margin=0` / `y_offset=0`
-so the panel fully covers the menu-bar strip. `sketchybar-glass` experiments
-with a floating island inset; without an engine-side full-bleed cover that
-leaks the native menu bar at the gaps.
+Same colors, fonts, defaults and item files — this directory holds only
+`bar.lua` and the entry point, and resolves the rest from
+`../sketchybar-glass` and `../sketchybar-port`. This setup keeps `margin=0` /
+`y_offset=0` so the panel fully covers the menu-bar strip. `sketchybar-glass`
+experiments with a floating island inset; without an engine-side full-bleed
+cover that leaks the native menu bar at the gaps.
 
 ## Use
 
@@ -28,6 +30,13 @@ scripts/ybar-theme use ysuite
 ybar theme use ysuite
 ```
 
-Requires the `sketchybar-port` tree beside this theme (shipped in
-`examples/`). Optional: `ybar --bar wifi_ssid_prompt=on` once for the Wi-Fi
-network name (Location Services).
+Requires the `sketchybar-glass` and `sketchybar-port` trees beside this
+theme (shipped in `examples/`; `ybarrc.lua` falls back to
+`~/.config/ybar/themes` for both). Optional: `ybar --bar wifi_ssid_prompt=on`
+once for the Wi-Fi network name (Location Services).
+
+Prerequisites: [Symbols Nerd Font](https://www.nerdfonts.com) for the port's
+glyphs, and `blueutil` (`brew install blueutil`) for the Bluetooth popup. The
+app-menus swap needs the port's `menus` helper, which only `make helpers`
+from a clone builds — a `brew install` never has it, so the swap is a no-op
+there (see [`../sketchybar-port/README.md`](../sketchybar-port/README.md)).
