@@ -34,3 +34,9 @@ Requires the `sketchybar-glass` and `sketchybar-port` trees beside this
 theme (shipped in `examples/`; `ybarrc.lua` falls back to
 `~/.config/ybar/themes` for both). Optional: `ybar --bar wifi_ssid_prompt=on`
 once for the Wi-Fi network name (Location Services).
+
+Prerequisites: [Symbols Nerd Font](https://www.nerdfonts.com) for the port's
+glyphs, and `blueutil` (`brew install blueutil`) for the Bluetooth popup. The
+app-menus swap needs the port's `menus` helper, which only `make helpers`
+from a clone builds — a `brew install` never has it, so the swap is a no-op
+there (see [`../sketchybar-port/README.md`](../sketchybar-port/README.md)).
