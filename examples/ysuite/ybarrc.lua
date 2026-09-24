@@ -23,11 +23,25 @@ SKETCHYBAR_CONFIG = PORT_DIR
 -- colors / default / settings / helpers.default_font come from the glass
 -- theme rather than a copy here, so a palette fix lands once. Same lookup
 -- as the port: beside this theme in the repo, else under ~/.config/ybar/themes.
-local GLASS_DIR = config_dir .. "../sketchybar-glass"
+-- Unlike the port's lookup, a miss at both is fatal. With no glass tree the
+-- package.path entry below is dead and require() falls through to the
+-- port's OWN colors / default / settings / default_font - a different
+-- palette and different defaults - so the bar would come up quietly wrong
+-- instead of not at all.
+local GLASS_DIR
 do
-  local probe = io.open(GLASS_DIR .. "/colors.lua", "r")
-  if probe then probe:close()
-  else GLASS_DIR = os.getenv("HOME") .. "/.config/ybar/themes/sketchybar-glass" end
+  local beside = config_dir .. "../sketchybar-glass"
+  local installed = os.getenv("HOME") .. "/.config/ybar/themes/sketchybar-glass"
+  for _, dir in ipairs({ beside, installed }) do
+    local probe = io.open(dir .. "/colors.lua", "r")
+    if probe then probe:close(); GLASS_DIR = dir; break end
+  end
+  if not GLASS_DIR then
+    error("ysuite: sketchybar-glass not found at " .. beside .. " or " .. installed
+      .. ". It supplies this theme's colors, defaults and fonts: put"
+      .. " examples/sketchybar-glass beside this theme, or under ~/.config/ybar/themes"
+      .. " (a copy, or `ybar theme install <git-url>` of a repo named sketchybar-glass).")
+  end
 end
 
 -- Search order: this directory, the glass theme, then the Lua default path
