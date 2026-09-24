@@ -8,6 +8,16 @@ section and publishes the section as the GitHub Release notes.
 
 ## [Unreleased] — 0.2.1
 
+### Added
+
+- `ybar start [-c <path>]`, `ybar stop`, `ybar restart [-c <path>]` and
+  `ybar status`: process control that launches YBar.app rather than the
+  bare binary, so privacy prompts stay attributed to YBar, and goes through
+  launchd when a login job owns the bar. `make start`, `make restart` and
+  `make status` wrap them; `make stop` runs `ybar stop` in place of
+  `--exit`. The formula's caveats point at `ybar start` and
+  `ybar autostart enable`; `brew services` stays deliberately unwired.
+
 ### Fixed
 
 - Wi-Fi: a join that `networksetup` refuses with exit 0 and a message
@@ -66,6 +76,8 @@ section and publishes the section as the GitHub Release notes.
 
 ### Changed
 
+- Usage errors from every local verb exit 2 — `ybar theme bogus` and a bare
+  `ybar theme use` used to exit 1 — while a failed operation stays at 1.
 - `--bar glass_variant` accepts `default` / `off` (restoring the built-in
   `clear`), the same tokens the item-level setter takes to drop a per-item
   override; both error messages list `clear|regular|default|off`.
