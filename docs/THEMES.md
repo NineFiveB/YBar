@@ -32,7 +32,7 @@ theme reset` hands the bar back to your `~/.config/ybar/ybarrc.lua`. Themes are 
 | Theme | Directory | Look |
 |---|---|---|
 | **sketchybar-glass** | `examples/sketchybar-glass` | Liquid Glass: monochrome near-black bar, real `NSGlassEffectView` pills and popups, full widget suite (wifi/bluetooth/battery/calendar/menus/Claude, a system monitor with CPU and memory gauges plus a GPU utilization graph when the driver reports one, and a now-playing popup with album artwork, seek + volume sliders, and transport controls). The flagship. |
-| **ninefiveb** | `examples/ninefiveb` | Maintainer daily driver — same Liquid Glass suite as `sketchybar-glass`, full-width under `topmost=on` (no island inset) so the native menu bar stays fully covered. |
+| **ninefiveb** | `examples/ninefiveb` | Maintainer daily driver — same Liquid Glass suite as `sketchybar-glass`, full-width under `topmost=on` (no island inset) so the native menu bar stays covered edge to edge. |
 | **ysuite-liquid** | `examples/ysuite-liquid` | The ysuite-web “Liquid Glass on Metal” mock: full-bleed strip, glass pills, right cluster CPU / Wi-Fi / Bluetooth / battery / clock. |
 | **darxk** | `examples/darxk` | Replication of [00Darxk/dotfiles](https://github.com/00Darxk/dotfiles) Waybar: translucent dark bar, segmented rounded capsules with Catppuccin accents, inverted light pills for active workspace and window title, brew-updates + GitHub-notifications modules. |
 | **sketchybar-port** | `examples/sketchybar-port` | The full sketchybar-setup port in its original styling. |
@@ -61,7 +61,10 @@ the native bar stays visible wherever the panel is inset. The
 `sketchybar-glass` island (`margin = 10`, `y_offset = 6`, `corner_radius =
 9`) leaves it showing in the top band, the side columns and the corner
 cutouts - and the auto-hide reveal lands exactly in that band - while
-`ninefiveb` keeps `margin = 0` / `y_offset = 0` so the cover is complete.
+`ninefiveb` keeps `margin = 0` / `y_offset = 0` so the cover runs edge to
+edge along the top and both sides; it keeps `corner_radius = 9`, so only
+the four corner cutouts remain (the top pair sit in the screen's own
+corners).
 The native status items become unclickable while covered, which is why
 the themes ship replacements for them.
 

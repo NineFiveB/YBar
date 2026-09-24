@@ -16,6 +16,12 @@ both themes get them.
 `../sketchybar-port/sketchybar.lua` and falls back to
 `~/.config/ybar/themes/sketchybar-port`.
 
+[`../ninefiveb`](../ninefiveb) layers on this directory in turn: its
+`ybarrc.lua` splices this directory into `package.path` and resolves
+`colors`, `default`, `settings` and `helpers.default_font` from here, so
+renaming or removing one of those files changes ninefiveb as well (and it
+refuses to start when this directory is missing altogether).
+
 ## The look
 
 - **Bar** — height 40, near-black, bar-level `glass` (the behind-window
