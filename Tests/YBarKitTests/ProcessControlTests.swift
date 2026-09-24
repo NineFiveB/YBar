@@ -665,13 +665,12 @@ private func makeTemporaryDirectory() throws -> URL {
         #expect(clock.elapsed == 3)
     }
 
-    /// The numbers. A booting bar gets a few seconds — less than the bar this
-    /// verb launched gets, because the bind comes first in the daemon's boot
-    /// — and a kickstart's -k retry gets a bar's boot allowance, so a job that
-    /// never comes up costs 45 s + 15 s rather than 90.
+    /// The numbers. A booting bar gets the same allowance as one this verb
+    /// launched — the Metal device and the shader compile come before the
+    /// bind — and a kickstart's -k retry gets that allowance too, so a job
+    /// that never comes up costs 45 s + 15 s rather than 90.
     @Test func theGraceAndTheRetryAreBounded() {
-        #expect(LocalVerbs.bootGrace == 5)
-        #expect(LocalVerbs.bootGrace < LocalVerbs.readyTimeout)
+        #expect(LocalVerbs.bootGrace == LocalVerbs.readyTimeout)
         #expect(LocalVerbs.kickstartRetryTimeout == LocalVerbs.readyTimeout)
         #expect(LocalVerbs.launchdReadyTimeout + LocalVerbs.kickstartRetryTimeout == 60)
     }

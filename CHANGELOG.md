@@ -26,7 +26,7 @@ section and publishes the section as the GitHub Release notes.
 - `launchctl print`'s `pid = N` line is read, so a bar that is alive but
   not answering its socket is neither "running" nor "not running": `status`
   and `stop` report it as such (`stop` boots the job out), `start` and
-  `restart` give it 5 s to bind — a bar still booting looks the same —
+  `restart` give it 15 s to bind — a bar still booting looks the same —
   and then replace it with `kickstart -k`, and a plain kickstart that has
   not come up within launchd's throttle is kicked once more with `-k` and
   given 15 s more before the failure names `launchctl kickstart -k
