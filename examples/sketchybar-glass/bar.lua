@@ -23,8 +23,9 @@ sbar.bar({
   -- shadowless rect and nothing behind it. With the island geometry above
   -- the native menu bar stays visible in the 6 pt band over the bar, the
   -- 10 pt columns beside it and the corner cutouts - and with auto-hide on,
-  -- the hover reveal lands exactly in that top band. The cover is complete
-  -- only at margin = 0 / y_offset = 0, which is what ninefiveb does.
+  -- the hover reveal lands exactly in that top band. Only margin = 0 /
+  -- y_offset = 0 (ninefiveb) covers the top edge and both sides; the
+  -- corner_radius cutouts remain either way.
   --
   -- Trade-off: the native menu bar and its status items (Control Center, the
   -- system clock, third-party menu items) become unclickable while covered.
