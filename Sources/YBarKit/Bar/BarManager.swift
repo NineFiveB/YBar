@@ -706,8 +706,12 @@ public final class BarManager {
     }
 
     /// The `pointerPixels` result for a cursor that is not over the surface:
-    /// far negative, the same value `DisplayList.pointer` starts out with.
-    static let missingPointer = SIMD2<Float>(repeating: -1e6)
+    /// far negative. Read off `DisplayList.pointer`'s default rather than
+    /// repeated as a literal: a scene never handed a pointer and one told
+    /// the cursor is elsewhere must carry the same value, and two literals
+    /// would only stay equal by care (SceneTests compares against
+    /// `DisplayList().pointer` for the same reason).
+    static let missingPointer = DisplayList().pointer
 
     /// Cursor in a surface's Metal pixels (top-left, y-down). Far negative when
     /// the pointer is outside that window, or the window is not ordered in:
