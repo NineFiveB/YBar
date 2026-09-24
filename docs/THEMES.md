@@ -6,7 +6,7 @@ A YBar theme is a directory with a `ybarrc.lua` (or `ybar.jsonc`,
 
 ```sh
 ybar theme list                # shipped + installed themes; * marks the selected one
-ybar theme use darxk           # a running bar reloads in place; otherwise YBar.app is started
+ybar theme use darxk           # a running bar reloads in place; otherwise `ybar start` runs
 ybar theme current             # the selected name
 ybar theme reset               # forget the selection
 ybar theme install <git-url>   # clone a community theme into ~/.config/ybar/themes
@@ -26,6 +26,17 @@ theme reset` hands the bar back to your `~/.config/ybar/ybarrc.lua`. Themes are 
 `share/ybar/examples` and `~/.config/ybar/themes`; from a source checkout,
 `scripts/ybar-theme …` forwards to the binary with the checkout's
 `examples/` added as a root.
+
+With no bar running, `use` records the name and runs a plain `ybar start`
+([INSTALL.md](INSTALL.md)): a loaded login job is kickstarted rather than
+bypassed, and the daemon's own discovery picks the theme up — the same path
+the next login takes. A theme the daemon cannot see on its own (a checkout's
+`examples/`, reached only through `YBAR_THEME_ROOTS`, which no launched
+daemon inherits) is passed with `-c` for that run and `use` says so; copy it
+under `~/.config/ybar/themes` to make the selection stick across logins. A
+login job written with `ybar autostart enable -c <path>` pins that config:
+`use` still reloads the running bar, but the next start comes up on the
+pinned file (`ybar autostart status` says so).
 
 ## Shipped themes
 

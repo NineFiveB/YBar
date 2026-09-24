@@ -8,6 +8,39 @@ section and publishes the section as the GitHub Release notes.
 
 ## [Unreleased] — 0.2.1
 
+### Added
+
+- `ybar start [-c <path>]`, `ybar stop`, `ybar restart [-c <path>]` and
+  `ybar status`: process control that launches YBar.app rather than the
+  bare binary, so privacy prompts stay attributed to YBar, and goes through
+  launchd when a login job owns the bar. `make start`, `make restart` and
+  `make status` wrap them; `make stop` runs `ybar stop` in place of
+  `--exit`. The formula's caveats point at `ybar start` and
+  `ybar autostart enable`; `brew services` stays deliberately unwired.
+- `ybar stop` reads the login job's plist before promising anything. A
+  hand-written `KeepAlive` that relaunches after any exit — `<true/>`, or a
+  dictionary launchd would satisfy on a clean exit — has the job booted out
+  instead, with the message saying the plist stays for `ybar start` (which
+  loads it again) or the next login; `status` and `autostart status` label
+  the shape (`KeepAlive: always`, `KeepAlive: off`).
+- `launchctl print`'s `pid = N` line is read, so a bar that is alive but
+  not answering its socket is neither "running" nor "not running": `status`
+  and `stop` report it as such (`stop` boots the job out), `start` and
+  `restart` give it 15 s to bind — a bar still booting looks the same —
+  and then replace it with `kickstart -k`, and a plain kickstart that has
+  not come up within launchd's throttle is kicked once more with `-k` and
+  given 15 s more before the failure names `launchctl kickstart -k
+  gui/<uid>/<label>`. The kickstart paths roll, and point at, the job's own
+  `StandardErrorPath` rather than assuming `~/Library/Logs/<instance>.log`.
+- `ybar stop` no longer promises a next login the plist alone cannot keep:
+  with a persistent disable override on the job (Login Items, off) it
+  says so, as `status` does. `ybar start -c` against a loaded job says
+  the job stays down and `-c` applies to that run only.
+- `ybar theme use` with no bar running goes through a plain `ybar start`,
+  so a loaded login job is kickstarted instead of an unmanaged `-c` copy
+  starting beside it; `-c` stays for a renamed instance and for a theme
+  only `YBAR_THEME_ROOTS` reaches, and `use` says so.
+
 ### Fixed
 
 - Wi-Fi: a join that `networksetup` refuses with exit 0 and a message
@@ -66,6 +99,8 @@ section and publishes the section as the GitHub Release notes.
 
 ### Changed
 
+- Usage errors from every local verb exit 2 — `ybar theme bogus` and a bare
+  `ybar theme use` used to exit 1 — while a failed operation stays at 1.
 - `--bar glass_variant` accepts `default` / `off` (restoring the built-in
   `clear`), the same tokens the item-level setter takes to drop a per-item
   override; both error messages list `clear|regular|default|off`.
@@ -98,11 +133,19 @@ section and publishes the section as the GitHub Release notes.
 
 - README GIFs re-shot on ysuite-liquid, with placeholder network and device
   names.
+- README, docs/INSTALL.md, docs/ARCHITECTURE.md, docs/EXTENDING.md and
+  docs/THEMES.md teach `ybar start|stop|restart|status` in place of
+  `open -g … --args` and `ybar --exit`, with `launchctl kickstart -k` kept as
+  the escape hatch for a hung bar; INSTALL.md's reference plist is what
+  `autostart enable` writes today (`LimitLoadToSessionType`,
+  `AssociatedBundleIdentifiers`, `ThrottleInterval`, `StandardErrorPath`),
+  and ARCHITECTURE.md lists the local verbs and their exit codes beside the
+  message grammar.
 - docs/WINDOWS-PORT.md synced three ways with the `windows` branch's copy:
   the port's process-control and console-ownership sections, the corrected
-  `Uniforms` ABI paragraph, and wording that keeps
-  `start`/`stop`/`restart`/`status` attributed to the unmerged
-  `wip/process-control-cli` branch.
+  `Uniforms` ABI paragraph, and the process-verb wording, which records
+  `start`/`stop`/`restart`/`status` as on the reference rather than staged
+  on a branch.
 - docs/ARCHITECTURE.md's redraw policy describes the display-link pacing
   above.
 - docs/EXTENDING.md catalogues the 0.2 surface: the Liquid Glass keys and

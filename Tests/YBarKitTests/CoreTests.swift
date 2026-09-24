@@ -334,31 +334,37 @@ import Testing
 
 @Suite struct LocalVerbsTests {
     @Test func launchAgentPlistOmitsConfigUnlessPinned() throws {
-        let binary = "/Users/me/Applications/YBar.app/Contents/MacOS/ybar"
-        let discovered = LaunchAgent.plist(binary: binary, configPath: nil)
+        let binary = URL(fileURLWithPath: "/Users/me/Applications/YBar.app/Contents/MacOS/ybar")
+        let label = LaunchAgent.label(instanceName: "ybar")
+        let log = "/Users/me/Library/Logs/ybar.log"
+        let discovered = LaunchAgent.plist(
+            label: label,
+            programArguments: LaunchAgent.programArguments(binary: binary, config: nil),
+            standardErrorPath: log)
         #expect(discovered["Label"] as? String == "com.ybar.YBar")
-        #expect(discovered["ProgramArguments"] as? [String] == [binary])
+        #expect(discovered["ProgramArguments"] as? [String] == [binary.path])
         #expect(discovered["RunAtLoad"] as? Bool == true)
         #expect((discovered["KeepAlive"] as? [String: Bool])?["SuccessfulExit"] == false)
-        let pinned = LaunchAgent.plist(binary: binary, configPath: "/Users/me/.config/ybar/ybarrc.lua")
-        #expect(pinned["ProgramArguments"] as? [String] == [binary, "-c", "/Users/me/.config/ybar/ybarrc.lua"])
+        let pinned = LaunchAgent.plist(
+            label: label,
+            programArguments: LaunchAgent.programArguments(
+                binary: binary, config: "/Users/me/.config/ybar/ybarrc.lua"),
+            standardErrorPath: log)
+        #expect(pinned["ProgramArguments"] as? [String]
+            == [binary.path, "-c", "/Users/me/.config/ybar/ybarrc.lua"])
         // launchd reads XML plists; the round trip must preserve the shape.
         let back = try PropertyListSerialization.propertyList(
-            from: LaunchAgent.plistData(pinned), format: nil) as? [String: Any]
+            from: LaunchAgent.xmlData(pinned), format: nil) as? [String: Any]
         #expect(back?["ProgramArguments"] as? [String] == pinned["ProgramArguments"] as? [String])
         #expect((back?["KeepAlive"] as? [String: Bool])?["SuccessfulExit"] == false)
     }
 
-    @Test func bundleDetectionAndHomebrewOptPath() {
-        #expect(AppBundle.bundleURL(containing: URL(
+    @Test func bundleDetection() {
+        #expect(AppBundle.enclosingBundle(of: URL(
             fileURLWithPath: "/Users/me/Applications/YBar.app/Contents/MacOS/ybar"))?.path
             == "/Users/me/Applications/YBar.app")
-        #expect(AppBundle.bundleURL(containing: URL(
+        #expect(AppBundle.enclosingBundle(of: URL(
             fileURLWithPath: "/Users/me/.cache/ybar-build/debug/ybar")) == nil)
-        #expect(AppBundle.homebrewOptPath(
-            for: "/opt/homebrew/Cellar/ybar/0.1.0/YBar.app/Contents/MacOS/ybar")
-            == "/opt/homebrew/opt/ybar/YBar.app/Contents/MacOS/ybar")
-        #expect(AppBundle.homebrewOptPath(for: "/Users/me/Applications/YBar.app/Contents/MacOS/ybar") == nil)
     }
 
     @Test func themeCatalogFirstRootWinsAndStaleSelectionIsNil() throws {
@@ -387,17 +393,17 @@ import Testing
         #expect(ThemeCatalog.currentEntry(home: home, roots: roots) == nil)
     }
 
-    /// Only `theme` and `autostart` are local; everything else must fall
+    /// Only the bare local verbs are claimed; everything else must fall
     /// through to the socket client untouched.
-    @Test func onlyThemeAndAutostartAreLocal() {
+    @Test func onlyLocalVerbsAreClaimed() {
         #expect(LocalVerbs.run(arguments: [], instanceName: "ybar") == nil)
         #expect(LocalVerbs.run(arguments: ["--query", "bar"], instanceName: "ybar") == nil)
         #expect(LocalVerbs.run(arguments: ["--theme"], instanceName: "ybar") == nil)
         // Bad sub-verbs are usage errors, and touch nothing.
-        #expect(LocalVerbs.run(arguments: ["theme", "bogus"], instanceName: "ybar") == 1)
-        #expect(LocalVerbs.run(arguments: ["theme", "use"], instanceName: "ybar") == 1)
-        #expect(LocalVerbs.run(arguments: ["autostart", "bogus"], instanceName: "ybar") == 1)
-        #expect(LocalVerbs.run(arguments: ["autostart", "enable", "extra"], instanceName: "ybar") == 1)
+        #expect(LocalVerbs.run(arguments: ["theme", "bogus"], instanceName: "ybar") == 2)
+        #expect(LocalVerbs.run(arguments: ["theme", "use"], instanceName: "ybar") == 2)
+        #expect(LocalVerbs.run(arguments: ["autostart", "bogus"], instanceName: "ybar") == 2)
+        #expect(LocalVerbs.run(arguments: ["autostart", "enable", "extra"], instanceName: "ybar") == 2)
     }
 }
 

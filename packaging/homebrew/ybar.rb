@@ -61,13 +61,31 @@ class Ybar < Formula
     bin.install "scripts/ybar-theme"
   end
 
+  # There is deliberately NO `service do` block, so `brew services start ybar`
+  # stays unimplemented. It would register a second RunAtLoad agent
+  # (sh.brew.ybar, or homebrew.mxcl.ybar on older Homebrew) racing
+  # com.ybar.YBar for /tmp/ybar_<user>.socket at login; the loser exits 0,
+  # which launchd reads as a clean quit and never retries, so one of the two
+  # bars silently never appears. yabai's and skhd's formulae omit it for the
+  # same reason and point their caveats at the built-in verb. `ybar autostart
+  # enable` is the supported route, it refuses to run while a brew-managed job
+  # is loaded, and `ybar status` reports the collision if one exists.
+
   def caveats
     <<~EOS
       YBar runs as an app bundle so macOS attributes privacy prompts
       (Bluetooth, Calendar, Apple Events) and manual grants (Accessibility,
       Screen Recording) to com.ybar.YBar. Start it with:
 
-        open -g #{opt_prefix}/YBar.app --args -c ~/.config/ybar/ybarrc.lua
+        ybar start
+
+      and have it come up at every login (a launchd agent that also restarts
+      it after a crash) with:
+
+        ybar autostart enable
+
+      `brew services` is deliberately not wired up: two login agents would race
+      for the same socket. `ybar autostart enable` is the supported route.
 
       The app is ad-hoc signed and every rebuild or upgrade produces a new
       signature, which voids previously granted TCC permissions. To keep
@@ -78,7 +96,8 @@ class Ybar < Formula
           #{opt_prefix}/YBar.app
 
       Start it at login with `ybar autostart enable` (writes and loads the
-      com.ybar.YBar LaunchAgent). First-run permission walkthrough:
+      com.ybar.YBar LaunchAgent). First-run permission walkthrough and
+      `ybar status`:
       https://github.com/NineFiveB/YBar/blob/main/docs/INSTALL.md
     EOS
   end

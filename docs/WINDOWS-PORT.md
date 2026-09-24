@@ -397,17 +397,12 @@ independent instance.
   Anything else → thin client (strip a leading `-m/--message`, fold
   `AEROSPACE_*`/`YABAI_*`/`KOMOREBI_*` env on `--trigger`, serialize argv →
   socket → print reply; `[!]` replies go to stderr, exit 1).
-- Process control (`src/app/process_control.cpp`): the same four verbs the
-  reference stages on its unmerged `wip/process-control-cli` branch, with
-  that branch's exit codes for them (on `main` today the reference's only
-  local verbs are `theme` and `autostart`, whose usage errors still exit 1;
-  once the branch lands these are simply the reference's verbs and codes) —
+- Process control (`src/app/process_control.cpp`): the reference's four
+  verbs (`Sources/YBarKit/App/LocalVerbs.swift`), with its exit codes —
   **0** success including every idempotent no-op
   (`stop` with nothing running, `start` with a bar already up), **1** the
-  operation failed, **2** the invocation was wrong. The port applies **2**
-  to usage errors from every local verb, `autostart`/`theme` included; that
-  is one step past the staged branch, where the four verbs' and
-  `autostart`'s usage errors exit 2 but `theme`'s still exit 1.
+  operation failed, **2** the invocation was wrong, from every local verb,
+  `autostart`/`theme` included.
   Message-grammar errors stay at 1 on both sides:
   - `start` refuses a `-c` that does not exist, probes the socket with a
     connect (not `--ping`: a bar mid-config-run cannot answer one, and reading
@@ -428,10 +423,10 @@ independent instance.
   - `restart` = `stop` (quiet when nothing runs) + `start`; `status` prints
     running/instance/socket/exe/config-a-fresh-start-would-pick (labelled with
     the theme when the recorded theme produced it)/autostart/log, plus notes.
-  - Of the staged macOS verbs (`wip/process-control-cli`), `start`, `stop`,
-    `restart` and `autostart enable`/`disable` refuse to run as root, while
-    `status` and `autostart status` run and print a note that they describe
-    root's session (`main`'s `theme` and `autostart` do not check the uid);
+  - Of the macOS verbs, `start`, `stop`, `restart` and `autostart
+    enable`/`disable` refuse to run as root, while `status` and `autostart
+    status` run and print a note that they describe root's session (`theme`
+    does not check the uid);
     the Windows ones do **not** refuse elevation. The reason there is TCC
     attribution, which has no analogue here, and an elevated bar is a
     legitimate setup next to an elevated tiler.
@@ -1628,8 +1623,8 @@ backdrops and Mica popup panels (§7.6; both surfaces moved to
 Windows.UI.Composition for them, DirectComposition remains only as the
 frame pump's clock), `ybar theme
 list|current|use|reset`, `ybar autostart enable|disable|status`, `ybar
-start|stop|restart|status` with the 0/1/2 exit codes of the verbs the
-reference stages on `wip/process-control-cli` (§5), the windowless
+start|stop|restart|status` with the reference's 0/1/2 exit codes (§5),
+the windowless
 `ybarw.exe` launcher (§5), the
 `AppUserModelID`, the shipped `examples/catppuccin-komorebi` theme, and CI
 packaging of `examples/` + app-local `d3dcompiler_47.dll`.
