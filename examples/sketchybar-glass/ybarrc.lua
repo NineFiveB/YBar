@@ -3,10 +3,11 @@
 -- menu, app menus + workspace swap, workspaces with app icons, calendar,
 -- battery + popup + charge history, bluetooth, wifi, cpu + stats popup,
 -- now-playing) — restyled as dark Liquid Glass: blurred backdrops,
--- specular rims, 20pt macOS-26 corners.
+-- specular rims, 9pt corners.
 --
 -- The item files are REUSED verbatim from ../sketchybar-port; only this
--- directory's colors.lua / bar.lua / default.lua differ.
+-- directory's colors.lua / bar.lua / default.lua / settings.lua /
+-- helpers/default_font.lua differ, plus this file.
 --
 -- Install: `scripts/ybar-theme use sketchybar-glass` (see docs/THEMES.md).
 -- Nothing to edit: PORT_DIR below finds the port tree beside this file in

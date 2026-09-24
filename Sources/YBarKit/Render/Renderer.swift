@@ -28,20 +28,14 @@ public final class Renderer {
     private var shapeBuffers = [MTLBuffer?](repeating: nil, count: Renderer.framesInFlight)
     private var glyphBuffers = [MTLBuffer?](repeating: nil, count: Renderer.framesInFlight)
     private var frameIndex = 0
-    /// Desktop strip behind each bar, keyed by screen arrangement index.
-    private var lensTextures: [Int: MTLTexture] = [:]
-    private let emptyBackdrop: MTLTexture
 
-    public func setLensBackdrop(_ texture: MTLTexture?, arrangement: Int) {
-        if let texture, texture.width > 1 {
-            lensTextures[arrangement] = texture
-        } else {
-            lensTextures.removeValue(forKey: arrangement)
-        }
-    }
-
-    public func lensBackdrop(for arrangement: Int) -> MTLTexture? {
-        lensTextures[arrangement]
+    /// The shader source shipped as a bundle resource (Package.swift copies
+    /// it verbatim, nothing pre-compiles it). Shared with the test that
+    /// compiles it, so both read the file the daemon will.
+    nonisolated static func shaderSource() -> String? {
+        guard let url = Bundle.module.url(forResource: "YBar", withExtension: "metal")
+        else { return nil }
+        return try? String(contentsOf: url, encoding: .utf8)
     }
 
     public init(device: MTLDevice) throws {
@@ -62,9 +56,7 @@ public final class Renderer {
         // don't require the Xcode metal toolchain.
         let library: MTLLibrary
         do {
-            guard let shaderURL = Bundle.module.url(forResource: "YBar", withExtension: "metal"),
-                  let source = try? String(contentsOf: shaderURL, encoding: .utf8)
-            else { throw RendererError.libraryLoadFailed }
+            guard let source = Renderer.shaderSource() else { throw RendererError.libraryLoadFailed }
             library = try device.makeLibrary(source: source, options: nil)
         } catch {
             FileHandle.standardError.write(Data("[ybar] shader compilation failed: \(error)\n".utf8))
@@ -91,20 +83,13 @@ public final class Renderer {
         quadPipeline = try makePipeline(vertex: "quad_vertex", fragment: "quad_fragment")
         shapePipeline = try makePipeline(vertex: "shape_vertex", fragment: "shape_fragment")
         glyphPipeline = try makePipeline(vertex: "glyph_vertex", fragment: "glyph_fragment")
-        let blank = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .bgra8Unorm_srgb, width: 1, height: 1, mipmapped: false)
-        blank.usage = [.shaderRead]
-        guard let empty = device.makeTexture(descriptor: blank) else { throw RendererError.noDevice }
-        emptyBackdrop = empty
     }
 
     /// Render one frame into the layer. Presents even an empty list (clears the bar).
     /// Returns false when the frame could not be produced (display asleep,
     /// drawables exhausted) — the caller must reschedule or the update is lost.
     @discardableResult
-    public func render(
-        list: DisplayList, layer: CAMetalLayer, atlas: GlyphAtlas, backdrop: MTLTexture? = nil
-    ) -> Bool {
+    public func render(list: DisplayList, layer: CAMetalLayer, atlas: GlyphAtlas) -> Bool {
         frameSemaphore.wait()
         guard let drawable = layer.nextDrawable() else {
             frameSemaphore.signal()
@@ -142,7 +127,6 @@ public final class Renderer {
             viewportSize: SIMD2(
                 Float(drawable.texture.width), Float(drawable.texture.height)),
             holeCount: UInt32(min(list.holes.count, DisplayList.maxHoles)),
-            time: list.time,
             pointer: list.pointer)
 
         if !list.quads.isEmpty, let buffer = quadBuffers[slot] {
@@ -158,7 +142,6 @@ public final class Renderer {
             holes.withUnsafeBytes { raw in
                 encoder.setFragmentBytes(raw.baseAddress!, length: raw.count, index: 2)
             }
-            encoder.setFragmentTexture(backdrop ?? emptyBackdrop, index: 0)
             encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4,
                                    instanceCount: list.quads.count)
         }

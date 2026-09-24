@@ -95,8 +95,14 @@ public enum BarPropertySetter {
             manager.settings.glass = flag
             return nil
         case "glass_variant":
+            // `default` / `off` restore the built-in `clear`, the same tokens
+            // the item setter takes to drop a per-item override.
+            if value == "off" || value == "default" || value.isEmpty {
+                manager.settings.glassVariant = .clear
+                return nil
+            }
             guard let variant = GlassVariant(rawValue: value) else {
-                return "[!] invalid glass_variant: \(value) (clear|regular|dock|control_center|app_icons)"
+                return "[!] invalid glass_variant: \(value) (clear|regular|default|off)"
             }
             manager.settings.glassVariant = variant
             return nil

@@ -8,6 +8,18 @@
       "path": "examples/sketchybar-glass"
     },
     {
+      "name": "ysuite",
+      "description": "Maintainer daily driver - the Liquid Glass suite full-width under topmost=on",
+      "author": "YSuite",
+      "path": "examples/ysuite"
+    },
+    {
+      "name": "ysuite-liquid",
+      "description": "ysuite-web Liquid Glass mock - clear strip over glass pills, CPU / Wi-Fi / Bluetooth / battery / clock",
+      "author": "YSuite",
+      "path": "examples/ysuite-liquid"
+    },
+    {
       "name": "darxk",
       "description": "Catppuccin capsules \u2014 replication of 00Darxk/dotfiles Waybar",
       "author": "YSuite (after 00Darxk)",

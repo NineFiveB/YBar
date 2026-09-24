@@ -113,7 +113,6 @@ for i = 1, max_devices do
     label = { drawing = false },
     padding_left = 8,
     padding_right = 8,
-    padding_top = 2,
   })
 end
 
@@ -130,7 +129,6 @@ local scan_label = sbar.add("item", "widgets.bluetooth.scan", {
   },
   label = { drawing = false },
   background = { height = 2, color = colors.with_alpha(colors.white, 0.12), y_offset = 12 },
-  padding_top = 8,
 })
 
 local spinner = require("helpers.spinner").attach(scan_label, {

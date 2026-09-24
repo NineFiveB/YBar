@@ -31,7 +31,7 @@ public final class BarManager {
     public private(set) var surfaces: [BarSurface] = []
     private var popupSurfaces: [Int: PopupSurface] = [:]
     private var atlases: [CGFloat: GlyphAtlas] = [:]
-    private var renderScheduled = false
+    private(set) var renderScheduled = false
     private(set) var retryScheduled = false
     /// Scales / displays whose no-render condition was already reported —
     /// the retry runs every second, the stderr line must not.
@@ -133,10 +133,6 @@ public final class BarManager {
             self.setNeedsRender()
         }
         rebuildSurfaces()
-        // System NSGlassEffectView is the product backdrop. Auto-starting
-        // ScreenCaptureKit would hide those pills behind a Metal lens and
-        // prompt for Screen Recording — that is a separate opt-in path, not
-        // the inactive-glass fix.
     }
 
     /// fullscreen_show: raise each surface over the active Space's fullscreen
@@ -271,18 +267,25 @@ public final class BarManager {
         guard !renderScheduled else { return }
         renderScheduled = true
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.renderScheduled = false
+            // The flag is consumed by renderAll, not here: a display-link
+            // tick that painted in the meantime has retired this redraw.
+            guard let self, self.renderScheduled else { return }
             self.renderAll()
         }
     }
 
+    /// Paint every surface and popup now. Damage is consumed where it is
+    /// painted: a tick paint retires any pending coalesced redraw, and an
+    /// invalidate raised inside the tick (an interpolated value, a completion)
+    /// is consumed by the tick's own paint that follows it. Damage raised
+    /// while painting is left standing and repaints on the next turn.
     public func renderAll() {
-        // Continuous demand (marquee or traveling sheen) belongs to the whole
-        // frame: every bar surface and every popup panel is accumulated and
-        // reported once. Reporting per surface let whichever scene rendered
-        // last decide, and popups never reported at all, so a display link
-        // could be torn down under text that was still scrolling.
+        renderScheduled = false
+        // Continuous demand (marquee text) belongs to the whole frame: every
+        // bar surface and every popup panel is accumulated and reported
+        // once. Reporting per surface let whichever scene rendered last
+        // decide, and popups never reported at all, so a display link could
+        // be torn down under text that was still scrolling.
         var continuous = false
         for surface in surfaces {
             if render(surface: surface) { continuous = true }
@@ -346,12 +349,23 @@ public final class BarManager {
             // drawable at that one scale (a fresh panel's backingScaleFactor
             // reports the primary screen until it is ordered in).
             let scale = surface.scale
-            let savedLens = sceneBuilder.lensActive
-            sceneBuilder.lensActive = false
-            sceneBuilder.pointer = Self.pointerPixels(in: surface.hostView, scale: scale)
+            // The pointer is sampled in the popup's own window, not the
+            // bar's: the two panels have different origins, so bar pixels
+            // would light the sheen specular on the wrong row, or on none.
+            // A host with no panel yet reads as "missing" outright rather
+            // than through a panel made for the sample: a fresh BarPanel
+            // keeps a real 10 pt placeholder frame at the primary screen's
+            // origin until it is presented, and the move that follows
+            // presentation resamples anyway.
+            sceneBuilder.pointer = popupSurfaces[host.id].map {
+                Self.pointerPixels(in: $0.hostView, scale: scale)
+            } ?? Self.missingPointer
             let scene = sceneBuilder.buildPopup(
                 host: host, members: members, scale: scale, atlas: atlas)
-            sceneBuilder.lensActive = savedLens
+            // An empty scene (every member drawing=off) leaves an existing
+            // panel to the teardown pass below, and a host without one is
+            // not given one: the NSPanel and its glass view would be
+            // allocated for nothing to show.
             guard scene.sizePoints.width > 0, scene.sizePoints.height > 0 else { continue }
             if scene.needsContinuousFrames { continuous = true }
 
@@ -369,6 +383,7 @@ public final class BarManager {
                 popupSurfaces[host.id] = popupSurface
             }
             popupSurface.itemFrames = scene.itemFrames
+            popupSurface.lastSceneHadSheen = scene.list.hasSheen
             popupSurface.hidesInFullscreen = settings.fullscreenPolicy == .hide
 
             // Host frame (bar-local, y-down) -> global AppKit coords (y-up).
@@ -506,9 +521,15 @@ public final class BarManager {
             // Same item on every move: a chart still has to name the bar
             // under the pointer, which the item-level enter/exit does not.
             updateGraphHover(item: hovered, localX: info.point.x, frames: popup.itemFrames)
+            // The sheen specular follows the pointer, which every render
+            // samples afresh: one damage-driven frame per move, no display
+            // link while the pointer rests.
+            if popup.lastSceneHadSheen { setNeedsRender() }
         case .exited:
             pointerInsideSurfaces.remove(ObjectIdentifier(popup))
             releaseHover(in: popup)
+            // Once more with the pointer gone, so the specular clears.
+            if popup.lastSceneHadSheen { setNeedsRender() }
             scheduleGlobalExitCheck()
         }
     }
@@ -660,14 +681,10 @@ public final class BarManager {
                 item.background.glassVariant,
                 item.background.hasGlassTint ? item.background.glassTint : nil))
         }
-        // System glass stays visible: ScreenCaptureKit lens is not started by
-        // default (inactive-glass path), so lensCoversPills stays false.
-        surface.syncGlassBackdrops(
-            glassSpecs, lensCoversPills: renderer.lensBackdrop(for: surface.arrangementIndex) != nil)
+        surface.syncGlassBackdrops(glassSpecs)
 
         sceneBuilder.clock = CACurrentMediaTime()
         sceneBuilder.pointer = Self.pointerPixels(in: surface.hostView, scale: scale)
-        sceneBuilder.lensActive = renderer.lensBackdrop(for: surface.arrangementIndex) != nil
         let list = sceneBuilder.build(
             items: items,
             settings: settings,
@@ -675,31 +692,45 @@ public final class BarManager {
             barSize: barSize,
             scale: scale,
             atlas: atlas)
-        if !renderer.render(
-            list: list,
-            layer: surface.hostView.metalLayer,
-            atlas: atlas,
-            backdrop: renderer.lensBackdrop(for: surface.arrangementIndex)) {
+        if !renderer.render(list: list, layer: surface.hostView.metalLayer, atlas: atlas) {
             // Frame lost (display asleep / drawables exhausted): the damage flag
             // was already consumed, so reschedule or the update is never shown.
             scheduleRetry()
         }
-        // Marquee text and traveling sheen need continuous frames; everything
-        // else stays damage-driven.
+        // The sheen's pointer specular is damage-driven: handleMouse redraws
+        // on moves over a surface whose scene carries it.
+        surface.lastSceneHadSheen = list.hasSheen
+        // Marquee text needs continuous frames; everything else stays
+        // damage-driven.
         return list.needsContinuousFrames
     }
 
+    /// The `pointerPixels` result for a cursor that is not over the surface:
+    /// far negative. Read off `DisplayList.pointer`'s default rather than
+    /// repeated as a literal: a scene never handed a pointer and one told
+    /// the cursor is elsewhere must carry the same value, and two literals
+    /// would only stay equal by care (SceneTests compares against
+    /// `DisplayList().pointer` for the same reason).
+    static let missingPointer = DisplayList().pointer
+
     /// Cursor in a surface's Metal pixels (top-left, y-down). Far negative when
-    /// the pointer is outside that window.
-    private static func pointerPixels(in view: NSView, scale: CGFloat) -> SIMD2<Float> {
-        let missing = SIMD2<Float>(repeating: -1e6)
-        guard let window = view.window else { return missing }
-        let screenPoint = NSEvent.mouseLocation
-        guard window.frame.contains(screenPoint) else { return missing }
+    /// the pointer is outside that window, or the window is not ordered in:
+    /// a panel that has never been presented still owns the placeholder
+    /// frame it was created with, a real rectangle at the primary screen's
+    /// origin that the cursor can sit inside. `screenPoint` is the live
+    /// cursor (AppKit global, y-up); the tests pass a point of their own.
+    static func pointerPixels(
+        in view: NSView, scale: CGFloat, screenPoint: CGPoint = NSEvent.mouseLocation
+    ) -> SIMD2<Float> {
+        guard let window = view.window, window.isVisible else { return missingPointer }
+        guard window.frame.contains(screenPoint) else { return missingPointer }
         let inWindow = window.convertPoint(fromScreen: screenPoint)
+        // MetalHostView is flipped, so the converted point is already
+        // top-left y-down: the pixel space the shader reads the pointer in.
+        // Flipping it once more here mirrored the specular within its
+        // surface — subtle in a 30 pt bar, the wrong row in a popup.
         let inView = view.convert(inWindow, from: nil)
-        let height = view.bounds.height
-        return SIMD2(Float(inView.x * scale), Float((height - inView.y) * scale))
+        return SIMD2(Float(inView.x * scale), Float(inView.y * scale))
     }
 
     private func scheduleRetry() {
@@ -814,9 +845,15 @@ public final class BarManager {
             noteSurfaceEntered(ObjectIdentifier(surface))
             let hovered = hitTest(point: info.point, on: surface)
             updateHover(surface: surface, to: hovered)
+            // The sheen specular follows the pointer, which every render
+            // samples afresh: one damage-driven frame per move, no display
+            // link while the pointer rests.
+            if surface.lastSceneHadSheen { setNeedsRender() }
         case .exited:
             pointerInsideSurfaces.remove(ObjectIdentifier(surface))
             updateHover(surface: surface, to: nil)
+            // Once more with the pointer gone, so the specular clears.
+            if surface.lastSceneHadSheen { setNeedsRender() }
             scheduleGlobalExitCheck()
         }
     }

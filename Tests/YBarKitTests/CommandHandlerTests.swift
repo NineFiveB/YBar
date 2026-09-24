@@ -35,15 +35,53 @@ import Testing
     @Test func barGlassVariantParsesAndQueries() throws {
         let stack = try makeStack()
         let reply = stack.handler.handle(arguments: [
-            "--bar", "glass=on", "glass_variant=control_center",
+            "--bar", "glass=on", "glass_variant=regular",
         ])
         #expect(reply.isEmpty)
         #expect(stack.barManager.settings.glass)
-        #expect(stack.barManager.settings.glassVariant == .controlCenter)
+        #expect(stack.barManager.settings.glassVariant == .regular)
         let bar = try query(stack, "bar")
         #expect(bar["glass"] as? String == "on")
-        #expect(bar["glass_variant"] as? String == "control_center")
+        #expect(bar["glass_variant"] as? String == "regular")
         #expect(bar["glass_tint"] as? String == "0x00000000")
+    }
+
+    /// `default` / `off` restore the built-in `clear` at bar level, the same
+    /// tokens that drop the per-item override.
+    @Test func barGlassVariantAcceptsDefaultAndOff() throws {
+        let stack = try makeStack()
+        #expect(stack.handler.handle(arguments: ["--bar", "glass_variant=regular"]).isEmpty)
+        #expect(stack.barManager.settings.glassVariant == .regular)
+        let reset = stack.handler.handle(arguments: ["--bar", "glass_variant=default"])
+        #expect(reset.isEmpty)
+        #expect(stack.barManager.settings.glassVariant == .clear)
+        #expect(try query(stack, "bar")["glass_variant"] as? String == "clear")
+        #expect(stack.handler.handle(arguments: ["--bar", "glass_variant=regular"]).isEmpty)
+        let off = stack.handler.handle(arguments: ["--bar", "glass_variant=off"])
+        #expect(off.isEmpty)
+        #expect(stack.barManager.settings.glassVariant == .clear)
+    }
+
+    /// The private `_setVariant:` names (`dock`, `control_center`,
+    /// `app_icons`) were removed; they must fail with the accepted list, at
+    /// both bar and item level, and leave the previous value alone.
+    @Test func glassVariantRejectsRemovedPrivateNames() throws {
+        let stack = try makeStack()
+        #expect(stack.handler.handle(arguments: ["--bar", "glass_variant=regular"]).isEmpty)
+        let bar = stack.handler.handle(arguments: ["--bar", "glass_variant=dock"])
+        #expect(bar.contains("invalid glass_variant: dock"))
+        #expect(bar.contains("(clear|regular|default|off)"))
+        #expect(stack.barManager.settings.glassVariant == .regular)
+        for name in ["control_center", "app_icons"] {
+            #expect(stack.handler.handle(arguments: ["--bar", "glass_variant=\(name)"])
+                .contains("invalid glass_variant: \(name)"))
+        }
+        #expect(stack.handler.handle(arguments: ["--add", "item", "pill", "left"]).isEmpty)
+        let item = try #require(stack.barManager.store.items.first { $0.name == "pill" })
+        let set = stack.handler.handle(arguments: ["--set", "pill", "background.glass_variant=dock"])
+        #expect(set.contains("invalid glass_variant: dock"))
+        #expect(set.contains("(clear|regular|default|off)"))
+        #expect(item.background.glassVariant == nil)
     }
 
     @Test func barGlassTintParsesAndClears() throws {
@@ -94,12 +132,12 @@ import Testing
         let stack = try makeStack()
         let reply = stack.handler.handle(arguments: [
             "--add", "item", "pill", "left",
-            "--set", "pill", "background.glass=on", "background.glass_variant=dock",
+            "--set", "pill", "background.glass=on", "background.glass_variant=clear",
         ])
         #expect(reply.isEmpty)
         let item = try #require(stack.barManager.store.items.first { $0.name == "pill" })
         #expect(item.background.glass)
-        #expect(item.background.glassVariant == .dock)
+        #expect(item.background.glassVariant == .clear)
         let bad = stack.handler.handle(arguments: [
             "--set", "pill", "background.glass_variant=not_a_variant",
         ])

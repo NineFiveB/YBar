@@ -101,25 +101,11 @@ public struct ShadowStyle: Equatable, Sendable {
     }
 }
 
-/// NSGlassEffectView material choice. Only `clear` and `regular` are public API;
-/// the rest call unsupported `_setVariant:` SPI and may break across OS updates.
-/// None of these force the active look on a non-key HUD.
+/// NSGlassEffectView material choice; each case maps onto the public
+/// `NSGlassEffectView.Style`. Neither forces the active look on a non-key HUD.
 public enum GlassVariant: String, Sendable, Equatable {
     case clear
     case regular
-    case dock
-    case controlCenter = "control_center"
-    case appIcons = "app_icons"
-
-    /// Private material codes used by undocumented `_setVariant:` (Dock=2, …).
-    var privateVariantCode: UInt64? {
-        switch self {
-        case .clear, .regular: return nil
-        case .dock: return 2
-        case .appIcons: return 3
-        case .controlCenter: return 8
-        }
-    }
 }
 
 /// Rounded-rect background: fill, optional 2-stop gradient, border, shadow.
@@ -139,8 +125,10 @@ public struct BackgroundStyle: Equatable, Sendable {
     /// designed to sit over a blurred backdrop (item blur_radius > 0).
     public var glass: Bool = false
     /// Pre-26 painted lip, shade, and pointer specular. Ignored where
-    /// NSGlassEffectView is the material, so it does not draw a fake shine
-    /// over system glass or keep the display link running.
+    /// NSGlassEffectView is the material: native glass supplies the
+    /// highlight on 26+, and a painted one over it reads as a fake shine.
+    /// Where it does draw, the specular is damage-driven — repainted on
+    /// pointer moves, never a reason to keep the display link running.
     public var sheen: Bool = false
     /// Overrides the bar-wide glass variant for this plate when `glass` is on.
     public var glassVariant: GlassVariant? = nil

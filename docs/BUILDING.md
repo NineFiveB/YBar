@@ -1,4 +1,9 @@
-# Building YBar
+# Building YBar on macOS
+
+(The Windows port is a separate C++/CMake tree on the orphan `windows` branch
+with its own toolchain and its own README — see [the README's Windows
+section](../README.md#windows) for its requirements and build commands. None
+of the toolchain notes below apply there.)
 
 ## Requirements
 
