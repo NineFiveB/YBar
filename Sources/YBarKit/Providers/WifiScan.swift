@@ -173,7 +173,6 @@ enum WifiScan {
     static func perform() -> (output: String, code: Int32) {
         guard let iface = CWWiFiClient.shared().interface() else { return ("", 0) }
         let current = iface.ssid().map(sanitize)
-        let profiles = readProfiles(on: iface)
         let networks: Set<CWNetwork>
         do {
             networks = try iface.scanForNetworks(withSSID: nil)
@@ -194,6 +193,16 @@ enum WifiScan {
             // it is joined, so the current network keeps its row under the
             // placeholder — Connected, Disconnect and the pill stay right,
             // and Lua can tell Wi-Fi from a wired path without probing.
+            // interfaceMode() is that signal. The header promises .none
+            // when the interface is not participating in a network (or is
+            // off) and defines .station as participating in an
+            // infrastructure network as a non-AP station, and unlike ssid(),
+            // bssid() and countryCode() it carries no Location note: it
+            // reads .station from this unprivileged process on a joined
+            // interface. rssiValue() and noiseMeasurement() are grant-free
+            // too, but each answers 0 for a failed read as well as for "not
+            // joined", so requiring one would drop the row on a bad reading
+            // (currentSighting only papers over that 0 with -50).
             var rows: [WifiScanRow] = []
             if iface.interfaceMode() == .station {
                 let sighting = currentSighting(on: iface, name: redactedName)
@@ -203,6 +212,10 @@ enum WifiScan {
             }
             return (tsv(rows), redactedCode)
         }
+        // Read after the redaction check: a redacted pass lists no profile,
+        // so the ObjC ivar peeks behind readProfiles would be spent on
+        // a result that path throws away.
+        let profiles = readProfiles(on: iface)
         if let current, !current.isEmpty,
            !sightings.contains(where: { sanitize($0.name) == current }) {
             sightings.append(currentSighting(on: iface, name: current))
