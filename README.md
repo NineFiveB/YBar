@@ -4,11 +4,11 @@
 
 **A status bar your GPU draws.** Script it from the shell or from Lua. Runs on macOS and Windows 11.
 
-Your GPU draws it and does nothing at rest. Your config is Lua running inside the bar. It is built on public APIs, so an OS update should not take it down.
+It does nothing at rest. Your config is Lua running inside it. A sketchybar config ports over with the same commands.
 
 ![YBar in use: AeroSpace workspace pills, then the app menus opening in the bar](docs/media/ybar-demo.gif?v=20260922)
 
-*The `ysuite-liquid` theme on macOS: AeroSpace workspace pills, then the app menus opening in the bar and folding back. The stock menu bar is hidden underneath. (The menu swap is an opt-in helper, built from a clone with `make helpers`.)*
+*The `ysuite-liquid` theme on macOS: AeroSpace workspace pills, then the app menus opening in the bar and folding back. The stock menu bar is hidden underneath. (The menu swap is an opt-in helper built from a source checkout with `make helpers`; Homebrew does not ship it.)*
 
 ![Calendar, system monitor, battery, Wi-Fi and Bluetooth popups on Liquid Glass](docs/media/ybar-popups.gif?v=20260922)
 
@@ -24,13 +24,13 @@ ybar --animate tanh 45 --set hello label.color=0xfff38ba8   # every change after
 ybar --query hello                                          # live state as JSON
 ```
 
-The bar is a set of live objects. Add one, set a property, and it redraws. One binary does both jobs: run `ybar` and it is the bar; run it with `--` commands and it is the remote control, over a local socket, from any shell, script or REPL. Write the whole bar as Lua, as a shell script, or as JSON with comments; it is the same engine underneath ([docs/CONFIG.md](docs/CONFIG.md)). Turn on `--hotload on` and the bar reloads in place when you save your config.
+The bar is a set of live objects. Add one, set a property, and it redraws. One binary does both jobs. Run `ybar` and it is the bar. Run it with `--` commands and it is the remote control: a local socket, driven from any shell, script or REPL. Write the whole bar as Lua, as a shell script, or as JSON with comments; it is the same engine underneath ([docs/CONFIG.md](docs/CONFIG.md)). Turn on `--hotload on` and the bar reloads in place when you save your config.
 
 ## Why YBar
 
-- **Nothing changes, nothing draws.** There is no draw loop. A frame is drawn only when something changed, so at rest the GPU does no work. When something does move, it moves at your display's refresh rate, up to 120 Hz, and stops the moment it is done. Pills, gradients, shadows and glows are math in a shader, not bitmaps.
+- **Nothing changes, nothing draws.** There is no draw loop. A frame is drawn only when something changed, so at rest the GPU does no work. When something does move, it moves at your display's refresh rate, up to 120 Hz, and stops the moment it is done. Pills, gradients, shadows and glows are math in a shader, not bitmaps, so they stay sharp at any size on any display.
 - **Real Liquid Glass.** On macOS 26 the pills and popups sit on the system's own glass backdrops. macOS 14 and 15 get a blur that looks the part.
-- **Hide the stock menu bar and put yours in its place.** `topmost=on` puts the bar above the native one. No SIP changes. Public APIs only, so an update should not take it down. One read of a private Wi-Fi flag is disclosed; if that flag moves, the Wi-Fi popup just lists no saved hotspots ([SECURITY.md](SECURITY.md)).
+- **Hide the stock menu bar and put yours in its place.** `topmost=on` puts the bar above the native one. No SIP changes. Public APIs only, so an OS update should not take it down. The one exception: the Wi-Fi popup reads a single private flag to list saved hotspots; if Apple moves it, that list is empty and nothing else changes ([SECURITY.md](SECURITY.md)).
 - **Your sketchybar config ports mechanically.** Same commands, same property names, same JSON from `--query`. `sbar = require("sketchybar")` and most SbarLua configs run nearly unchanged.
 - **Your config is Lua and it runs inside the bar.** A click calls your function directly. No socket, no shell, no fork.
 - **Popups are just items.** A calendar grid or a Wi-Fi list is more items, drawn by the same engine. Graphs, sliders, arc gauges, app icons, marquees and tooltips are built in.
@@ -87,7 +87,7 @@ Modules probe for optional tools such as AeroSpace or Homebrew and hide themselv
 
 ## The same bar on Windows 11
 
-YBar has a native Windows 11 port on the [`windows` branch](../../tree/windows): a C++ engine on Direct3D 11. It speaks the same commands, the same socket protocol and the same Lua API. Themes, configs and scripts move over with only the OS-specific bits changed: shell commands, glyph fonts, the window manager adapter. Workspace pills follow komorebi or YTile. Pills now sit on Mica (the GIF below predates it). Battery, volume, Wi-Fi, media and the tray come from Windows' own APIs under the same event names as the Mac.
+YBar has a native Windows 11 port on the [`windows` branch](../../tree/windows): a C++ engine on Direct3D 11. It speaks the same commands, the same socket protocol and the same Lua API. Themes, configs and scripts move over with only the OS-specific bits changed: shell commands, glyph fonts, the window manager adapter. Workspace pills follow komorebi or YTile. Pills sit on Mica. Battery, volume, Wi-Fi, media and the tray come from Windows' own APIs under the same event names as the Mac.
 
 ![The Windows bar: workspace pills tracking komorebi or YTile, CPU and battery fill meters, the tray widget](docs/media/ybar-win-bar.gif)
 
@@ -111,7 +111,7 @@ Install channels, materials, depth effects and the build: [docs/WINDOWS.md](docs
 
 ## Acknowledgments
 
-YBar stands on [sketchybar](https://github.com/FelixKratz/SketchyBar) by [Felix Kratz](https://github.com/FelixKratz): the daemon and CLI architecture, the command grammar and the script contract all come from there, and YBar stays compatible with them, [SbarLua](https://github.com/FelixKratz/SbarLua) included. [Waybar](https://github.com/Alexays/Waybar) shaped the feature set: tooltips, the idle inhibitor and the sense that a bar should come with batteries included.
+YBar stands on [sketchybar](https://github.com/FelixKratz/SketchyBar) by [Felix Kratz](https://github.com/FelixKratz). The daemon and CLI architecture, the command grammar and the script contract all come from there, and YBar stays compatible with them, [SbarLua](https://github.com/FelixKratz/SbarLua) included. [Waybar](https://github.com/Alexays/Waybar) shaped the feature set: tooltips, the idle inhibitor and the sense that a bar should come with batteries included.
 
 ## License
 

@@ -127,7 +127,8 @@ environment into the trigger. The shipped themes probe for the binary at
 module when it is missing, so the rest of the theme still works.
 
 **macOS: yabai.** `items/spaces_yabai.lua` reads `yabai -m query --spaces`
-for native Spaces. It needs no scripting addition. The signal recipes in
+for native Spaces. Reading them needs no scripting addition; clicking a
+pill to focus a space does. The signal recipes in
 [`examples/yabai-skhd`](../examples/yabai-skhd/README.md) make updates
 instant, and the CLI folds every `$YABAI_*` variable into `--trigger` the
 same way. The example config picks whichever window manager is running and
