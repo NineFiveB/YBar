@@ -3,8 +3,11 @@ name: Release
 # Cut a release with `git tag v0.1.1 && git push origin v0.1.1`. The tag's
 # version must already be in the three places the version gate reads
 # (Version.current in SocketClient.swift, CFBundleShortVersionString in
-# packaging/Info.plist, VERSION in the Makefile); the formula's url and
-# sha256 are pinned here from the tag's own source tarball, never by hand.
+# packaging/Info.plist, VERSION in the Makefile), CHANGELOG.md must carry a
+# "## [<version>]" section (it becomes the GitHub Release notes) and
+# SECURITY.md must list the "<major.minor>.x" series as supported; the
+# formula's url and sha256 are pinned here from the tag's own source
+# tarball, never by hand.
 #
 # Required secret: HOMEBREW_TAP_TOKEN. A fine-grained personal access token
 # with Contents: read and write on NineFiveB/homebrew-ybar only; it pushes
@@ -49,7 +52,12 @@ jobs:
 
       # The version string lives in three hand-edited places; a tag that
       # disagrees with any of them would ship a binary answering the wrong
-      # `--version` (and pin a formula whose version does not match).
+      # `--version` (and pin a formula whose version does not match). Two
+      # more files must name the release before it exists: CHANGELOG.md, so
+      # a release cannot be cut without notes (its "## [<version>]" section
+      # is the GitHub Release body, composed below), and SECURITY.md, so the
+      # supported series in the policy never trails the release it answers
+      # for.
       - name: Version gate
         env:
           V: ${{ steps.version.outputs.value }}
@@ -57,14 +65,23 @@ jobs:
           swift_version=$(sed -nE 's/^ *public static let current = "([^"]+)".*/\1/p' Sources/YBarKit/IPC/SocketClient.swift)
           plist_version=$(plutil -extract CFBundleShortVersionString raw -o - packaging/Info.plist)
           make_version=$(sed -nE 's/^VERSION[[:space:]]*\?=[[:space:]]*(.*)$/\1/p' Makefile)
+          # Every "## [x.y.z]" heading, filtered to the tag's own: the value is
+          # the version when its section exists and empty when it does not.
+          changelog_version=$(sed -nE 's/^## \[([^]]+)\].*/\1/p' CHANGELOG.md | grep -xF "$V" || true)
+          # The policy names a major.minor series ("0.2.x"), never a patch.
+          series="${V%.*}.x"
+          security_series=$(grep -oF "$series" SECURITY.md | head -n 1 || true)
           status=0
           check() {
-            if [[ "$2" == "$V" ]]; then echo "ok    $1 = $2"
-            else echo "FAIL  $1 = '$2' but the tag says $V"; status=1; fi
+            local want="${3:-$V}"
+            if [[ "$2" == "$want" ]]; then echo "ok    $1 = $2"
+            else echo "FAIL  $1 = '$2' but the tag says $want"; status=1; fi
           }
           check "Version.current (Sources/YBarKit/IPC/SocketClient.swift)" "$swift_version"
           check "CFBundleShortVersionString (packaging/Info.plist)" "$plist_version"
           check "VERSION (Makefile)" "$make_version"
+          check "## [version] section (CHANGELOG.md)" "$changelog_version"
+          check "supported series (SECURITY.md)" "$security_series" "$series"
           exit $status
 
       - name: Toolchain
@@ -203,17 +220,40 @@ jobs:
               commit -m "ybar $V"
           git push origin HEAD
 
+      # The release notes are the tag's own CHANGELOG.md section (the version
+      # gate proved it exists): every line between "## [$V]" and the next
+      # "## [" heading or the link references at the foot of the file. The
+      # install snippet and the tarball hash follow the notes so the release
+      # page stays complete on its own, and a section with no notes is
+      # refused rather than published as a bare heading.
+      - name: Compose the release notes
+        env:
+          V: ${{ steps.version.outputs.value }}
+          SHA: ${{ steps.tarball.outputs.sha256 }}
+        run: |
+          awk -v v="$V" '
+            index($0, "## [" v "]") == 1 { on = 1; next }
+            on && (/^## \[/ || /^\[[^]]+\]: /) { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          grep -q '[^[:space:]]' notes.md || { echo "CHANGELOG.md has no notes under ## [$V]"; exit 1; }
+          {
+            cat notes.md
+            echo
+            echo "YBar $V for macOS 14+, built from source by the formula:"
+            echo
+            echo '```sh'
+            echo 'brew tap NineFiveB/ybar'
+            echo 'brew install ybar'
+            echo '```'
+            echo
+            echo "Source tarball \`SHA256\` \`$SHA\` (pinned in \`packaging/homebrew/ybar.rb\`)."
+            echo "First-run permissions and autostart: docs/INSTALL.md."
+          } > release-body.md
+          cat release-body.md
+
       - name: Publish the GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: YBar ${{ steps.version.outputs.value }}
-          body: |
-            YBar ${{ steps.version.outputs.value }} for macOS 14+, built from source by the formula:
-
-            ```sh
-            brew tap NineFiveB/ybar
-            brew install ybar
-            ```
-
-            Source tarball `SHA256` `${{ steps.tarball.outputs.sha256 }}` (pinned in `packaging/homebrew/ybar.rb`).
-            First-run permissions and autostart: docs/INSTALL.md.
+          body_path: release-body.md
