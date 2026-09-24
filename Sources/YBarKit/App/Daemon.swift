@@ -116,7 +116,17 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         socketServer = SocketServer(path: socketPath) { [weak self] arguments in
             self?.commandHandler.handle(arguments: arguments) ?? ""
         }
-        try socketServer.start()
+        // Drop the server before terminating on bind failure: applicationWillTerminate
+        // runs on the way out, and a server that never bound must not tear down
+        // the socket file the LIVE daemon owns. SocketServer.stop() guards this
+        // too; this is the belt to that brace — autostart makes the double-start
+        // ordinary (launchd starts one, the user starts another).
+        do {
+            try socketServer.start()
+        } catch {
+            socketServer = nil
+            throw error
+        }
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
