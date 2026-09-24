@@ -196,10 +196,11 @@ public final class AnimationScheduler {
         // Set before the link joins the run loop. The request is pinned
         // explicitly rather than left to the link's default range: the
         // slowest hosted panel's rate, floored at 60 and capped at 120.
-        // The rates are sampled only here, when a link is (re)created, so a
-        // refresh-rate change with no surface rebuild behind it (toggling
-        // ProMotion in System Settings) keeps the old range until the next
-        // reattachDisplayLink().
+        // The rates are sampled only here, whenever a link is created —
+        // after an idle teardown (stopLinkIfIdle) or reattachDisplayLink()
+        // — so a refresh-rate change while a link is running (toggling
+        // ProMotion in System Settings mid-animation) is not picked up
+        // until then.
         link.preferredFrameRateRange = Self.preferredFrameRateRange(
             hostedHz: hostRefreshRates?() ?? [])
         link.add(to: .main, forMode: .common)
