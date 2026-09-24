@@ -2,7 +2,7 @@
 
 All notable user-visible changes to YBar for macOS, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the Windows
-port on the `windows` branch keeps its own history. Each release heading is
+port on the `windows` branch has its own git history. Each release heading is
 `## [<version>] — <date>`: the release workflow refuses a tag that has no such
 section and publishes the section as the GitHub Release notes.
 
@@ -20,8 +20,9 @@ section and publishes the section as the GitHub Release notes.
   a timeout — "Timed out joining <name>." in the panel, which stays open
   for another try — instead of "Couldn't join. Check the password and try
   again."
-- Wi-Fi: Cancel and Escape work while a join is in flight; Lua hears
-  "cancelled", and the pill catches up on the next `wifi_change`.
+- Wi-Fi: Cancel and Escape work while a join is in flight; the
+  `wifi_prompt` callback receives `("", 2)`, as on any close that did not
+  join, and the pill catches up on the next `wifi_change`.
 - Wi-Fi: without the Location grant, `wifi_scan` hands Lua exit code 3
   instead of an empty success, the joined network is still listed under the
   literal "<redacted>", and the ysuite-liquid popup says "Allow Location
@@ -37,6 +38,14 @@ section and publishes the section as the GitHub Release notes.
   Ethernet on a desktop Mac); a stale SSID no longer lingers after a
   disconnect, and the widget re-seeds itself so a config reload does not
   leave it silent.
+- ysuite-liquid: the Wi-Fi scan spinner runs only while the popup is drawn
+  (it used to tick a hidden row every 40 ms on every `wifi_change`), and a
+  `wifi_change` that arrives mid-scan queues one follow-up scan instead of
+  being dropped.
+- ysuite-liquid: the CPU card's temperature aside starts empty and fills
+  only when `helpers/system_stats_rich.sh` reports a positive `CPU_TEMP`
+  (it needs an `osx-cpu-temp` binary, which reports 0 on Apple Silicon);
+  the GPU card's "—°C" aside, which no helper key could ever fill, is gone.
 - Render: `background.sheen` no longer keeps the display link running. The
   pointer highlight redraws on pointer moves over a sheened surface and
   once on exit; at rest that is zero frames.
@@ -60,6 +69,19 @@ section and publishes the section as the GitHub Release notes.
 - `--bar glass_variant` accepts `default` / `off` (restoring the built-in
   `clear`), the same tokens the item-level setter takes to drop a per-item
   override; both error messages list `clear|regular|default|off`.
+- ysuite: `colors.lua`, `default.lua`, `settings.lua` and
+  `helpers/default_font.lua` are no longer copies of the sketchybar-glass
+  files; `ybarrc.lua` resolves them from `../sketchybar-glass` (or
+  `~/.config/ybar/themes/sketchybar-glass`) and stops with an error naming
+  both locations when neither exists, rather than falling through to the
+  port's different palette and defaults.
+- ysuite-liquid: the `padding_top` / `padding_bottom` keys its popup widgets
+  set on some twenty-five items are dropped; the engine accepts and discards
+  both, so nothing moves.
+- Release workflow: a tag is refused unless this file has its
+  `## [<version>]` section and SECURITY.md lists its `<major.minor>.x`
+  series, and that section — read from the tag's own tree — becomes the
+  GitHub Release notes.
 
 ### Removed
 
@@ -83,6 +105,20 @@ section and publishes the section as the GitHub Release notes.
   `wip/process-control-cli` branch.
 - docs/ARCHITECTURE.md's redraw policy describes the display-link pacing
   above.
+- docs/EXTENDING.md catalogues the 0.2 surface: the Liquid Glass keys and
+  `background.sheen`, item-level `x_offset`, the slider track ring, the
+  bars graph keys and the four Wi-Fi verbs with their callback codes.
+- README, VISION, SECURITY and ARCHITECTURE disclose the engine's one
+  undocumented-ABI read — the `_isPersonalHotspot` ivar peek — in place of
+  the "100% public APIs" claim.
+- THIRD_PARTY.md credits the vendored Lua 5.4 interpreter (`Sources/CLua`,
+  MIT) and the `windows` branch's copy and vcpkg dependencies.
+- `themes/registry.json` carries rows for `ysuite` and `ysuite-liquid`.
+- The example READMEs name the prerequisites the Liquid Glass themes
+  inherit from the port (Symbols Nerd Font, `blueutil`, the `menus`
+  helper), and docs/INSTALL.md says the Wi-Fi popup's scan and join wait on
+  the Location grant.
+- This changelog, from 0.1.0 on.
 
 ## [0.2.0] — 2026-09-22
 
@@ -96,7 +132,9 @@ with the next release.
 - Liquid Glass keys: `background.sheen` (a specular rim and a pointer
   highlight drawn in-shader), `glass_tint` (`--bar glass_tint` is inherited
   by every glass pill and overridable per item and per part) and
-  `glass_variant` (`clear` / `regular`, bar- and item-level).
+  `glass_variant` (bar- and item-level; at the tag both setters accepted
+  `clear|regular|dock|control_center|app_icons` — the last three are removed
+  under Unreleased above).
 - Graph items: `graph.style=line|bars`, `graph.tick`, `graph.plot_width`,
   `graph.axis_max` and `graph.marks` (the battery chart's charging marks).
 - Item-level `x_offset` (the background-level key already existed): slides
@@ -121,8 +159,8 @@ with the next release.
 - Bar `fullscreen_hide`; `popup.fade_in` / `popup.fade_out`;
   `slider.interactive=off` read-only meters; sliders inside popups;
   `icon.background.*` / `label.background.*` plates; `icon.shadow` /
-  `label.shadow`; `background.shadow.blur`; `background.padding_left/right`;
-  `image.desaturate` / `image.y_offset`; `toggle` on every item boolean.
+  `label.shadow`; `background.shadow.blur`; `image.desaturate` /
+  `image.y_offset`; `toggle` on every item boolean.
 - `ybarrc.jsonc` / `ybar.jsonc` config entry points.
 - CI on macOS 26 and 15 for every push to `main`; a tag-driven release
   workflow that pins the Homebrew formula from the tag's own tarball; the
@@ -149,6 +187,10 @@ with the next release.
 - Render: no text-shadow copy for colour glyphs; per-part plates clip like
   their ink; a graph stroke stays inside its box and its border; the two
   silent no-render guards are reported and retried.
+- Render: `background.padding_left` / `background.padding_right` widen the
+  pill. Both keys were parsed and reported by `--query` since 0.1.0, but
+  the renderer ignored them: the pill was always exactly the content box
+  wide.
 - Audio: `--volume +N` steps from the kept scalar, not the muted 0;
   `ybar.volume(n)` is clamped into 0–100; the CoreAudio listener blocks no
   longer capture `self`.
