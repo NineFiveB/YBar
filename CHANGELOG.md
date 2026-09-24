@@ -26,11 +26,16 @@ section and publishes the section as the GitHub Release notes.
 - `launchctl print`'s `pid = N` line is read, so a bar that is alive but
   not answering its socket is neither "running" nor "not running": `status`
   and `stop` report it as such (`stop` boots the job out), `start` and
-  `restart` replace it with `kickstart -k` straight away, and a plain
-  kickstart that has not come up within launchd's throttle is kicked once
-  more with `-k` before the failure names `launchctl kickstart -k
+  `restart` give it 5 s to bind — a bar still booting looks the same —
+  and then replace it with `kickstart -k`, and a plain kickstart that has
+  not come up within launchd's throttle is kicked once more with `-k` and
+  given 15 s more before the failure names `launchctl kickstart -k
   gui/<uid>/<label>`. The kickstart paths roll, and point at, the job's own
   `StandardErrorPath` rather than assuming `~/Library/Logs/<instance>.log`.
+- `ybar stop` no longer promises a next login the plist alone cannot keep:
+  with a persistent disable override on the job (Login Items, off) it
+  says so, as `status` does. `ybar start -c` against a loaded job says
+  the job stays down and `-c` applies to that run only.
 - `ybar theme use` with no bar running goes through a plain `ybar start`,
   so a loaded login job is kickstarted instead of an unmanaged `-c` copy
   starting beside it; `-c` stays for a renamed instance and for a theme

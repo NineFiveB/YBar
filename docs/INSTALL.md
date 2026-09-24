@@ -114,11 +114,12 @@ ybar status      # running or not, which bundle, which config, autostart state
 waits for the process to actually go, and tells you if a login agent will
 bring it back. A bar that is alive but has stopped answering is reported as
 such (`status` says `running (pid N) but not answering`), and `restart`
-replaces it rather than waiting on it. The escape hatch for a hung bar, when
-you would rather not go through the verb, is
-`launchctl kickstart -k gui/$(id -u)/com.ybar.YBar` — the same command
-`restart` reaches for. If the CLI is not on your PATH, every verb works
-through the bundle too: `~/Applications/YBar.app/Contents/MacOS/ybar status`.
+gives it 5 s to answer — a bar still booting looks the same — and then
+replaces it. The escape hatch for a hung bar, when you would rather not go
+through the verb, is `launchctl kickstart -k gui/$(id -u)/com.ybar.YBar` —
+the same command `restart` reaches for. If the CLI is not on your PATH, every
+verb works through the bundle too:
+`~/Applications/YBar.app/Contents/MacOS/ybar status`.
 
 `ybar --version` names the build — quote it in bug reports: `make app`,
 `make release` and `brew install --HEAD` stamp the commit into the bundle
@@ -211,14 +212,15 @@ after `ybar theme use` has reloaded the running bar.
 
 Once the job is loaded, the process verbs go through launchd. `ybar restart`
 asks the bar to quit and kickstarts the job — a bar that ignores the request,
-or is alive but not answering, is replaced with `launchctl kickstart -k`, and
-a kickstarted job that has not come up after launchd's 30 s throttle is kicked
-once more with `-k` before `restart` gives up and names the log. `ybar stop`
-sends `--exit` and leaves the job loaded: `KeepAlive.SuccessfulExit = false`
-restarts YBar after a crash (or a kill) but respects that clean exit. `ybar
-start` kickstarts a stopped job. Never `pkill`: launchd reads a kill as a
-crash and brings the bar straight back. The manual escape hatch for a hung
-bar is the same `launchctl kickstart -k gui/$(id -u)/com.ybar.YBar`.
+or is alive and still silent after 5 s, is replaced with
+`launchctl kickstart -k`, and a kickstarted job that has not come up after
+launchd's 30 s throttle is kicked once more with `-k` and given 15 s more
+before `restart` gives up and names the log. `ybar stop` sends `--exit` and
+leaves the job loaded: `KeepAlive.SuccessfulExit = false` restarts YBar after
+a crash (or a kill) but respects that clean exit. `ybar start` kickstarts a
+stopped job. Never `pkill`: launchd reads a kill as a crash and brings the bar
+straight back. The manual escape hatch for a hung bar is the same
+`launchctl kickstart -k gui/$(id -u)/com.ybar.YBar`.
 
 A hand-written plist with `<key>KeepAlive</key><true/>` relaunches after
 *any* exit, a `--exit` included, so against one `ybar stop` boots the job out

@@ -603,6 +603,87 @@ private func makeTemporaryDirectory() throws -> URL {
     }
 }
 
+// MARK: - The boot grace and the kickstart waits
+
+/// The wait behind `start` and `restart`'s grace runs on a clock and a sleep
+/// it is handed, so what is pinned here is the shape of the wait itself: how
+/// long a silent process gets, when it is read as wedged, and when the notice
+/// fires.
+@Suite struct WaitTests {
+    /// Scripted time: sleeping is the only thing that moves it.
+    final class Clock {
+        var now = Date(timeIntervalSinceReferenceDate: 0)
+        var elapsed: TimeInterval { now.timeIntervalSinceReferenceDate }
+        func sleep(_ seconds: TimeInterval) { now = now.addingTimeInterval(seconds) }
+    }
+
+    /// A bar that binds its socket during the grace is a live bar: the wait
+    /// ends the moment it answers, and nothing was said about it.
+    @Test func aBarThatBindsDuringTheGraceIsLeftAlone() {
+        let clock = Clock()
+        var probes = 0
+        var notices = 0
+        let answered = LocalVerbs.poll(
+            timeout: LocalVerbs.bootGrace, noticeAfter: LocalVerbs.noticeAfter, every: 1,
+            clock: { clock.now }, sleep: clock.sleep, notice: { notices += 1 }
+        ) {
+            probes += 1
+            return probes == 3
+        }
+        #expect(answered)
+        #expect(probes == 3)
+        #expect(clock.elapsed == 2)
+        #expect(notices == 0)
+    }
+
+    /// One that stays silent is read as wedged only once the whole grace has
+    /// passed — with one last look at the deadline — and is mentioned once.
+    @Test func aBarThatStaysSilentIsReadAsWedgedAfterTheGrace() {
+        let clock = Clock()
+        var probes = 0
+        var notices = 0
+        let answered = LocalVerbs.poll(
+            timeout: LocalVerbs.bootGrace, noticeAfter: LocalVerbs.noticeAfter, every: 1,
+            clock: { clock.now }, sleep: clock.sleep, notice: { notices += 1 }
+        ) {
+            probes += 1
+            return false
+        }
+        #expect(!answered)
+        #expect(clock.elapsed == LocalVerbs.bootGrace)
+        #expect(probes == Int(LocalVerbs.bootGrace) + 1)
+        #expect(notices == 1)
+    }
+
+    /// The last look counts: a socket bound exactly at the deadline answers.
+    @Test func theLastLookIsAtTheDeadline() {
+        let clock = Clock()
+        let answered = LocalVerbs.poll(
+            timeout: 3, every: 1, clock: { clock.now }, sleep: clock.sleep
+        ) { clock.elapsed >= 3 }
+        #expect(answered)
+        #expect(clock.elapsed == 3)
+    }
+
+    /// The numbers. A booting bar gets a few seconds — less than the bar this
+    /// verb launched gets, because the bind comes first in the daemon's boot
+    /// — and a kickstart's -k retry gets a bar's boot allowance, so a job that
+    /// never comes up costs 45 s + 15 s rather than 90.
+    @Test func theGraceAndTheRetryAreBounded() {
+        #expect(LocalVerbs.bootGrace == 5)
+        #expect(LocalVerbs.bootGrace < LocalVerbs.readyTimeout)
+        #expect(LocalVerbs.kickstartRetryTimeout == LocalVerbs.readyTimeout)
+        #expect(LocalVerbs.launchdReadyTimeout + LocalVerbs.kickstartRetryTimeout == 60)
+    }
+
+    /// The defaults are real time: a caller with no scripted clock sleeps.
+    @Test func theDefaultsRunOnRealTime() {
+        let started = Date()
+        #expect(!LocalVerbs.poll(timeout: 0.05, every: 0.01) { false })
+        #expect(Date().timeIntervalSince(started) >= 0.05)
+    }
+}
+
 // MARK: - theme use
 
 @Suite struct ThemeUseTests {
