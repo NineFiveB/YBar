@@ -397,17 +397,12 @@ independent instance.
   Anything else → thin client (strip a leading `-m/--message`, fold
   `AEROSPACE_*`/`YABAI_*`/`KOMOREBI_*` env on `--trigger`, serialize argv →
   socket → print reply; `[!]` replies go to stderr, exit 1).
-- Process control (`src/app/process_control.cpp`): the same four verbs the
-  reference stages on its unmerged `wip/process-control-cli` branch, with
-  that branch's exit codes for them (on `main` today the reference's only
-  local verbs are `theme` and `autostart`, whose usage errors still exit 1;
-  once the branch lands these are simply the reference's verbs and codes) —
+- Process control (`src/app/process_control.cpp`): the reference's four
+  verbs (`Sources/YBarKit/App/LocalVerbs.swift`), with its exit codes —
   **0** success including every idempotent no-op
   (`stop` with nothing running, `start` with a bar already up), **1** the
-  operation failed, **2** the invocation was wrong. The port applies **2**
-  to usage errors from every local verb, `autostart`/`theme` included; that
-  is one step past the staged branch, where the four verbs' and
-  `autostart`'s usage errors exit 2 but `theme`'s still exit 1.
+  operation failed, **2** the invocation was wrong, from every local verb,
+  `autostart`/`theme` included.
   Message-grammar errors stay at 1 on both sides:
   - `start` refuses a `-c` that does not exist, probes the socket with a
     connect (not `--ping`: a bar mid-config-run cannot answer one, and reading

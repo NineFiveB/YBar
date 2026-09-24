@@ -400,8 +400,8 @@ import Testing
         #expect(LocalVerbs.run(arguments: ["--query", "bar"], instanceName: "ybar") == nil)
         #expect(LocalVerbs.run(arguments: ["--theme"], instanceName: "ybar") == nil)
         // Bad sub-verbs are usage errors, and touch nothing.
-        #expect(LocalVerbs.run(arguments: ["theme", "bogus"], instanceName: "ybar") == 1)
-        #expect(LocalVerbs.run(arguments: ["theme", "use"], instanceName: "ybar") == 1)
+        #expect(LocalVerbs.run(arguments: ["theme", "bogus"], instanceName: "ybar") == 2)
+        #expect(LocalVerbs.run(arguments: ["theme", "use"], instanceName: "ybar") == 2)
         #expect(LocalVerbs.run(arguments: ["autostart", "bogus"], instanceName: "ybar") == 2)
         #expect(LocalVerbs.run(arguments: ["autostart", "enable", "extra"], instanceName: "ybar") == 2)
     }

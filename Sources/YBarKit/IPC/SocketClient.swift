@@ -266,7 +266,7 @@ public enum CLIClient {
       ybar --query apps               running apps: name, bundle_id, pid, active, hidden
       ybar --app com.apple.Safari activate      (or hide | quit | kill; a pid works too)
 
-    Process-control exit codes: 0 success, 1 the operation failed, 2 the
+    Local verbs exit 0 on success, 1 when the operation failed, 2 when the
     invocation was wrong. A rejected message is an [!] reply and exits 1.
     `ybar --ping` is the scriptable liveness probe.
 

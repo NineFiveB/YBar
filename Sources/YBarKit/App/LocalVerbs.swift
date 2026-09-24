@@ -98,8 +98,10 @@ public enum ThemeCatalog {
 }
 
 enum ThemeVerbs {
-    static let usage = "[!] usage: ybar theme list|current|use <name>|reset|install <git-url>"
+    static let usage = "theme list|current|use <name>|reset|install <git-url>"
 
+    /// A wrong invocation exits 2 like every other local verb's; a failed
+    /// operation exits 1.
     static func run(_ args: [String], instanceName: String) -> Int32 {
         switch args.first ?? "list" {
         case "list": return list()
@@ -111,13 +113,15 @@ enum ThemeVerbs {
             print("theme selection cleared; the default config discovery applies")
             return 0
         case "use":
-            guard args.count >= 2 else { return fail("[!] usage: ybar theme use <name>") }
+            guard args.count >= 2 else { return LocalVerbs.usage("\(instanceName) theme use <name>") }
             return use(args[1], instanceName: instanceName)
         case "install":
-            guard args.count >= 2 else { return fail("[!] usage: ybar theme install <git-url>") }
+            guard args.count >= 2 else {
+                return LocalVerbs.usage("\(instanceName) theme install <git-url>")
+            }
             return install(args[1])
         default:
-            return fail(usage)
+            return LocalVerbs.usage("\(instanceName) \(usage)")
         }
     }
 
