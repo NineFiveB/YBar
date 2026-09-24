@@ -134,7 +134,8 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
   grant ([INSTALL.md](INSTALL.md#permissions)); only the joined network is
   listed then, as `<redacted>`. `wifi_join` goes through `networksetup` with
   the keychain password (which is what wakes a saved iPhone hotspot) and
-  returns its exit status, a refusal it merely prints reported as 1;
+  returns its exit status, a refusal it merely prints reported as 1, and 124
+  when the same 30 s watchdog killed it;
   `wifi_prompt` raises YBar's own key panel for a locked network's password —
   the panel keeps the password, pipes it to `networksetup`'s stdin, owns the
   retries (a wrong password keeps it open; its join runs under a 30 s
