@@ -1187,8 +1187,15 @@ public final class SceneBuilder {
         SIMD2(Float((rect.minX * scale).rounded()), Float((rect.minY * scale).rounded()))
     }
 
+    /// Size from the rounded EDGES, not the rounded extent. Rounding origin
+    /// and extent independently lets them disagree — `round(x·s) + round(w·s)`
+    /// is not `round((x+w)·s)` — so a pill sliding a whole number of points
+    /// breathed by a pixel on the frames where the two disagreed. Every call
+    /// site pairs this with `pixelOrigin` on the same rect, so the far edge
+    /// now lands exactly where the next item's near edge does.
     static func pixelSize(_ rect: CGRect, scale: CGFloat) -> SIMD2<Float> {
-        SIMD2(Float((rect.width * scale).rounded()), Float((rect.height * scale).rounded()))
+        SIMD2(Float((rect.maxX * scale).rounded() - (rect.minX * scale).rounded()),
+              Float((rect.maxY * scale).rounded() - (rect.minY * scale).rounded()))
     }
 
     static func gradientDirection(angleDegrees: Float) -> SIMD2<Float> {
