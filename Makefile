@@ -7,12 +7,13 @@ SCRATCH := $(HOME)/.cache/ybar-build
 # swiftbuild layout, the real directory on classic).
 BIN     := $(SCRATCH)/debug/ybar
 
-.PHONY: build test run stop clean app helpers release
+.PHONY: build test run start stop restart status clean app helpers release
 
 # App bundle: gives the daemon its own TCC identity so privacy prompts
 # (Bluetooth, Calendar, Apple Events) are attributed to YBar and grants
-# cover the daemon plus every helper it spawns. Launch with:
-#   open -g ~/Applications/YBar.app --args -c <config.lua>
+# cover the daemon plus every helper it spawns. Launch with `make start`, or
+# directly:
+#   ybar start -c <config.lua>
 APP_DIR := $(HOME)/Applications/YBar.app
 # Stable identity if present ("YBar Signing" self-signed cert), else ad-hoc.
 # A stable signature keeps TCC grants (Accessibility, Screen Recording)
@@ -73,11 +74,27 @@ test: build
 	swift test --scratch-path $(SCRATCH) \
 	  $(shell [ -f $(TESTING_MACROS) ] && echo -Xswiftc -load-plugin-library -Xswiftc $(TESTING_MACROS))
 
+# Runs the daemon in this terminal, from the bare binary: handy for reading
+# stderr, but it has no bundle identity, so privacy prompts are attributed to
+# the terminal. The dev loop below is what to use otherwise.
 run: build
 	$(BIN)
 
+# The dev loop. Both rebuild the bundle first, then drive it through the CLI's
+# own verbs: those find ~/Applications/YBar.app, so the daemon keeps its TCC
+# identity. After a code change you want `restart` — `start` is a no-op against
+# a bar that is already up, so it would leave the old binary running.
+start: app
+	$(BIN) start
+
+restart: app
+	$(BIN) restart
+
 stop:
-	-$(BIN) --exit 2>/dev/null
+	-$(BIN) stop 2>/dev/null
+
+status:
+	-$(BIN) status
 
 clean:
 	rm -rf $(SCRATCH)
