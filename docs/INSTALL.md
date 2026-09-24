@@ -49,7 +49,7 @@ trust it, and the download carries quarantine, so Gatekeeper will refuse the
 app as-is. Strip quarantine and re-sign locally:
 
 ```sh
-unzip YBar-0.1.0.zip -d ~/Applications
+unzip YBar-0.2.1.zip -d ~/Applications
 xattr -dr com.apple.quarantine ~/Applications/YBar.app
 codesign --force --sign - --identifier com.ybar.YBar ~/Applications/YBar.app
 ```
@@ -94,8 +94,8 @@ your PATH).
 
 `ybar --version` names the build — quote it in bug reports: `make app`,
 `make release` and `brew install --HEAD` stamp the commit into the bundle
-(`ybar 0.1.0 (a1b2c3d)`), a tagged Homebrew install reports the release
-build number from the committed plist (`ybar 0.1.0 (1)`), and a binary
+(`ybar 0.2.1 (a1b2c3d)`), a tagged Homebrew install reports the release
+build number from the committed plist (`ybar 0.2.1 (3)`), and a binary
 outside a bundle prints the bare version.
 
 ### Permissions
@@ -127,7 +127,14 @@ script it spawns. Only the features you actually configure ask for anything:
   Services. Opt in once with `ybar --bar wifi_ssid_prompt=on` and click
   Allow; the network name is re-published the moment the grant lands (no
   restart or `--trigger wifi_change` needed). Without it, wifi widgets show
-  a generic connected state.
+  a generic connected state. The Wi-Fi popup's scan needs the same grant:
+  until it lands CoreWLAN withholds every network name from the daemon
+  (`ybar.wifi_scan` reports code 3 and the popup can only offer the opt-in
+  above), so nothing can be joined from the popup until the grant lands.
+  Joining a locked network you have not saved (`ybar.wifi_prompt`) raises
+  YBar's own password panel — a key window of the daemon, not a system
+  dialog, so no further grant; the password goes to `networksetup` and
+  nowhere else.
 - **Screen Recording** — needed by the `alias` component, which screenshots
   other apps' menu bar items via ScreenCaptureKit. macOS prompts on first
   capture; if you dismissed it, grant manually under Privacy & Security →

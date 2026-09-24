@@ -42,10 +42,9 @@ public struct QuadInstance {
     /// Pre-26 painted lip / shade / pointer specular. Not set when
     /// NSGlassEffectView is the backdrop.
     public static let flagSheen: UInt32 = 1 << 5
-    /// Popup trigger (webpage is-liquid-active): stronger pointer lens.
-    public static let flagLens: UInt32 = 1 << 6
-    /// Sample the captured desktop through the liquid-glass refraction.
-    public static let flagLensSample: UInt32 = 1 << 7
+    /// Open-popup trigger: its sheen specular stays lit while the popup is
+    /// up, as if the pointer had never left the pill.
+    public static let flagHot: UInt32 = 1 << 6
 
     public init(
         origin: SIMD2<Float>, size: SIMD2<Float>, radii: SIMD4<Float>,
@@ -118,19 +117,19 @@ public struct Uniforms {
     public var viewportSize: SIMD2<Float>
     /// Cutout count for quads carrying flagHoles.
     public var holeCount: UInt32 = 0
-    /// Seconds (CACurrentMediaTime) for traveling sheen phase.
-    public var time: Float = 0
+    /// Holds `pointer` at offset 16, where the Metal struct reads it (the
+    /// slot the traveling-sheen clock used to occupy).
+    var _pad: UInt32 = 0
     /// Pointer in this drawable's pixels (top-left, y-down). Far negative when
     /// the cursor is outside the surface.
     public var pointer: SIMD2<Float> = SIMD2(repeating: -1e6)
 
     public init(
-        viewportSize: SIMD2<Float>, holeCount: UInt32 = 0, time: Float = 0,
+        viewportSize: SIMD2<Float>, holeCount: UInt32 = 0,
         pointer: SIMD2<Float> = SIMD2(repeating: -1e6)
     ) {
         self.viewportSize = viewportSize
         self.holeCount = holeCount
-        self.time = time
         self.pointer = pointer
     }
 }
@@ -164,17 +163,17 @@ public struct DisplayList {
     /// This scene contains scrolling text: the frame clock must keep running
     /// while any scene of the frame (bar or popup) carries it.
     public var hasMarquee = false
-    /// Per-pill Metal lip/shade/pointer specular: same continuous display-link
-    /// demand so hover specular tracks the cursor without damage lag.
+    /// Per-pill Metal lip/shade/pointer specular. Not a continuous-frame
+    /// demand: the specular only changes when the pointer does, so
+    /// BarManager redraws on pointer moves over a surface whose last scene
+    /// carried it, and an idle bar stays idle.
     public var hasSheen = false
-    /// Media time stamped when the scene was built (feeds Uniforms.time).
-    public var time: Float = 0
     /// Cursor in this surface's pixels (top-left, y-down).
     public var pointer: SIMD2<Float> = SIMD2(repeating: -1e6)
 
     public init() {}
 
-    public var needsContinuousFrames: Bool { hasMarquee || hasSheen }
+    public var needsContinuousFrames: Bool { hasMarquee }
 
     public var isEmpty: Bool { quads.isEmpty && triangles.isEmpty && glyphs.isEmpty }
 }
@@ -187,6 +186,7 @@ enum InstanceLayout {
     /// 48, not the Windows port's 32: the Metal Hole pads with a float3,
     /// which is 16-byte aligned on both sides of the buffer.
     static let holeStride = 48
+    static let uniformsStride = 24
 
     /// The first Swift struct whose stride no longer matches its Metal twin,
     /// or nil while the ABI holds. A value rather than an assert: `-c release`
@@ -199,6 +199,7 @@ enum InstanceLayout {
             ("GlyphInstance", glyphStride, MemoryLayout<GlyphInstance>.stride),
             ("ShapeVertex", shapeStride, MemoryLayout<ShapeVertex>.stride),
             ("HoleInstance", holeStride, MemoryLayout<HoleInstance>.stride),
+            ("Uniforms", uniformsStride, MemoryLayout<Uniforms>.stride),
         ]
         return checks.first { $0.expected != $0.actual }.map {
             "\($0.name) stride \($0.actual) != Metal \($0.expected)"

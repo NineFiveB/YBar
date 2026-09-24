@@ -123,7 +123,19 @@ public final class AnimationScheduler {
 
     /// Provider of a fresh display link bound to a live bar view (wired by the daemon).
     public var makeDisplayLink: ((AnimationScheduler, Selector) -> CADisplayLink?)?
-    /// Called once per animation frame after values are applied.
+    /// Refresh rates of every display the bar is hosted on (wired by the
+    /// daemon). The link asks for the slowest of them, capped at 120 Hz: a
+    /// ProMotion panel then samples a frames/60 duration more than once per
+    /// sketchybar "frame", while a 60 Hz panel next to it is never fed faster
+    /// than it can present. `onFrame` paints every panel, and a layer driven
+    /// past its refresh rate fills its three-drawable pool within three ticks,
+    /// after which `nextDrawable()` blocks the main thread for the rest of the
+    /// slow panel's frame on every tick.
+    public var hostRefreshRates: (() -> [Int])?
+    /// Called once per animation frame after values are applied and finished
+    /// animations have completed. The daemon paints here, on the display-link
+    /// callback: the sample is on screen the same turn it was computed, and
+    /// the paint retires any coalesced redraw the updates raised on the way.
     public var onFrame: (() -> Void)?
 
     public init() {}
@@ -181,8 +193,32 @@ public final class AnimationScheduler {
     private func startLinkIfNeeded() {
         guard displayLink == nil, isAnimating || continuousDemand else { return }
         guard let link = makeDisplayLink?(self, #selector(step(_:))) else { return }
+        // Set before the link joins the run loop. The request is pinned
+        // explicitly rather than left to the link's default range: the
+        // slowest hosted panel's rate, floored at 60 and capped at 120.
+        // The rates are sampled only here, whenever a link is created —
+        // after an idle teardown (stopLinkIfIdle) or reattachDisplayLink()
+        // — so a refresh-rate change while a link is running (toggling
+        // ProMotion in System Settings mid-animation) is not picked up
+        // until then.
+        link.preferredFrameRateRange = Self.preferredFrameRateRange(
+            hostedHz: hostRefreshRates?() ?? [])
         link.add(to: .main, forMode: .common)
         displayLink = link
+    }
+
+    /// The link's requested cadence for a set of hosted panels: the slowest
+    /// one, because every tick paints all of them. No panel at all (headless,
+    /// or the daemon has not wired the rates) reads as 60.
+    static func preferredFrameRateRange(hostedHz: [Int]) -> CAFrameRateRange {
+        preferredFrameRateRange(screenHz: hostedHz.min() ?? 60)
+    }
+
+    /// The link's requested cadence. Minimum stays 60 so a 60Hz display is
+    /// unchanged; the ceiling is 120 even when the panel reports more.
+    static func preferredFrameRateRange(screenHz: Int) -> CAFrameRateRange {
+        let maximum = Float(min(120, max(60, screenHz)))
+        return CAFrameRateRange(minimum: 60, maximum: maximum, preferred: maximum)
     }
 
     private func stopLinkIfIdle() {
@@ -213,7 +249,9 @@ public final class AnimationScheduler {
 
     /// One frame at `now`. Finished keys are removed BEFORE their completions
     /// run: a completion that animates the same key again would otherwise be
-    /// swept away together with the animation it replaced.
+    /// swept away together with the animation it replaced. Every applied
+    /// value and every completion lands before `onFrame`, so the paint there
+    /// sees the whole sample and consumes whatever damage the updates raised.
     func tick(now: TimeInterval) {
         var finished: [(key: String, onComplete: (() -> Void)?)] = []
         for (key, animation) in animations where !animation.tick(now: now) {

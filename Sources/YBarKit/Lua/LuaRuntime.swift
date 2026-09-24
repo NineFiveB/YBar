@@ -686,23 +686,34 @@ public final class LuaRuntime {
     }
 
     /// CoreWLAN scan off the main thread. The callback matches `exec`:
-    /// `(output, exitCode)`.
+    /// `(output, exitCode)`, where 3 means every SSID was withheld for want
+    /// of the Location grant (`WifiScan.redactedCode`); the joined network,
+    /// if any, is still listed then, under `WifiScan.redactedName`.
     private func scheduleWifiScan(ref: Int32) {
         let generation = stateGeneration
         DispatchQueue.global(qos: .utility).async {
-            let output = WifiScan.perform()
+            let result = WifiScan.perform()
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard ref != luaRefNil else { return }
                     LuaRuntime.current?.completeExec(
-                        ref: ref, generation: generation, output: output, exitCode: 0)
+                        ref: ref, generation: generation,
+                        output: result.output, exitCode: result.code)
                 }
             }
         }
     }
 
-    /// Saved-network join, also off the main thread. Exit code is
-    /// `networksetup`'s status.
+    /// Saved-network join, also off the main thread. The exit code is 0 only
+    /// when `networksetup` exited 0 and printed nothing. A failure before
+    /// the spawn — an empty name, no Wi-Fi interface, the spawn itself —
+    /// is 1 with a "[!]" line as the output; a non-zero status passes
+    /// through; a refusal `networksetup` prints while exiting 0 ("Could not
+    /// find network …") becomes 1 with that text as the output
+    /// (`WifiScan.joinRejected`); and `WifiScan.timedOutCode` (124) is the
+    /// watchdog, which runs here exactly as under the password prompt: a
+    /// child still running after `WifiScan.joinTimeout` is killed, so a
+    /// hung association cannot park this utility-queue job for good.
     private func scheduleWifiJoin(ssid: String, ref: Int32) {
         let generation = stateGeneration
         DispatchQueue.global(qos: .utility).async {

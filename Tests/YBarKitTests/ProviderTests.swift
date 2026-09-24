@@ -1,5 +1,7 @@
 import CoreLocation
+import CoreWLAN
 import Foundation
+import ObjectiveC
 import Testing
 @testable import YBarKit
 
@@ -175,6 +177,15 @@ import Testing
         #expect(rows.isEmpty)
     }
 
+    @Test func redactionIsNetworksOnTheAirThatNoneCouldName() {
+        #expect(WifiScan.isRedacted(scanned: 22, named: 0))
+        #expect(!WifiScan.isRedacted(scanned: 22, named: 22))
+        // One hidden-SSID network is a hidden network, not a missing grant.
+        #expect(!WifiScan.isRedacted(scanned: 22, named: 21))
+        // Wi-Fi off or a failed pass: nothing to name.
+        #expect(!WifiScan.isRedacted(scanned: 0, named: 0))
+    }
+
     @Test func tsvMatchesThePopupParser() {
         let rows = WifiScan.merge(
             sightings: [.init(name: "Home\tNet", rssi: -42)],
@@ -207,6 +218,119 @@ import Testing
         #expect(rows.count == 1)
         #expect(rows[0].secure == false)
         #expect(WifiScan.tsv(rows) == "0\tCafe\t-60\t0\t0\t0")
+    }
+}
+
+@Suite struct WifiHotspotFlagTests {
+    @Test func onlyAOneByteBoolEncodingIsRead() {
+        #expect(WifiScan.isBoolIvarEncoding("B"))
+        #expect(WifiScan.isBoolIvarEncoding("c"))
+        // A wider integer, an object, or no encoding: refuse rather than
+        // read the first byte of something else.
+        #expect(!WifiScan.isBoolIvarEncoding("i"))
+        #expect(!WifiScan.isBoolIvarEncoding("Q"))
+        #expect(!WifiScan.isBoolIvarEncoding("@"))
+        #expect(!WifiScan.isBoolIvarEncoding(""))
+        #expect(!WifiScan.isBoolIvarEncoding(nil))
+    }
+
+    @Test func theRealFlagStillPassesTheGuard() {
+        // If this SDK still declares the ivar, it must be the BOOL the peek
+        // expects — otherwise hotspot rows silently vanish and this is the
+        // test that says why. An SDK without the ivar has nothing to check.
+        guard let ivar = class_getInstanceVariable(CWNetworkProfile.self, "_isPersonalHotspot") else {
+            return
+        }
+        let encoding = ivar_getTypeEncoding(ivar).map { String(cString: $0) }
+        #expect(WifiScan.isBoolIvarEncoding(encoding), "encoding \(encoding ?? "nil")")
+    }
+}
+
+@Suite struct WifiJoinVerdictTests {
+    @Test func silenceWithExitZeroIsTheOnlySuccess() {
+        #expect(!WifiScan.joinRejected(code: 0, output: ""))
+        // The trimmed child output can still carry a stray newline.
+        #expect(!WifiScan.joinRejected(code: 0, output: "\n"))
+    }
+
+    @Test func exitZeroRefusalsAreStillRefusals() {
+        // networksetup exits 0 for each of these; none says "failed".
+        for message in [
+            "Could not find network Cafe.",
+            "You cannot join a network when Wi-Fi power is off.",
+            "All Wi-Fi network services are disabled.",
+            "Failed to join network Cafe.",
+        ] {
+            #expect(WifiScan.joinRejected(code: 0, output: message), "\(message)")
+        }
+    }
+
+    @Test func nonZeroExitIsARefusalEvenWhenSilent() {
+        #expect(WifiScan.joinRejected(code: 1, output: ""))
+    }
+}
+
+/// The step after the spawn that both join paths share: the watchdog, the
+/// drain, the exit. Pinned against real children so the saved-network path
+/// (wifi_join from Lua) can never again run without the watchdog the
+/// password prompt had — a hung networksetup used to park that
+/// utility-queue job for good.
+@Suite struct WifiJoinWatchdogTests {
+    private func spawn(_ arguments: [String]) throws -> (Process, Pipe) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c"] + arguments
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        return (process, pipe)
+    }
+
+    /// reap() blocks its thread until the child is gone. Run it on a thread
+    /// of its own: held on a cooperative-pool thread it starves the other
+    /// suites and the watchdog timers on a small runner.
+    private final class Reaper: @unchecked Sendable {
+        let process: Process
+        let pipe: Pipe
+        let timeout: TimeInterval
+        init(_ process: Process, _ pipe: Pipe, _ timeout: TimeInterval) {
+            self.process = process; self.pipe = pipe; self.timeout = timeout
+        }
+        func run() async -> (output: String, code: Int32) {
+            await withCheckedContinuation { continuation in
+                let thread = Thread { [self] in
+                    continuation.resume(
+                        returning: WifiScan.reap(process, output: pipe, timeout: timeout))
+                }
+                thread.start()
+            }
+        }
+    }
+
+    @Test func aChildThatOutlivesTheTimeoutIsKilledAndReadsAsTimedOut() async throws {
+        let (process, pipe) = try spawn(["echo started; exec sleep 300"])
+        let result = await Reaper(process, pipe, 0.2).run()
+        // The exit is the watchdog's, and what the child printed before it
+        // was killed is not returned as if it were a verdict.
+        #expect(result.code == WifiScan.timedOutCode)
+        #expect(result.output == "")
+        #expect(!process.isRunning)
+        #expect(process.terminationReason == .uncaughtSignal)
+    }
+
+    @Test func aChildThatExitsInTimeKeepsItsOutputAndStatus() async throws {
+        // networksetup's shape for an exit-0 refusal: a line, status 0. The
+        // helper passes both through untouched; the verdict is join's.
+        let (refusal, refusalPipe) = try spawn(["echo 'Could not find network Cafe.'; exit 0"])
+        let refused = await Reaper(refusal, refusalPipe, 5).run()
+        #expect(refused.output == "Could not find network Cafe.")
+        #expect(refused.code == 0)
+
+        let (failure, failurePipe) = try spawn(["exit 3"])
+        let failed = await Reaper(failure, failurePipe, 5).run()
+        #expect(failed.output == "")
+        #expect(failed.code == 3)
     }
 }
 

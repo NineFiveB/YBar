@@ -144,11 +144,30 @@ local scan_label = sbar.add("item", "widgets.wifi.scan", {
   },
   label = { drawing = false },
   background = { height = 2, color = colors.with_alpha(colors.white, 0.12), y_offset = 12 },
-  padding_top = 8,
 })
 
 local spinner = require("helpers.spinner").attach(scan_label, {
   size = 10, align = "l", padding_left = 12,
+})
+
+-- Second line of the no-Location notice: the one-time opt-in that raises
+-- the prompt. Its own row because the whole sentence is wider than the
+-- popup at the label's size.
+local scan_hint = sbar.add("item", "widgets.wifi.scan.hint", {
+  position = popup_pos,
+  drawing = false,
+  width = line,
+  padding_left = 0,
+  padding_right = 0,
+  icon = {
+    string = "ybar --bar wifi_ssid_prompt=on",
+    align = "left",
+    color = colors.with_alpha(colors.white, 0.62),
+    font = { family = "Menlo", size = 11 },
+    width = line,
+    padding_left = 12,
+  },
+  label = { drawing = false },
 })
 
 local other_rows = {}
@@ -158,8 +177,24 @@ end
 
 local scan_cache = {}
 local live_ssid = nil
+-- Last wifi_change INFO: "" offline, the SSID on Wi-Fi with the Location
+-- grant, "connected" for any other online path (wired, or Wi-Fi without
+-- the grant).
+local live_info = ""
 local is_connected = false
 local scan_running = false
+-- A "connected" payload landed while a scan was in flight. That pass
+-- predates the change, so one more follows when it returns; however many
+-- payloads a burst delivers meanwhile, they collapse into that single
+-- follow-up, and two scans never overlap.
+local scan_pending = false
+-- A scan has landed since the last "connected" payload; until one does,
+-- that payload is taken at face value.
+local scan_seen = false
+-- The last scan saw networks but could name none: macOS withholds every
+-- SSID until YBar holds the Location grant (wifi_scan exit code 3). The
+-- joined network is still listed then, under the literal "<redacted>".
+local scan_redacted = false
 local disconnecting_name = nil
 local joining_name = nil
 local hovered_name = nil
@@ -372,21 +407,63 @@ local function paint()
   end
   if scan_running then
     scan_label:set({ drawing = true, icon = { string = "Looking for networks…" } })
+  elseif scan_redacted then
+    scan_label:set({ drawing = true, icon = { string = "Allow Location for YBar to list networks" } })
   elseif #other_list > 0 then
     scan_label:set({ drawing = true, icon = { string = "Other networks" } })
   else
     scan_label:set({ drawing = false })
   end
+  scan_hint:set({ drawing = scan_redacted and not scan_running })
+end
+
+-- Whether the Wi-Fi interface is joined. wifi_change settles it outright
+-- when INFO is "" or an SSID. "connected" only says some path is up —
+-- wired, or Wi-Fi without the Location grant — and the scan's current row
+-- tells the two apart: the scan lists the joined network even without the
+-- grant. Until a scan lands the payload is taken at face value, the same
+-- generic connected state docs/INSTALL.md promises without Location.
+-- No ipconfig probe: en0 is the Wi-Fi interface on a laptop but Ethernet
+-- on a desktop Mac.
+local function wifi_connected()
+  if live_info == "" then return false end
+  if live_info ~= "connected" then return true end
+  if not scan_seen then return true end
+  for _, net in ipairs(scan_cache) do
+    if net.current then return true end
+  end
+  return false
+end
+
+local function popup_open()
+  return wifi_bracket:query().popup.drawing == "on"
+end
+
+local function refresh_pill()
+  is_connected = wifi_connected()
+  wifi:set({
+    icon = {
+      string = is_connected and icons.wifi.connected or icons.wifi.disconnected,
+      color = is_connected and colors.white or colors.grey,
+    },
+  })
+  paint()
 end
 
 local function run_scan()
   if scan_running then return end
   scan_running = true
-  spinner.start()
+  -- The spinner is an item:set every 40 ms, and most scans start from a
+  -- wifi_change with the popup closed (the load-time seed, `ybar --update`,
+  -- a path change). Spin only while the popup is drawn: toggle() starts it
+  -- when the popup opens mid-scan, hide() stops it when the popup closes.
+  if popup_open() then spinner.start() end
   paint()
-  sbar.wifi_scan(function(output)
+  sbar.wifi_scan(function(output, code)
     scan_running = false
     spinner.stop()
+    scan_seen = true
+    scan_redacted = code == 3
     local nets = {}
     for line_text in (output or ""):gmatch("[^\r\n]+") do
       local cur, name, rssi, known, hotspot, secure =
@@ -403,25 +480,17 @@ local function run_scan()
       end
     end
     scan_cache = nets
-    paint()
-  end)
-end
-
-local function refresh_pill()
-  sbar.exec("ipconfig getifaddr en0", function(ip)
-    is_connected = ip:match("%S") ~= nil
-    wifi:set({
-      icon = {
-        string = is_connected and icons.wifi.connected or icons.wifi.disconnected,
-        color = is_connected and colors.white or colors.grey,
-      },
-    })
-    paint()
+    refresh_pill()
+    if scan_pending then
+      scan_pending = false
+      run_scan()
+    end
   end)
 end
 
 local function hide()
   hovered_name = nil
+  spinner.stop()
   wifi_bracket:set({ popup = { drawing = false } })
 end
 
@@ -519,7 +588,7 @@ local function toggle()
   if open then
     wifi_bracket:set({ popup = { drawing = true } })
     refresh_pill()
-    run_scan()
+    if scan_running then spinner.start() else run_scan() end
   else
     hide()
   end
@@ -529,13 +598,27 @@ wifi:subscribe("mouse.clicked", toggle)
 wifi:subscribe("mouse.exited.global", hide)
 wifi:subscribe("wifi_change", function(env)
   local info = env.INFO or ""
-  if info ~= "" and info ~= "connected" and info ~= "disconnected" then
+  live_info = info
+  if info ~= "" and info ~= "connected" then
     live_ssid = info
-  elseif info == "disconnected" then
+  else
     live_ssid = nil
   end
+  -- Some path came up, or the Wi-Fi name went away: which interface is
+  -- joined is a fresh scan's call now, not the last pass's.
+  local settle = info == "connected"
+  if settle then scan_seen = false end
   refresh_pill()
+  if settle then
+    if scan_running then scan_pending = true else run_scan() end
+  end
 end)
+
+-- Seed the state. A config reload keeps the provider armed and deduped,
+-- so nothing would arrive until the path next changed; the forced
+-- re-query publishes it now (on a fresh start the first path update
+-- follows on its own).
+sbar.trigger("wifi_change")
 
 sbar.add("item", "widgets.wifi.padding", {
   position = "right",

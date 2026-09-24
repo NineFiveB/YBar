@@ -34,6 +34,22 @@ struct WifiScanRow: Equatable, Sendable {
 enum WifiScan {
     /// Signal placeholder for a hotspot profile that was not in the scan.
     static let absentRSSI = -999
+    /// Exit code of a join the watchdog killed, saved-network and prompted
+    /// alike — timeout(1)'s number, so it cannot collide with anything
+    /// networksetup itself exits with.
+    static let timedOutCode: Int32 = 124
+    /// How long a join may run before the watchdog signals `networksetup`:
+    /// long enough for a slow association or a hotspot waking from sleep,
+    /// short enough that a hung child does not pin the password dialog, or
+    /// the utility-queue job behind `wifi_join`, for good.
+    static let joinTimeout: TimeInterval = 30
+    /// Exit code of a scan whose every SSID was withheld: macOS gates the
+    /// names behind the Location grant, which the popup then has to ask for.
+    static let redactedCode: Int32 = 3
+    /// Name the joined network is listed under when the grant withholds it:
+    /// the literal Apple's own tools print, and one the sketchybar port
+    /// already treats as a name.
+    static let redactedName = "<redacted>"
 
     struct Sighting: Equatable, Sendable {
         var name: String
@@ -148,11 +164,21 @@ enum WifiScan {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Pure: whether a pass came back with every SSID withheld. Without the
+    /// Location grant CoreWLAN answers nil for each network's name, so
+    /// networks on the air that none could be read from is the missing
+    /// grant; an empty pass (Wi-Fi off, or the scan failing) is not.
+    /// Detected from the result rather than asked of CLLocationManager,
+    /// which must never be touched unattended (see NetworkProvider).
+    static func isRedacted(scanned: Int, named: Int) -> Bool {
+        scanned > 0 && named == 0
+    }
+
     /// Blocking scan. Call off the main thread; a pass takes seconds.
-    static func perform() -> String {
-        guard let iface = CWWiFiClient.shared().interface() else { return "" }
+    /// The code is `redactedCode` when no SSID could be read, else 0.
+    static func perform() -> (output: String, code: Int32) {
+        guard let iface = CWWiFiClient.shared().interface() else { return ("", 0) }
         let current = iface.ssid().map(sanitize)
-        let profiles = readProfiles(on: iface)
         let networks: Set<CWNetwork>
         do {
             networks = try iface.scanForNetworks(withSSID: nil)
@@ -166,14 +192,50 @@ enum WifiScan {
             sightings.append(Sighting(
                 name: name, rssi: network.rssiValue, secure: isSecure(network)))
         }
+        if isRedacted(scanned: networks.count, named: sightings.count) {
+            // The saved profiles lose their names the same way, so there is
+            // nothing to list; the popup says what to allow instead. Only
+            // the names are gated, though: the interface still says whether
+            // it is joined, so the current network keeps its row under the
+            // placeholder — Connected, Disconnect and the pill stay right,
+            // and Lua can tell Wi-Fi from a wired path without probing.
+            // interfaceMode() is that signal. CWInterface.h: "Returns
+            // kCWInterfaceModeNone if an error occurs, or if the interface
+            // is not participating in a Wi-Fi network", and .station is
+            // "participating in an infrastructure network as a non-AP
+            // station"; unlike ssid(), bssid() and countryCode() it carries
+            // no Location note, and it reads .station from this
+            // unprivileged process on a joined interface. rssiValue() and
+            // noiseMeasurement() are grant-free too, but each answers 0 for
+            // a failed read as well as for "not joined", so requiring one
+            // would drop the row on a bad reading (currentSighting only
+            // papers over that 0 with -50).
+            var rows: [WifiScanRow] = []
+            if iface.interfaceMode() == .station {
+                let sighting = currentSighting(on: iface, name: redactedName)
+                rows.append(WifiScanRow(
+                    name: sighting.name, rssi: sighting.rssi,
+                    current: true, known: true, hotspot: false, secure: sighting.secure))
+            }
+            return (tsv(rows), redactedCode)
+        }
+        // Read after the redaction check: a redacted pass lists no profile,
+        // so the ObjC ivar peeks behind readProfiles would be spent on
+        // a result that path throws away.
+        let profiles = readProfiles(on: iface)
         if let current, !current.isEmpty,
            !sightings.contains(where: { sanitize($0.name) == current }) {
-            let rssi = iface.rssiValue()
-            let secure = iface.security() != .none
-            sightings.append(Sighting(
-                name: current, rssi: rssi == 0 ? -50 : rssi, secure: secure))
+            sightings.append(currentSighting(on: iface, name: current))
         }
-        return tsv(merge(sightings: sightings, currentSSID: current, profiles: profiles))
+        return (tsv(merge(sightings: sightings, currentSSID: current, profiles: profiles)), 0)
+    }
+
+    /// The joined network as the interface itself reports it, for when the
+    /// scan did not list it. `rssiValue()` is 0 with no reading; -50 keeps
+    /// the signal fan drawn.
+    private static func currentSighting(on iface: CWInterface, name: String) -> Sighting {
+        let rssi = iface.rssiValue()
+        return Sighting(name: name, rssi: rssi == 0 ? -50 : rssi, secure: iface.security() != .none)
     }
 
     /// Arguments for `networksetup -setairportnetwork`. A password is never
@@ -192,9 +254,26 @@ enum WifiScan {
         return output.replacingOccurrences(of: password, with: "")
     }
 
+    /// Pure: whether `networksetup -setairportnetwork` refused the join.
+    /// It prints nothing on success, but exits 0 for several refusals
+    /// ("Could not find network X.", "You cannot join a network when Wi-Fi
+    /// power is off.", "All Wi-Fi network services are disabled."), so any
+    /// output at all is a refusal — not only the "Failed to join" line.
+    static func joinRejected(code: Int32, output: String) -> Bool {
+        code != 0 || !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// Join a network. With `password == nil`, `networksetup` uses the
     /// keychain and can wake a saved personal hotspot. A non-nil password is
     /// written to the child's stdin and is not returned in `output`.
+    ///
+    /// The code is 0 only when `networksetup` exited 0 and printed nothing.
+    /// A pre-spawn failure — an empty name, no Wi-Fi interface, the spawn
+    /// itself — is 1 with a "[!]" line as the output; a non-zero status
+    /// passes through; a refusal printed while exiting 0 ("Could not find
+    /// network …") becomes 1 (`joinRejected`). `timedOutCode` is the
+    /// watchdog, on both paths: a child still running after `joinTimeout`
+    /// is killed, and the output is then empty.
     static func join(ssid: String, password: String? = nil) -> (output: String, code: Int32) {
         let name = sanitize(ssid)
         guard !name.isEmpty else { return ("[!] wifi_join expects a network name", 1) }
@@ -231,32 +310,51 @@ enum WifiScan {
             }
             bytes.resetBytes(in: 0..<bytes.count)
         }
-        // A hung association must not pin the password dialog forever.
-        if password != nil {
-            let box = ProcessBox(process: process)
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 30) {
-                box.terminateIfRunning()
-            }
-        }
-        let raw = String(
-            decoding: outputPipe.fileHandleForReading.readDataToEndOfFile(),
-            as: UTF8.self
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
-        process.waitUntilExit()
-        let code = process.terminationStatus
-        if password != nil {
-            let cleaned = redacted(raw, password: password)
-            let rejected = code != 0
-                || cleaned.range(of: "failed", options: .caseInsensitive) != nil
-            if rejected {
-                return ("", code == 0 ? 1 : code)
+        let result = reap(process, output: outputPipe, timeout: joinTimeout)
+        if result.code == timedOutCode { return result }
+        if let password {
+            // Nothing the child printed comes back on this path: it may
+            // have echoed the secret, and the prompt only reads the code.
+            let cleaned = redacted(result.output, password: password)
+            if joinRejected(code: result.code, output: cleaned) {
+                return ("", result.code == 0 ? 1 : result.code)
             }
             return ("", 0)
         }
-        if code != 0, raw.isEmpty {
-            return ("[!] could not join \(name)", code)
+        if joinRejected(code: result.code, output: result.output) {
+            return (result.output.isEmpty ? "[!] could not join \(name)" : result.output,
+                    result.code == 0 ? 1 : result.code)
         }
-        return (raw, code)
+        return ("", 0)
+    }
+
+    /// Everything after the spawn, shared by the saved-network join and the
+    /// password prompt's: arm the watchdog, drain the child's output, read
+    /// its exit. A child still running `timeout` seconds in gets SIGTERM,
+    /// then SIGKILL if it shrugs that off (`ProcessBox`); it dies of the
+    /// signal, and the result is then `("", timedOutCode)` — a signal death
+    /// is the watchdog, not a verdict on the join, and whatever the child
+    /// managed to print first is not one either. Otherwise the output is
+    /// the child's, trimmed, next to its exit status as it was: the verdict
+    /// (`joinRejected`) is the caller's.
+    static func reap(
+        _ process: Process, output pipe: Pipe, timeout: TimeInterval
+    ) -> (output: String, code: Int32) {
+        let box = ProcessBox(process: process)
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) {
+            box.terminateIfRunning()
+        }
+        // Drain before waiting: a child blocked writing a full pipe never
+        // exits, and the read returns once the child is gone either way.
+        let raw = String(
+            decoding: pipe.fileHandleForReading.readDataToEndOfFile(),
+            as: UTF8.self
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        process.waitUntilExit()
+        if process.terminationReason == .uncaughtSignal {
+            return ("", timedOutCode)
+        }
+        return (raw, process.terminationStatus)
     }
 
     /// Drop the current association. Wi-Fi stays on; this is not a power toggle.
@@ -281,10 +379,23 @@ enum WifiScan {
         return profiles
     }
 
-    /// The header stores the flag as a private `BOOL` ivar and publishes no
-    /// accessor. Missing ivar returns nil so the caller does not guess.
+    /// Pure: whether an ivar's ObjC type encoding is a one-byte `BOOL` —
+    /// "B" (C99 bool, arm64) or "c" (signed char, x86_64). Anything else,
+    /// including no encoding at all, is refused so a changed layout is
+    /// never read as a flag.
+    static func isBoolIvarEncoding(_ encoding: String?) -> Bool {
+        encoding == "B" || encoding == "c"
+    }
+
+    /// Read-only ObjC-runtime peek at a `BOOL` ivar. The SDK header declares
+    /// `_isPersonalHotspot` under `@private`, and the accessor that exists
+    /// for it is private too, so there is no supported way to ask. The read
+    /// is presence- and type-checked and degrades to nil — no hotspot rows —
+    /// when either check fails.
     private static func boolIvar(_ object: AnyObject, name: String) -> Bool? {
-        guard let ivar = class_getInstanceVariable(type(of: object), name) else { return nil }
+        guard let ivar = class_getInstanceVariable(type(of: object), name),
+              isBoolIvarEncoding(ivar_getTypeEncoding(ivar).map { String(cString: $0) })
+        else { return nil }
         let pointer = Unmanaged.passUnretained(object).toOpaque().advanced(by: ivar_getOffset(ivar))
         return pointer.load(as: UInt8.self) != 0
     }

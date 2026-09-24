@@ -11,7 +11,6 @@ final class WifiPasswordPrompt: NSObject, NSWindowDelegate, NSTextFieldDelegate 
     private var field: NSSecureTextField?
     private var message: NSTextField?
     private var joinButton: NSButton?
-    private var cancelButton: NSButton?
     private var ssid = ""
     private var onFinish: ((Bool) -> Void)?
     private var joining = false
@@ -134,7 +133,6 @@ final class WifiPasswordPrompt: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         self.field = field
         self.message = message
         self.joinButton = join
-        self.cancelButton = cancel
         return window
     }
 
@@ -176,11 +174,13 @@ final class WifiPasswordPrompt: NSObject, NSWindowDelegate, NSTextFieldDelegate 
             y: visible.midY - size.height / 2 + 40))
     }
 
+    /// Cancel stays enabled while a join runs: the 30 s watchdog is the only
+    /// other way out of a hung association, and abandoning the in-flight
+    /// join is what `present` already does when a new prompt replaces it.
     private func setBusy(_ busy: Bool) {
         joining = busy
         field?.isEnabled = !busy
         joinButton?.isEnabled = !busy
-        cancelButton?.isEnabled = !busy
         if busy {
             setMessage("Joining…", failure: false)
         }
@@ -206,8 +206,12 @@ final class WifiPasswordPrompt: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         callback?(joined)
     }
 
+    /// Mid-join, the bumped `requestID` makes the completion below discard
+    /// the result; the child runs on until it finishes or the watchdog
+    /// fires, so a join cancelled late may still land — Lua only hears the
+    /// close (exit code 2, from scheduleWifiPrompt) and the pill catches up
+    /// on the wifi_change.
     @objc private func cancelPressed() {
-        guard !joining else { return }
         requestID += 1
         dismiss(joined: false)
     }
@@ -233,9 +237,12 @@ final class WifiPasswordPrompt: NSObject, NSWindowDelegate, NSTextFieldDelegate 
                         self.dismiss(joined: true)
                     } else {
                         self.setBusy(false)
-                        self.setMessage(
-                            "Couldn't join. Check the password and try again.",
-                            failure: true)
+                        // The watchdog never saw a verdict, so do not blame
+                        // the password for it.
+                        let text = result.code == WifiScan.timedOutCode
+                            ? "Timed out joining \(name)."
+                            : "Couldn't join. Check the password and try again."
+                        self.setMessage(text, failure: true)
                         self.panel?.makeFirstResponder(self.field)
                     }
                 }
@@ -244,7 +251,6 @@ final class WifiPasswordPrompt: NSObject, NSWindowDelegate, NSTextFieldDelegate 
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        guard !joining else { return false }
         cancelPressed()
         return false
     }

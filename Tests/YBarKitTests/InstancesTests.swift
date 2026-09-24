@@ -45,9 +45,14 @@ import Testing
         #expect(MemoryLayout<HoleInstance>.offset(of: \.size) == 8)
         #expect(MemoryLayout<HoleInstance>.offset(of: \.radius) == 16)
         #expect(MemoryLayout<HoleInstance>.offset(of: \._pad) == 32)
+        // Uniforms: the pad after holeCount keeps the pointer at 16.
+        #expect(MemoryLayout<Uniforms>.offset(of: \.holeCount) == 8)
+        #expect(MemoryLayout<Uniforms>.offset(of: \.pointer) == 16)
     }
 
-    /// The flag bits are ABI too: the Windows port sets the same ones.
+    /// The flag bits are ABI too. Bits 0-4 are shared with the Windows port,
+    /// which sets the same ones; the higher bits (painted sheen, the
+    /// open-popup highlight) are macOS-only and the port must not reuse them.
     @Test func flagBitsMatchThePort() {
         #expect(QuadInstance.flagGradient == 1)
         #expect(QuadInstance.flagGlass == 2)
@@ -55,8 +60,7 @@ import Testing
         #expect(QuadInstance.flagHoles == 8)
         #expect(QuadInstance.flagShadow == 16)
         #expect(QuadInstance.flagSheen == 32)
-        #expect(QuadInstance.flagLens == 64)
-        #expect(QuadInstance.flagLensSample == 128)
+        #expect(QuadInstance.flagHot == 64)
         #expect(GlyphInstance.flagColorGlyph == 1)
         #expect(GlyphInstance.flagDesaturate == 2)
     }
