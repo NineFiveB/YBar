@@ -1,13 +1,22 @@
 #!/bin/bash
 # Record README demo GIFs: wallpaper only, placeholder names (obfuscation, not redaction).
+#
+# This is the maintainer's recipe rather than a general tool: it drives the
+# RUNNING bar over its socket (it never launches one), parks the recording on
+# an empty AeroSpace workspace so only the wallpaper is in frame, and crops the
+# capture at offsets measured on a 3024-wide retina display. Another setup
+# keeps the sequence and changes the workspace numbers and the crop geometry
+# below. Needs aerospace, ffmpeg and gifski on PATH; the bar is found through
+# $YBAR, then `ybar` on PATH, then the app bundle under ~/Applications.
 set -euo pipefail
 
-Y="${YBAR:-/Users/wutts/Applications/YBar.app/Contents/MacOS/ybar}"
-OUT="${1:-/Users/wutts/Documents/Development/YBar/docs/media}"
+repo="$(cd "$(dirname "$0")/.." && pwd)"
+OUT="${1:-$repo/docs/media}"
+Y="${YBAR:-$(command -v ybar || echo "$HOME/Applications/YBar.app/Contents/MacOS/ybar")}"
 WORK="${TMPDIR:-/tmp}/ybar-gif-$$"
+FFMPEG="$(command -v ffmpeg)" || { echo "[gif] ffmpeg not found on PATH (brew install ffmpeg)" >&2; exit 1; }
+GIFSKI="$(command -v gifski)" || { echo "[gif] gifski not found on PATH (brew install gifski)" >&2; exit 1; }
 mkdir -p "$WORK" "$OUT"
-FFMPEG=/opt/homebrew/bin/ffmpeg
-GIFSKI=/opt/homebrew/bin/gifski
 # Empty AeroSpace workspace so no app window is in frame.
 EMPTY_WS="${YBAR_GIF_WORKSPACE:-8}"
 RESTORE_WS="${YBAR_GIF_RESTORE:-2}"
