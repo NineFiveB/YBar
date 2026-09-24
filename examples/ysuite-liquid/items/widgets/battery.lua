@@ -85,7 +85,6 @@ local header = sbar.add("item", {
     padding_right = inset,
   },
   background = { height = 2, color = colors.grey, y_offset = -15 },
-  padding_top = 4,
 })
 
 local function add_detail(title)
@@ -121,7 +120,6 @@ sbar.add("item", {
   icon = { drawing = false },
   label = { drawing = false },
   background = { height = 2, color = colors.with_alpha(colors.white, 0.12) },
-  padding_top = 8,
 })
 
 -- Segmented control: two equal tabs on one wrap line (track + blue active).
@@ -145,8 +143,6 @@ local range_24h = sbar.add("item", "widgets.battery.range.24h", {
     sheen = false,
   },
   padding_left = inset,
-  padding_top = 8,
-  padding_bottom = 2,
 })
 
 local range_10d = sbar.add("item", "widgets.battery.range.10d", {
@@ -168,8 +164,6 @@ local range_10d = sbar.add("item", "widgets.battery.range.10d", {
     sheen = false,
   },
   padding_right = inset,
-  padding_top = 8,
-  padding_bottom = 2,
 })
 
 local last_charged = sbar.add("item", {
@@ -184,7 +178,6 @@ local last_charged = sbar.add("item", {
     padding_left = inset,
   },
   label = { drawing = false },
-  padding_top = 10,
 })
 
 local last_when = sbar.add("item", {
@@ -213,7 +206,6 @@ local chart_title = sbar.add("item", "widgets.battery.chart_title", {
     padding_left = inset,
   },
   label = { drawing = false },
-  padding_top = 10,
 })
 
 -- Filled while the pointer is on a bar; a single space keeps the row's height
@@ -230,7 +222,6 @@ local chart_detail = sbar.add("item", "widgets.battery.chart_detail", {
     padding_left = inset,
   },
   label = { drawing = false },
-  padding_top = 2,
 })
 
 local buckets_24h = 64
@@ -256,7 +247,6 @@ local function add_history_graph(name, buckets, drawing, height)
     label = { drawing = false },
     padding_left = inset,
     padding_right = 0,
-    padding_top = 4,
   })
 end
 
@@ -283,7 +273,6 @@ for i = 1, 10 do
     },
     label = { drawing = false },
     padding_left = (i == 1) and inset or 0,
-    padding_top = 6,
   })
   x_dates[i] = sbar.add("item", "widgets.battery.xdate." .. i, {
     position = popup_pos,
@@ -298,8 +287,6 @@ for i = 1, 10 do
     },
     label = { drawing = false },
     padding_left = (i == 1) and inset or 0,
-    padding_top = 0,
-    padding_bottom = 6,
   })
 end
 

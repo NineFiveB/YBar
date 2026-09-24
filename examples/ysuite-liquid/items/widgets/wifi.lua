@@ -144,7 +144,6 @@ local scan_label = sbar.add("item", "widgets.wifi.scan", {
   },
   label = { drawing = false },
   background = { height = 2, color = colors.with_alpha(colors.white, 0.12), y_offset = 12 },
-  padding_top = 8,
 })
 
 local spinner = require("helpers.spinner").attach(scan_label, {
@@ -184,6 +183,11 @@ local live_ssid = nil
 local live_info = ""
 local is_connected = false
 local scan_running = false
+-- A "connected" payload landed while a scan was in flight. That pass
+-- predates the change, so one more follows when it returns; however many
+-- payloads a burst delivers meanwhile, they collapse into that single
+-- follow-up, and two scans never overlap.
+local scan_pending = false
 -- A scan has landed since the last "connected" payload; until one does,
 -- that payload is taken at face value.
 local scan_seen = false
@@ -431,6 +435,10 @@ local function wifi_connected()
   return false
 end
 
+local function popup_open()
+  return wifi_bracket:query().popup.drawing == "on"
+end
+
 local function refresh_pill()
   is_connected = wifi_connected()
   wifi:set({
@@ -445,7 +453,11 @@ end
 local function run_scan()
   if scan_running then return end
   scan_running = true
-  spinner.start()
+  -- The spinner is an item:set every 40 ms, and most scans start from a
+  -- wifi_change with the popup closed (the load-time seed, `ybar --update`,
+  -- a path change). Spin only while the popup is drawn: toggle() starts it
+  -- when the popup opens mid-scan, hide() stops it when the popup closes.
+  if popup_open() then spinner.start() end
   paint()
   sbar.wifi_scan(function(output, code)
     scan_running = false
@@ -469,11 +481,16 @@ local function run_scan()
     end
     scan_cache = nets
     refresh_pill()
+    if scan_pending then
+      scan_pending = false
+      run_scan()
+    end
   end)
 end
 
 local function hide()
   hovered_name = nil
+  spinner.stop()
   wifi_bracket:set({ popup = { drawing = false } })
 end
 
@@ -571,7 +588,7 @@ local function toggle()
   if open then
     wifi_bracket:set({ popup = { drawing = true } })
     refresh_pill()
-    run_scan()
+    if scan_running then spinner.start() else run_scan() end
   else
     hide()
   end
@@ -592,7 +609,9 @@ wifi:subscribe("wifi_change", function(env)
   local settle = info == "connected"
   if settle then scan_seen = false end
   refresh_pill()
-  if settle then run_scan() end
+  if settle then
+    if scan_running then scan_pending = true else run_scan() end
+  end
 end)
 
 -- Seed the state. A config reload keeps the provider armed and deduped,

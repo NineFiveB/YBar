@@ -6,7 +6,8 @@
 --
 -- Differs from sketchybar-glass only in bar geometry: full-width strip
 -- (margin=0, y_offset=0) so topmost=on can cover the native menu bar without
--- edge leaks. Colors, fonts, and the port item files are shared.
+-- edge leaks. Only bar.lua lives here; colors, defaults and fonts resolve
+-- from ../sketchybar-glass and the item files from ../sketchybar-port.
 --
 -- Install: `ybar theme use ninefiveb` (see docs/THEMES.md).
 
@@ -19,7 +20,26 @@ do
 end
 SKETCHYBAR_CONFIG = PORT_DIR
 
-package.path = package.path
+-- colors / default / settings / helpers.default_font come from the glass
+-- theme rather than a copy here, so a palette fix lands once. Same lookup
+-- as the port: beside this theme in the repo, else under ~/.config/ybar/themes.
+local GLASS_DIR = config_dir .. "../sketchybar-glass"
+do
+  local probe = io.open(GLASS_DIR .. "/colors.lua", "r")
+  if probe then probe:close()
+  else GLASS_DIR = os.getenv("HOME") .. "/.config/ybar/themes/sketchybar-glass" end
+end
+
+-- Search order: this directory, the glass theme, then the Lua default path
+-- and the port. The engine already put this directory first, but the glass
+-- entry has to go in FRONT of package.path rather than on the end: the
+-- vendored default path ends in ./?.lua, and the port carries its own
+-- colors / default / settings / default_font, so an appended entry would
+-- lose to both. Re-adding this directory ahead of it keeps bar.lua here
+-- winning over the glass island one; the duplicate entry is harmless.
+package.path = config_dir .. "?.lua;"
+  .. GLASS_DIR .. "/?.lua;"
+  .. package.path
   .. ";" .. PORT_DIR .. "/?.lua"
   .. ";" .. PORT_DIR .. "/?/init.lua"
 
