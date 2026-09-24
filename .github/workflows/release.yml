@@ -223,19 +223,23 @@ jobs:
       # The release notes are the tag's own CHANGELOG.md section (the version
       # gate proved it exists): every line between "## [$V]" and the next
       # "## [" heading or the link references at the foot of the file. The
-      # install snippet and the tarball hash follow the notes so the release
-      # page stays complete on its own, and a section with no notes is
-      # refused rather than published as a bare heading.
+      # section is read from the tag's tree, not the working copy: when main
+      # already pins this version the formula step above exits before its
+      # detach and leaves the checkout on main, whose CHANGELOG.md may carry
+      # the next release's notes. The install snippet and the tarball hash
+      # follow the notes so the release page stays complete on its own, and a
+      # section with no notes is refused rather than published as a bare
+      # heading.
       - name: Compose the release notes
         env:
           V: ${{ steps.version.outputs.value }}
           SHA: ${{ steps.tarball.outputs.sha256 }}
         run: |
-          awk -v v="$V" '
+          git show "refs/tags/v$V:CHANGELOG.md" | awk -v v="$V" '
             index($0, "## [" v "]") == 1 { on = 1; next }
             on && (/^## \[/ || /^\[[^]]+\]: /) { exit }
             on { print }
-          ' CHANGELOG.md > notes.md
+          ' > notes.md
           grep -q '[^[:space:]]' notes.md || { echo "CHANGELOG.md has no notes under ## [$V]"; exit 1; }
           {
             cat notes.md
