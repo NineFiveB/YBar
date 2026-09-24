@@ -97,20 +97,6 @@ YBar has a native Windows 11 port on the [`windows` branch](../../tree/windows):
 
 Install channels, materials, depth effects and the build: [docs/WINDOWS.md](docs/WINDOWS.md).
 
-## Read more
-
-- [docs/INSTALL.md](docs/INSTALL.md): install, autostart, privacy prompts, signing
-- [docs/CONFIG.md](docs/CONFIG.md): Lua, shell, JSONC, workspace adapters
-- [docs/THEMES.md](docs/THEMES.md): theme gallery, verbs, publishing yours
-- [docs/EXTENDING.md](docs/EXTENDING.md): every property, event and component
-- [docs/BUILDING.md](docs/BUILDING.md): toolchain, make targets, test suite
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): renderer, IPC, providers, design rules
-- [docs/WINDOWS.md](docs/WINDOWS.md): the Windows 11 port guide
-- [docs/WINDOWS-PORT.md](docs/WINDOWS-PORT.md): the Windows port's design and platform contract
-- [CHANGELOG.md](CHANGELOG.md): what changed in each release
-- [SECURITY.md](SECURITY.md): supported versions, reporting, API scope
-- [CONTRIBUTING.md](CONTRIBUTING.md): themes, CI, releases, README GIFs
-
 ## Acknowledgments
 
 YBar stands on [sketchybar](https://github.com/FelixKratz/SketchyBar) by [Felix Kratz](https://github.com/FelixKratz). The daemon and CLI architecture, the command grammar and the script contract all come from there, and YBar stays compatible with them, [SbarLua](https://github.com/FelixKratz/SbarLua) included. [Waybar](https://github.com/Alexays/Waybar) shaped the feature set: tooltips, the idle inhibitor and the sense that a bar should come with batteries included.
