@@ -114,7 +114,7 @@ ybar status      # running or not, which bundle, which config, autostart state
 waits for the process to actually go, and tells you if a login agent will
 bring it back. A bar that is alive but has stopped answering is reported as
 such (`status` says `running (pid N) but not answering`), and `restart`
-gives it 5 s to answer — a bar still booting looks the same — and then
+gives it 15 s to answer — a bar still booting looks the same — and then
 replaces it. The escape hatch for a hung bar, when you would rather not go
 through the verb, is `launchctl kickstart -k gui/$(id -u)/com.ybar.YBar` —
 the same command `restart` reaches for. If the CLI is not on your PATH, every
@@ -212,7 +212,7 @@ after `ybar theme use` has reloaded the running bar.
 
 Once the job is loaded, the process verbs go through launchd. `ybar restart`
 asks the bar to quit and kickstarts the job — a bar that ignores the request,
-or is alive and still silent after 5 s, is replaced with
+or is alive and still silent after 15 s, is replaced with
 `launchctl kickstart -k`, and a kickstarted job that has not come up after
 launchd's 30 s throttle is kicked once more with `-k` and given 15 s more
 before `restart` gives up and names the log. `ybar stop` sends `--exit` and

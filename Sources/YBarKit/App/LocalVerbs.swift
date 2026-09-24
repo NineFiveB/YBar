@@ -1734,13 +1734,15 @@ public enum LocalVerbs {
     /// can cost, where a second `launchdReadyTimeout` made it 90 s.
     static let kickstartRetryTimeout: TimeInterval = readyTimeout
     /// What a process launchd names gets to bind its socket before it is read
-    /// as wedged. A bar in its first seconds — dyld, AppKit, a cold cache — is
-    /// "pid present, socket silent" exactly like one that hung, and only time
-    /// tells them apart: without this a login script, or a `start` typed
-    /// right after login, would `kickstart -k` a bar that was about to
-    /// answer. Shorter than `readyTimeout` because the bind is the first
-    /// thing the daemon does, before Metal and the config run.
-    static let bootGrace: TimeInterval = 5
+    /// as wedged. A bar in its first seconds is "pid present, socket silent"
+    /// exactly like one that hung — dyld, AppKit, the Metal device and the
+    /// shader compile all come before the bind, and a cold cache or a fresh
+    /// signature to validate stretches them — and only time tells the two
+    /// apart: without this a login script, or a `start` typed right after
+    /// login, would `kickstart -k` a bar that was about to answer. The same
+    /// allowance a fresh spawn gets (`readyTimeout`); the config run comes
+    /// after the bind and does not count.
+    static let bootGrace: TimeInterval = readyTimeout
     static let noticeAfter: TimeInterval = 2
     static let stopTimeout: TimeInterval = 5
     static let pollInterval: TimeInterval = 0.1
