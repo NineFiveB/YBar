@@ -65,4 +65,4 @@ ybar theme use sketchybar-glass
 
 Both `-c` and `--config` work. The `windows` branch ships its own restyle of
 this theme for Windows 11 Fluent, where the pills are Mica rather than Liquid
-Glass — see [the README's Windows section](../../README.md#windows).
+Glass — see [docs/WINDOWS.md](../../docs/WINDOWS.md).

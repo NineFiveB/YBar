@@ -8,7 +8,7 @@ the surface area you have to work with.
 The contract is [sketchybar](https://github.com/FelixKratz/SketchyBar)'s: items
 are live objects driven over IPC, addressed by name, with a stable property
 namespace and event model. Anything you can express in a shell script you can
-express in Lua (in-process) or over the CLI — see [Config](../README.md#config)
+express in Lua (in-process) or over the CLI — see [CONFIG.md](CONFIG.md)
 for the three surfaces. The same contract holds on the [Windows
 port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
 

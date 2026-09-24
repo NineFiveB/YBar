@@ -5,7 +5,9 @@ binary would fail Gatekeeper. Building locally (Homebrew formula or `make app`)
 produces a bundle with a fresh local signature that macOS accepts without
 ceremony. All routes need macOS 14+ and a Swift 6 toolchain — the Command Line
 Tools are sufficient, full Xcode is not required (see
-[BUILDING.md](BUILDING.md)).
+[BUILDING.md](BUILDING.md)). Liquid Glass needs macOS 26 at runtime; on
+macOS 14 and 15 the same themes draw a blur in its place. Windows users:
+[WINDOWS.md](WINDOWS.md).
 
 ## Homebrew (recommended)
 
@@ -24,14 +26,16 @@ directly also works: `brew tap NineFiveB/ybar https://github.com/NineFiveB/YBar.
 This builds YBar from source and installs:
 
 - `$(brew --prefix)/opt/ybar/YBar.app` — the app bundle (the daemon's TCC
-  identity, see [Permissions](#first-run-permissions))
+  identity, see [Permissions](#permissions))
 - `ybar` on your PATH — the CLI: process control (`ybar start|stop|restart|
   status|autostart`), sketchybar-compatible messages, and `ybar --help`
 
-Launch:
+Launch, and pick a look:
 
 ```sh
 ybar start
+ybar theme use darxk            # any name from `ybar theme list` (THEMES.md)
+ybar autostart enable           # bring it back at every login (Autostart, below)
 ```
 
 Heed the formula's caveats: upgrades re-sign the app, which voids previously

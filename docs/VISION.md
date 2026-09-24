@@ -1,6 +1,6 @@
 # YBar — Vision
 
-**YBar is Waybar for macOS**: a highly customizable, GPU-rendered status bar that replaces (or augments) the macOS menu bar, rendering complex graphics and animations at full speed via Metal, and extensible the way sketchybar is — scriptable from any language, with first-class Lua configuration. That was the founding statement and it still describes the macOS engine; a native Windows 11 port has since shipped beside it, mirroring the same command grammar, wire format and Lua API on Direct3D 11 (see [the README's Windows section](../README.md#windows)).
+**YBar is Waybar for macOS**: a highly customizable, GPU-rendered status bar that replaces (or augments) the macOS menu bar, rendering complex graphics and animations at full speed via Metal, and extensible the way sketchybar is — scriptable from any language, with first-class Lua configuration. That was the founding statement and it still describes the macOS engine; a native Windows 11 port has since shipped beside it, mirroring the same command grammar, wire format and Lua API on Direct3D 11 (see [WINDOWS.md](WINDOWS.md)).
 
 ## Why
 
