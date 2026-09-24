@@ -193,13 +193,15 @@ spec's letter and the reference's behavior disagreeing):
 
 ### 3.4 Events (`EventBus.swift`)
 
-The 20 built-in events **in exact declaration order** (bit = `1 << index`,
+The 22 built-in events **in exact declaration order** (bit = `1 << index`,
 `u64` mask, cap 64 total, custom events append):
 `front_app_switched, space_change, display_change, system_woke,
 system_will_sleep, mouse.entered, mouse.exited, mouse.clicked, mouse.scrolled,
 volume_change, power_source_change, battery_change, wifi_change, system_stats,
 mouse.exited.global, mouse.entered.global, modifier_change, app_launched,
-app_terminated, media_change`. Order is a contract — `--query` exposes raw
+app_terminated, media_change, bluetooth_change, bluetooth_pair`. The last
+two are Windows-only, so custom-event `update_mask` bits start at bit 22 on
+Windows. Order is a contract — `--query` exposes raw
 `update_mask` values. The forced-query `--trigger` interception set carries
 the reference's eight — `volume_change, power_source_change, battery_change,
 wifi_change, front_app_switched, display_change, system_stats, media_change`
@@ -346,7 +348,7 @@ ybar-win/
     app/                    — daemon lifecycle, message loop, config exec, hotload
     ipc/                    — wire format, server (accept thread), client, parser, handler
     model/                  — Item, Style, Components, Layout, PropertySetter, Serialize
-    events/                 — EventBus: 20 built-in names in contract order +
+    events/                 — EventBus: 22 built-in names in contract order +
                               custom events, u64 bitmask
     anim/                   — curves, scheduler (compositor-clock driven)
     render/                 — D3D11 device/swapchains, SceneBuilder, GlyphAtlas,
