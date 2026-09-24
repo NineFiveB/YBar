@@ -23,7 +23,31 @@ ignored, so a misspelled section does not silently produce an empty bar.
 | `bar` | `--bar` | object of properties |
 | `defaults` | `--default` | the prototype copied into every later item |
 | `events` | `--add event <name>` | array of strings |
-| `items` | see below | array, created in order |
+| `items` | `--add` / `--set` / `--subscribe` | array of item objects (shape below), created in order |
+
+Each entry of `items` is an object with these keys. Anything else warns on
+stderr (`[?] jsonc: items[N]: unknown key …`) and is ignored; a key of the
+wrong type is an error that names the entry, and the whole file is rejected.
+
+| Key | Becomes | Notes |
+|---|---|---|
+| `name` | the item's (or bracket's) name | required, non-empty string |
+| `position` | `--add item <name> <position>` | `left` (the default when absent), `right`, `center`, `q` or `e` (or the aliases `l`, `r`, `c`, `center_left`, `center_right`); must be a string when present; unused on a bracket |
+| `bracket` | `--add bracket <name> <members…>` in place of `--add item` | non-empty array of member names |
+| `props` | `--set <name> key=value …` | object; keys emitted in sorted order |
+| `subscribe` | `--subscribe <name> <events…>` | non-empty array of event names |
+
+```jsonc
+{
+  "name": "clock",
+  "position": "right",
+  "props": { "icon": "sf:clock", "update_freq": 10,
+             "script": "ybar --set \"$NAME\" label=\"$(date '+%H:%M')\"" },
+  "subscribe": ["system_woke"],
+},
+```
+
+`ybar.jsonc` beside this file has a bracket entry as well.
 
 Property keys within items use the full dotted namespace —
 `label.font`, `background.corner_radius`, `icon.color.alpha` — exactly as on
