@@ -193,7 +193,26 @@ public struct TextPart: Equatable, Sendable {
 public struct FontSpec: Equatable, Hashable, Sendable {
     public var family: String = ""
     public var style: String = ""
-    public var size: Float = 14
+    /// Quantized to the quarter point on the way in, once, so every cache
+    /// keyed on a font agrees about what a distinct size IS. The glyph atlas
+    /// already bucketed its keys (GlyphAtlas.quarterPoint) because its shelf
+    /// packer never reclaims, while the shaped-line, font and symbol caches
+    /// keyed on the raw value — so an `--animate` on `font` missed them on
+    /// every interpolated frame while the atlas hit, and a bucketed key
+    /// rasterized at a raw size would hand one size's metrics to another.
+    /// Quantizing at the source makes both classes of bug unreachable.
+    public var size: Float {
+        get { quantizedSize }
+        set { quantizedSize = FontSpec.quantize(newValue) }
+    }
+    private var quantizedSize: Float = 14
+
+    /// The quarter-point grid, shared with GlyphAtlas.quarterPoint. A full
+    /// 12→20pt animation visits 33 distinct sizes instead of one per frame.
+    public static func quantize(_ size: Float) -> Float {
+        guard size.isFinite else { return 0 }
+        return (size * 4).rounded() / 4
+    }
 
     public init() {}
 

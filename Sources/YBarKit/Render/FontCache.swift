@@ -2,7 +2,7 @@ import AppKit
 import CoreText
 
 /// Shaped-line + font caches. Status-bar strings repeat heavily, so both caches
-/// have generous hit rates; they are cleared wholesale when they grow too large.
+/// have generous hit rates; overflowing one evicts half of it.
 @MainActor
 public final class FontCache {
     public struct ShapedLine {
@@ -31,7 +31,25 @@ public final class FontCache {
 
     private var fonts: [FontSpec: CTFont] = [:]
     private var lines: [LineKey: ShapedLine] = [:]
-    private var symbolImages: [String: NSImage] = [:]
+    /// The value is itself optional: a name AppKit cannot resolve is cached as
+    /// nil, or an `sf:` typo re-enters AppKit on every measurement of every
+    /// frame — a miss costs ~15 us against ~0.07 us for a hit, and a part is
+    /// measured several times per frame.
+    private var symbolImages: [String: NSImage?] = [:]
+    /// Unresolvable symbol names already named on stderr; the part renders
+    /// blank and said nothing about why.
+    private var reportedMissingSymbols: Set<String> = []
+    /// How often AppKit was actually asked to resolve a symbol. A part is
+    /// measured several times per frame, so every one of these that is not a
+    /// genuine first sighting is ~15 us of the frame's budget spent again.
+    private(set) var symbolResolutions = 0
+
+    /// Cache bounds. Both values are small (a CTLine and its metrics, a
+    /// configured NSImage), so the bounds are generous; what matters is that
+    /// overflowing evicts HALF rather than everything — wiping the whole
+    /// table made the next frame re-shape every string on the bar.
+    private static let lineLimit = 4096
+    private static let symbolLimit = 1024
 
     public init() {}
 
@@ -45,7 +63,7 @@ public final class FontCache {
     public func shapedLine(text: String, spec: FontSpec) -> ShapedLine {
         let key = LineKey(text: text, font: spec)
         if let cached = lines[key] { return cached }
-        if lines.count > 1024 { lines.removeAll(keepingCapacity: true) }
+        if lines.count >= FontCache.lineLimit { FontCache.evictHalf(&lines) }
 
         let font = self.font(for: spec)
         let attributes: [NSAttributedString.Key: Any] = [
@@ -69,15 +87,33 @@ public final class FontCache {
         return shaped
     }
 
-    /// SF Symbol image for `sf:<name>` strings, configured at the part's font size.
+    /// SF Symbol image for `sf:<name>` strings, configured at the part's font
+    /// size. The size arrives already quantized (FontSpec.quantize), so the
+    /// key matches the atlas key for the same lookup and an animated size
+    /// mints a bounded number of entries rather than one per frame.
     public func symbolImage(name: String, pointSize: CGFloat) -> NSImage? {
         let key = "\(name)#\(pointSize)"
         if let cached = symbolImages[key] { return cached }
-        guard let base = NSImage(systemSymbolName: name, accessibilityDescription: nil) else { return nil }
+        if symbolImages.count >= FontCache.symbolLimit { FontCache.evictHalf(&symbolImages) }
+        symbolResolutions += 1
         let configuration = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .regular, scale: .medium)
-        guard let configured = base.withSymbolConfiguration(configuration) else { return nil }
-        symbolImages[key] = configured
-        return configured
+        let resolved = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(configuration)
+        // The failure is cached too: the name is a config typo or a symbol
+        // this macOS does not have, and neither resolves by trying again.
+        symbolImages[key] = resolved
+        if resolved == nil, reportedMissingSymbols.insert(name).inserted {
+            FileHandle.standardError.write(Data(
+                "[!] sf:\(name) is not a symbol on this system, nothing to draw\n".utf8))
+        }
+        return resolved
+    }
+
+    /// Drop half the entries when a cache hits its bound. Which half is
+    /// arbitrary (a dictionary has no order), but half an arbitrary cache
+    /// beats all of a good one.
+    private static func evictHalf<Key, Value>(_ cache: inout [Key: Value]) {
+        for key in cache.keys.prefix(cache.count / 2) { cache.removeValue(forKey: key) }
     }
 
     /// Measured ink size of one text part (layout units, points). Fixed-width
@@ -106,6 +142,7 @@ public final class FontCache {
         fonts.removeAll()
         lines.removeAll()
         symbolImages.removeAll()
+        reportedMissingSymbols.removeAll()
     }
 
     /// sketchybar's text_get_length: the tight ink width truncated as

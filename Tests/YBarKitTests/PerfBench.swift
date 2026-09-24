@@ -71,6 +71,42 @@ struct PerfBench {
         return sorted[index]
     }
 
+    /// The same bar with exactly one item whose icon is an `sf:` name this
+    /// system has no symbol for — a config typo, or a symbol a later macOS
+    /// dropped. The nil used to be returned before the cache write, so every
+    /// measurement of that part re-entered AppKit, four times a frame, forever.
+    @Test func tickCostWithOneUnresolvableSymbol() {
+        let items = Self.barItems()
+        items[1].icon.string = "sf:definitely.not.a.symbol.ybar"
+        print(String(format: "[bench] bar-only tick, one unresolvable sf: name: mean %.1f us",
+                     Self.timeBar(items: items)))
+    }
+
+    /// Mean bar-only tick cost over a warm run.
+    static func timeBar(items: [Item]) -> Double {
+        let fontCache = FontCache()
+        let builder = SceneBuilder(fontCache: fontCache)
+        let atlas = GlyphAtlas(scale: Self.scale)
+        let settings = BarSettings()
+        let measure = { (item: Item) in
+            MeasuredContent(iconSize: fontCache.measure(part: item.icon),
+                            labelSize: fontCache.measure(part: item.label))
+        }
+        var samples: [Double] = []
+        for iteration in 0..<600 {
+            let start = CFAbsoluteTimeGetCurrent()
+            let result = Layout.perform(items: items, barSize: Self.barSize,
+                                        settings: settings, notchWidth: 0, measure: measure)
+            _ = ComponentGeometry.bracketFrames(
+                items: items, contentBoxes: result.contentBoxes, barHeight: Self.barSize.height)
+            _ = builder.build(items: items, settings: settings,
+                              contentBoxes: result.contentBoxes, barSize: Self.barSize,
+                              scale: Self.scale, atlas: atlas)
+            if iteration >= 100 { samples.append((CFAbsoluteTimeGetCurrent() - start) * 1e6) }
+        }
+        return samples.reduce(0, +) / Double(samples.count)
+    }
+
     @Test func tickCostMicroseconds() {
         let fontCache = FontCache()
         let builder = SceneBuilder(fontCache: fontCache)
