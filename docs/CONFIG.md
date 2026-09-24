@@ -19,7 +19,7 @@ clock:set({ icon = "sf:clock", update_freq = 10, label = os.date("%H:%M") })
 clock:subscribe("routine", function() clock:set({ label = os.date("%H:%M") }) end)
 ```
 
-The `ybar.*` API: `bar`, `default`, `add`, `set`, `subscribe`, `trigger`,
+The `ybar.*` API: `bar`, `default`, `add`, `set`, `subscribe`, `trigger`, `query`, `add_event`,
 `push`, `remove`, `update`, `exec`, `delay`, `animate`, `volume`,
 `query_table`, `wifi_scan`, `wifi_join`, `wifi_prompt` and
 `wifi_disconnect`. Property tables nest (`background = { height = 16 }`) or
