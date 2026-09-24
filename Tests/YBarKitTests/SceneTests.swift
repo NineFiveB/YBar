@@ -285,10 +285,15 @@ struct HeadlessScene {
         let bar = BarSurface(screen: screen, arrangementIndex: 1)
         #expect(BarManager.pointerPixels(
             in: bar.hostView, scale: scene.scale, screenPoint: cursor) == DisplayList().pointer)
-        // A popup panel not yet presented reads as missing too.
+        // A popup panel not yet presented reads as missing too, even with
+        // the cursor inside the placeholder frame a fresh BarPanel keeps at
+        // the primary screen's origin: a window that is not ordered in is
+        // never under the cursor, whatever its frame says.
         let fresh = PopupSurface(hostItemID: -2, device: manager.device)
+        let placeholder = CGPoint(x: fresh.panel.frame.midX, y: fresh.panel.frame.midY)
         #expect(BarManager.pointerPixels(
-            in: fresh.hostView, scale: scene.scale, screenPoint: cursor) == DisplayList().pointer)
+            in: fresh.hostView, scale: scene.scale, screenPoint: placeholder)
+            == DisplayList().pointer)
     }
 }
 
