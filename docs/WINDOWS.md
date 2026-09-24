@@ -26,7 +26,8 @@ Windows 11, 22H2 or later. Windows 10 is untested.
 
 ## Install
 
-Three channels. All of them put `ybar` on your `PATH`.
+Three channels. The installer and Scoop put `ybar` on your `PATH`; with the
+zip you do it yourself.
 
 **PowerShell, one line, no admin rights:**
 

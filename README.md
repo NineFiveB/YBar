@@ -34,7 +34,7 @@ The bar is a set of live objects. Add one, set a property, and it redraws. One b
 - **Your sketchybar config ports mechanically.** Same commands, same property names, same JSON from `--query`. `sbar = require("sketchybar")` and most SbarLua configs run nearly unchanged.
 - **Your config is Lua and it runs inside the bar.** A click calls your function directly. No socket, no shell, no fork.
 - **Popups are just items.** A calendar grid or a Wi-Fi list is more items, drawn by the same engine. Graphs, sliders, arc gauges, app icons, marquees and tooltips are built in.
-- **Batteries included.** Battery, volume, Wi-Fi, now-playing, CPU and memory come from the engine itself. They start the first time a widget asks for them. Nothing shells out every second.
+- **Batteries included.** Battery, volume, Wi-Fi, now-playing, CPU and memory come from the engine itself. Volume, Wi-Fi, now-playing and the stats sampler wake up the first time a widget asks for them; battery is always on and costs nothing. Nothing shells out every second.
 
 ## Install
 
