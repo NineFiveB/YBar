@@ -95,7 +95,7 @@ YBar has a native Windows 11 port on the [`windows` branch](../../tree/windows):
 
 *The `sketchybar-glass` theme on Windows 11, restyled to Fluent: workspace pills, CPU and battery pills as fill meters, and the tray widget. Flat pills, recorded before Mica landed.*
 
-Install channels, materials, depth effects and the build: [docs/WINDOWS.md](docs/WINDOWS.md).
+Install, materials, depth effects and what is native: [docs/WINDOWS.md](docs/WINDOWS.md).
 
 ## Acknowledgments
 
