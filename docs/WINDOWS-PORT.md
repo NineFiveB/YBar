@@ -258,8 +258,13 @@ The whole surface: `ybar.bar/default/set/subscribe/delay/update/query_table/
 trigger/push/exec/add_event/query/remove/animate/add/item`, item handles
 (`h:set/subscribe/push/query`, `h.name`), nested-table flattening, valstr
 coercion (booleans → `on`/`off`, integral floats → integer strings), the
-18-trampoline raw bridge (the reference's 16 plus the two Windows additions
-below), registry-ref subscriptions keyed per item per event,
+19-trampoline raw bridge (the 16 the reference's bridge had when the port was
+copied, plus the two Windows additions below — `ybar.tray`, and `ybar.volume`,
+which the reference has since adopted — and `ybar.bluetooth`; the reference's
+`LuaRuntime.swift` registers 21 on `main` today: the same 16, `ybar.volume`,
+and the four Wi-Fi verbs `wifi_scan`/`wifi_join`/`wifi_prompt`/
+`wifi_disconnect`, which the port's bridge does not register), registry-ref
+subscriptions keyed per item per event,
 generation-guarded `exec`/`delay` completions, SENDER=forced → `routine`
 handler fallback, Lua-first-then-shell dispatch, and the pure-Lua `sketchybar`
 compat shim shipped verbatim except for one Windows-only addition,
@@ -394,13 +399,16 @@ independent instance.
   socket → print reply; `[!]` replies go to stderr, exit 1).
 - Process control (`src/app/process_control.cpp`): the same four verbs the
   reference stages on its unmerged `wip/process-control-cli` branch, with
-  that branch's exit codes (on `main` today the reference's only local verbs
-  are `theme` and `autostart`, whose usage errors still exit 1; once the
-  branch lands these are simply the reference's verbs and codes) — **0**
-  success including every idempotent no-op
+  that branch's exit codes for them (on `main` today the reference's only
+  local verbs are `theme` and `autostart`, whose usage errors still exit 1;
+  once the branch lands these are simply the reference's verbs and codes) —
+  **0** success including every idempotent no-op
   (`stop` with nothing running, `start` with a bar already up), **1** the
-  operation failed, **2** the invocation was wrong (usage errors from every
-  local verb, `autostart`/`theme` included; message-grammar errors stay at 1):
+  operation failed, **2** the invocation was wrong. The port applies **2**
+  to usage errors from every local verb, `autostart`/`theme` included; that
+  is one step past the staged branch, where the four verbs' and
+  `autostart`'s usage errors exit 2 but `theme`'s still exit 1.
+  Message-grammar errors stay at 1 on both sides:
   - `start` refuses a `-c` that does not exist, probes the socket with a
     connect (not `--ping`: a bar mid-config-run cannot answer one, and reading
     that as "not running" would launch a second instance), then
@@ -420,11 +428,13 @@ independent instance.
   - `restart` = `stop` (quiet when nothing runs) + `start`; `status` prints
     running/instance/socket/exe/config-a-fresh-start-would-pick (labelled with
     the theme when the recorded theme produced it)/autostart/log, plus notes.
-  - The staged macOS verbs (`wip/process-control-cli`; `main`'s `theme` and
-    `autostart` do not check the uid) refuse to run as root; the Windows ones
-    do **not** refuse elevation. The reason there is TCC attribution, which
-    has no analogue here, and an elevated bar is a legitimate setup next to
-    an elevated tiler.
+  - Of the staged macOS verbs (`wip/process-control-cli`), `start`, `stop`,
+    `restart` and `autostart enable`/`disable` refuse to run as root, while
+    `status` and `autostart status` run and print a note that they describe
+    root's session (`main`'s `theme` and `autostart` do not check the uid);
+    the Windows ones do **not** refuse elevation. The reason there is TCC
+    attribution, which has no analogue here, and an elevated bar is a
+    legitimate setup next to an elevated tiler.
 - Console ownership. `ybar.exe` stays a console-subsystem binary: the CLI has
   to behave in a terminal (the shell waits, `$LASTEXITCODE` is real, output
   lands before the prompt), which a GUI-subsystem exe cannot give. The price
