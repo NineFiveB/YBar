@@ -10,7 +10,7 @@
 
 ## Product pillars
 
-1. **Metal-first rendering.** A retained scene graph rendered by Metal (instanced SDF quads + glyph atlas text). Damage-driven: zero GPU work when the bar is static, ProMotion-paced when animating. Complex visuals — gradients, shadows, squircles, live graphs, shader-driven effects — at negligible cost.
+1. **Metal-first rendering.** A retained scene graph rendered by Metal (instanced SDF quads + glyph atlas text). Damage-driven: zero GPU work when the bar is static, and when animating paced to the slowest hosted display, up to 120 Hz. Complex visuals — gradients, shadows, squircles, live graphs, shader-driven effects — at negligible cost.
 2. **sketchybar-compatible mental model.** Items with `icon`/`label`/`background`, positions `left|center|right`, brackets/groups, popups, `--add/--set/--subscribe/--animate/--trigger/--query` style commands over IPC, executable config script, plugin scripts receiving `$NAME/$SENDER/$INFO` env vars. Migrating a sketchybar config should feel mechanical, not a rewrite.
 3. **Batteries included (Waybar-style).** Native Swift providers for the common modules so a useful bar needs zero external scripts: clock/calendar, battery, volume/audio device, wifi/network, cpu/memory, disk, now-playing, front app, spaces/workspaces (native + yabai/AeroSpace integration), and more.
 4. **Extensible in layers.**
