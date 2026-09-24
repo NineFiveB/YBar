@@ -35,10 +35,11 @@ surfaces are:
 
 - **The IPC socket** — `/tmp/ybar_$USER.socket` on macOS (`chmod 0600`), and
   on Windows an AF_UNIX socket at `%LOCALAPPDATA%\ybar\ybar_%USERNAME%.sock`
-  (falling back to `%TEMP%`, then to `C:\Windows\Temp` when `%TEMP%` is
-  unset), restricted after bind by an explicit DACL to the current user's
-  SID: anything that lets a *different* local user drive the daemon or
-  execute code through it.
+  (falling back to `%TEMP%` when `%LOCALAPPDATA%` is unset or that path
+  would not fit the 108-byte `sun_path` limit, then to `C:\Windows\Temp`
+  when `%TEMP%` is unset), restricted after bind by an explicit DACL to the
+  current user's SID: anything that lets a *different* local user drive the
+  daemon or execute code through it.
 - **Config-adjacent execution**: the daemon runs user-authored Lua and
   shell handlers by design — that is not a vulnerability. Escalation
   *beyond* what the config author wrote (e.g. injection through externally

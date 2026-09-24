@@ -1,7 +1,7 @@
 local settings = require("settings")
 local colors = require("colors")
 
--- The port's defaults with the glass treatment: 20pt macOS-26 corners,
+-- The port's defaults with the glass treatment: 9pt corners,
 -- in-shader glass material (implies a blurred backdrop on every pill),
 -- no hard borders — the specular rim replaces them.
 sbar.default({

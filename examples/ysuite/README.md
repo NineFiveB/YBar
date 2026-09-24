@@ -32,11 +32,16 @@ ybar theme use ysuite
 
 Requires the `sketchybar-glass` and `sketchybar-port` trees beside this
 theme (shipped in `examples/`; `ybarrc.lua` falls back to
-`~/.config/ybar/themes` for both). Optional: `ybar --bar wifi_ssid_prompt=on`
-once for the Wi-Fi network name (Location Services).
+`~/.config/ybar/themes` for both, and stops with an error naming both
+locations when `sketchybar-glass` is at neither — the port carries different
+copies of the same modules, so a silent fall-through would be the wrong
+palette). Optional: `ybar --bar wifi_ssid_prompt=on` once for the Wi-Fi
+network name (Location Services).
 
 Prerequisites: [Symbols Nerd Font](https://www.nerdfonts.com) for the port's
-glyphs, and `blueutil` (`brew install blueutil`) for the Bluetooth popup. The
+Wi-Fi and Bluetooth widgets (the right-edge glyphs and the Bluetooth logo;
+`items/widgets/wifi.lua` and `bluetooth.lua` are the only files that set that
+family), and `blueutil` (`brew install blueutil`) for the Bluetooth popup. The
 app-menus swap needs the port's `menus` helper, which only `make helpers`
 from a clone builds — a `brew install` never has it, so the swap is a no-op
 there (see [`../sketchybar-port/README.md`](../sketchybar-port/README.md)).
