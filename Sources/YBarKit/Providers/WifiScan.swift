@@ -34,9 +34,15 @@ struct WifiScanRow: Equatable, Sendable {
 enum WifiScan {
     /// Signal placeholder for a hotspot profile that was not in the scan.
     static let absentRSSI = -999
-    /// Exit code of a join the watchdog killed — timeout(1)'s number, so it
-    /// cannot collide with anything networksetup itself exits with.
+    /// Exit code of a join the watchdog killed, saved-network and prompted
+    /// alike — timeout(1)'s number, so it cannot collide with anything
+    /// networksetup itself exits with.
     static let timedOutCode: Int32 = 124
+    /// How long a join may run before the watchdog signals `networksetup`:
+    /// long enough for a slow association or a hotspot waking from sleep,
+    /// short enough that a hung child does not pin the password dialog, or
+    /// the utility-queue job behind `wifi_join`, for good.
+    static let joinTimeout: TimeInterval = 30
     /// Exit code of a scan whose every SSID was withheld: macOS gates the
     /// names behind the Location grant, which the popup then has to ask for.
     static let redactedCode: Int32 = 3
@@ -259,6 +265,14 @@ enum WifiScan {
     /// Join a network. With `password == nil`, `networksetup` uses the
     /// keychain and can wake a saved personal hotspot. A non-nil password is
     /// written to the child's stdin and is not returned in `output`.
+    ///
+    /// The code is 0 only when `networksetup` exited 0 and printed nothing.
+    /// A pre-spawn failure — an empty name, no Wi-Fi interface, the spawn
+    /// itself — is 1 with a "[!]" line as the output; a non-zero status
+    /// passes through; a refusal printed while exiting 0 ("Could not find
+    /// network …") becomes 1 (`joinRejected`). `timedOutCode` is the
+    /// watchdog, on both paths: a child still running after `joinTimeout`
+    /// is killed, and the output is then empty.
     static func join(ssid: String, password: String? = nil) -> (output: String, code: Int32) {
         let name = sanitize(ssid)
         guard !name.isEmpty else { return ("[!] wifi_join expects a network name", 1) }
@@ -295,36 +309,51 @@ enum WifiScan {
             }
             bytes.resetBytes(in: 0..<bytes.count)
         }
-        // A hung association must not pin the password dialog forever.
-        if password != nil {
-            let box = ProcessBox(process: process)
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 30) {
-                box.terminateIfRunning()
-            }
-        }
-        let raw = String(
-            decoding: outputPipe.fileHandleForReading.readDataToEndOfFile(),
-            as: UTF8.self
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
-        process.waitUntilExit()
-        let code = process.terminationStatus
-        if password != nil {
-            // A signal death is the watchdog above, not a verdict on the
-            // password: the child was killed before it could say anything,
-            // and its status would read as an ordinary failure otherwise.
-            if process.terminationReason == .uncaughtSignal {
-                return ("", timedOutCode)
-            }
-            let cleaned = redacted(raw, password: password)
-            if joinRejected(code: code, output: cleaned) {
-                return ("", code == 0 ? 1 : code)
+        let result = reap(process, output: outputPipe, timeout: joinTimeout)
+        if result.code == timedOutCode { return result }
+        if let password {
+            // Nothing the child printed comes back on this path: it may
+            // have echoed the secret, and the prompt only reads the code.
+            let cleaned = redacted(result.output, password: password)
+            if joinRejected(code: result.code, output: cleaned) {
+                return ("", result.code == 0 ? 1 : result.code)
             }
             return ("", 0)
         }
-        if joinRejected(code: code, output: raw) {
-            return (raw.isEmpty ? "[!] could not join \(name)" : raw, code == 0 ? 1 : code)
+        if joinRejected(code: result.code, output: result.output) {
+            return (result.output.isEmpty ? "[!] could not join \(name)" : result.output,
+                    result.code == 0 ? 1 : result.code)
         }
         return ("", 0)
+    }
+
+    /// Everything after the spawn, shared by the saved-network join and the
+    /// password prompt's: arm the watchdog, drain the child's output, read
+    /// its exit. A child still running `timeout` seconds in gets SIGTERM,
+    /// then SIGKILL if it shrugs that off (`ProcessBox`); it dies of the
+    /// signal, and the result is then `("", timedOutCode)` — a signal death
+    /// is the watchdog, not a verdict on the join, and whatever the child
+    /// managed to print first is not one either. Otherwise the output is
+    /// the child's, trimmed, next to its exit status as it was: the verdict
+    /// (`joinRejected`) is the caller's.
+    static func reap(
+        _ process: Process, output pipe: Pipe, timeout: TimeInterval
+    ) -> (output: String, code: Int32) {
+        let box = ProcessBox(process: process)
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) {
+            box.terminateIfRunning()
+        }
+        // Drain before waiting: a child blocked writing a full pipe never
+        // exits, and the read returns once the child is gone either way.
+        let raw = String(
+            decoding: pipe.fileHandleForReading.readDataToEndOfFile(),
+            as: UTF8.self
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        process.waitUntilExit()
+        if process.terminationReason == .uncaughtSignal {
+            return ("", timedOutCode)
+        }
+        return (raw, process.terminationStatus)
     }
 
     /// Drop the current association. Wi-Fi stays on; this is not a power toggle.

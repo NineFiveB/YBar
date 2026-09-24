@@ -705,11 +705,15 @@ public final class LuaRuntime {
     }
 
     /// Saved-network join, also off the main thread. The exit code is 0 only
-    /// when `networksetup` exited 0 and printed nothing: a non-zero status
-    /// passes through, and a refusal it prints while exiting 0 ("Could not
+    /// when `networksetup` exited 0 and printed nothing. A failure before
+    /// the spawn — an empty name, no Wi-Fi interface, the spawn itself —
+    /// is 1 with a "[!]" line as the output; a non-zero status passes
+    /// through; a refusal `networksetup` prints while exiting 0 ("Could not
     /// find network …") becomes 1 with that text as the output
-    /// (`WifiScan.joinRejected`). No watchdog runs on this path, so
-    /// `WifiScan.timedOutCode` is only ever seen by the password prompt.
+    /// (`WifiScan.joinRejected`); and `WifiScan.timedOutCode` (124) is the
+    /// watchdog, which runs here exactly as under the password prompt: a
+    /// child still running after `WifiScan.joinTimeout` is killed, so a
+    /// hung association cannot park this utility-queue job for good.
     private func scheduleWifiJoin(ssid: String, ref: Int32) {
         let generation = stateGeneration
         DispatchQueue.global(qos: .utility).async {

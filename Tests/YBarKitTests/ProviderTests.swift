@@ -270,6 +270,49 @@ import Testing
     }
 }
 
+/// The step after the spawn that both join paths share: the watchdog, the
+/// drain, the exit. Pinned against real children so the saved-network path
+/// (wifi_join from Lua) can never again run without the watchdog the
+/// password prompt had — a hung networksetup used to park that
+/// utility-queue job for good.
+@Suite struct WifiJoinWatchdogTests {
+    private func spawn(_ arguments: [String]) throws -> (Process, Pipe) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c"] + arguments
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        return (process, pipe)
+    }
+
+    @Test func aChildThatOutlivesTheTimeoutIsKilledAndReadsAsTimedOut() throws {
+        let (process, pipe) = try spawn(["echo started; exec sleep 300"])
+        let result = WifiScan.reap(process, output: pipe, timeout: 0.2)
+        // The exit is the watchdog's, and what the child printed before it
+        // was killed is not returned as if it were a verdict.
+        #expect(result.code == WifiScan.timedOutCode)
+        #expect(result.output == "")
+        #expect(!process.isRunning)
+        #expect(process.terminationReason == .uncaughtSignal)
+    }
+
+    @Test func aChildThatExitsInTimeKeepsItsOutputAndStatus() throws {
+        // networksetup's shape for an exit-0 refusal: a line, status 0. The
+        // helper passes both through untouched; the verdict is join's.
+        let (refusal, refusalPipe) = try spawn(["echo 'Could not find network Cafe.'; exit 0"])
+        let refused = WifiScan.reap(refusal, output: refusalPipe, timeout: 5)
+        #expect(refused.output == "Could not find network Cafe.")
+        #expect(refused.code == 0)
+
+        let (failure, failurePipe) = try spawn(["exit 3"])
+        let failed = WifiScan.reap(failure, output: failurePipe, timeout: 5)
+        #expect(failed.output == "")
+        #expect(failed.code == 3)
+    }
+}
+
 @Suite struct NetworkInfoTests {
     @Test func offlineIsEmpty() {
         #expect(NetworkProvider.info(satisfied: false, isWifi: true, ssid: "Home") == "")
