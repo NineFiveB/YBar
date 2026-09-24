@@ -99,12 +99,12 @@ with the next release.
   `glass_variant` (`clear` / `regular`, bar- and item-level).
 - Graph items: `graph.style=line|bars`, `graph.tick`, `graph.plot_width`,
   `graph.axis_max` and `graph.marks` (the battery chart's charging marks).
-- `x_offset` on items and backgrounds: slides the drawn pill without
-  pushing the items that follow.
+- Item-level `x_offset` (the background-level key already existed): slides
+  the drawn pill without pushing the items that follow.
 - Wi-Fi: `ybar.wifi_scan`, `ybar.wifi_join`, `ybar.wifi_prompt` and
   `ybar.wifi_disconnect`; a glass password window for locked networks that
-  joins through `networksetup`'s stdin; `--bar wifi_ssid_prompt=on` for the
-  one-time Location opt-in that unredacts network names.
+  joins through `networksetup`'s stdin. Names stay redacted until the
+  existing `--bar wifi_ssid_prompt=on` Location opt-in (a 0.1.0 key).
 - Themes: `ysuite-liquid` (the ysuite-web "Liquid Glass on Metal" mock) and
   `ninefiveb` (the maintainer's daily driver); `sketchybar-glass` floats as
   an island on a glass strip.
