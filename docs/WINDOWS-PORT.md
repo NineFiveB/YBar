@@ -118,9 +118,12 @@ colors, bool grammar (`on/off/true/false/yes/no/1/0` + `toggle` on bool
 leaves), `width=dynamic` (-1 sentinel with measured-width animation seeding),
 auto-enable of `background.drawing` on color set, lazy `gauge.*`/`image.*`
 component attachment, and the exact `[!]`/`[?]` error string formats (one
-known slip to close in code, not in this contract: the port replies
-`[!] invalid boolean:` for `image.drawing` and `[!] invalid image.drawing:`
-for `background.image.drawing` — the reverse of the reference).
+known slip left to close in code, not in this contract: the port replies
+`[!] invalid image.drawing:` for `background.image.drawing`, where the
+reference now replies `[!] invalid boolean:` — its answer for every boolean
+leaf. `image.drawing` was the other half of that slip and is closed: the
+reference routes it through the shared boolean setter too, so both sides say
+`[!] invalid boolean:` there).
 
 Windows-specific accepted no-ops: `notch_width`, `notch_offset`,
 `notch_display_height` (no notched hardware — number-validated, stored and
@@ -131,8 +134,12 @@ value; never read — a no-op in the reference too). `wifi_ssid_prompt` is
 `ms-settings:privacy-location`, the Windows stand-in for the reference's Core
 Location request (§10, Network row, for the 24H2 caveat).
 
-Windows-specific **added** keys (deliberate divergences; each absent from the
-reference namespace, listed again in §15's divergence roll-up):
+Keys **added** here first (the three item keys have since been ported to the
+reference under the same names and defaults — `slider.interactive` with the
+same `--query` shape, the two image keys additionally reported under `image`
+there, which this serializer does not do — so they are shared rather than
+divergences; §15's roll-up records where they came from. Bar `reserve` stays
+Windows-only):
 
 - `slider.interactive` (bool, default `on`): `off` makes a slider a
   **read-only meter** — the press/drag path is skipped entirely, while
@@ -251,14 +258,20 @@ The whole surface: `ybar.bar/default/set/subscribe/delay/update/query_table/
 trigger/push/exec/add_event/query/remove/animate/add/item`, item handles
 (`h:set/subscribe/push/query`, `h.name`), nested-table flattening, valstr
 coercion (booleans → `on`/`off`, integral floats → integer strings), the
-18-trampoline raw bridge (the reference's 16 plus the two Windows additions
-below), registry-ref subscriptions keyed per item per event,
+19-trampoline raw bridge (the 16 the reference's bridge had when the port was
+copied, plus the two Windows additions below — `ybar.tray`, and `ybar.volume`,
+which the reference has since adopted — and `ybar.bluetooth`; the reference's
+`LuaRuntime.swift` registers 21 on `main` today: the same 16, `ybar.volume`,
+and the four Wi-Fi verbs `wifi_scan`/`wifi_join`/`wifi_prompt`/
+`wifi_disconnect`, which the port's bridge does not register), registry-ref
+subscriptions keyed per item per event,
 generation-guarded `exec`/`delay` completions, SENDER=forced → `routine`
 handler fallback, Lua-first-then-shell dispatch, and the pure-Lua `sketchybar`
 compat shim shipped verbatim except for one Windows-only addition,
 `sbar.tray(name, action)`, which forwards to `ybar.tray`. The Lua prelude is
-plain Lua source and ships **byte-identical** apart from the two inserted
-lines that expose `ybar.tray`/`ybar.volume` (below). Bridge invariants
+plain Lua source and ships **byte-identical** apart from the inserted line
+that exposes `ybar.tray` (below; the `ybar.volume` line is now in the
+reference prelude too, so only the tray line differs). Bridge invariants
 preserved: no `luaL_check*`/`luaL_error` in trampolines (longjmp/destructor
 UB), key-copy before stringify in table walks, `lua_State` generation counter.
 
@@ -269,8 +282,10 @@ shell round trip into the daemon the config already runs inside (measured
 area to act on) routes the §10.6 tray verbs through the daemon's own
 token-dispatch path in-process, and also retires the shell-metacharacter
 guard an app-controlled registry tooltip once forced. And `ybar.volume(pct[, app])`
-routes `--volume` (§10, Audio row): macOS themes shell
-`osascript -e 'set volume …'`, while this daemon already holds the
+routes `--volume` (§10, Audio row): macOS themes used to shell
+`osascript -e 'set volume …'` (the reference has since adopted the same
+in-process verb over CoreAudio, so only the optional app id below stays
+Windows-only), while this daemon already holds the
 `IAudioEndpointVolume` — the previous theme workaround synthesized volume-key
 ticks through PowerShell SendKeys, one shell spawn per adjustment at 2 %
 quantization. The optional app id (`--query audio`'s `id` field) routes the
@@ -347,7 +362,7 @@ ybar-win/
                               front-app hook are polled inline by app/daemon.cpp
     lua/                    — Lua 5.4.8 vendored (C) under vendor/; runtime.cpp bridge,
                               prelude embedded as a string constant (the reference
-                              prelude + Windows-only ybar.tray/ybar.volume bindings)
+                              prelude + the Windows-only ybar.tray binding)
   shaders/ybar.hlsl         — shipped loose beside the exe, D3DCompile at startup
   themes/                   — placeholder (README only); the shipped themes live under
                               examples/. `ybar theme list` searches examples/ + themes/
@@ -382,11 +397,18 @@ independent instance.
   Anything else → thin client (strip a leading `-m/--message`, fold
   `AEROSPACE_*`/`YABAI_*`/`KOMOREBI_*` env on `--trigger`, serialize argv →
   socket → print reply; `[!]` replies go to stderr, exit 1).
-- Process control (`src/app/process_control.cpp`), the reference's verbs with
-  the reference's exit codes — **0** success including every idempotent no-op
+- Process control (`src/app/process_control.cpp`): the same four verbs the
+  reference stages on its unmerged `wip/process-control-cli` branch, with
+  that branch's exit codes for them (on `main` today the reference's only
+  local verbs are `theme` and `autostart`, whose usage errors still exit 1;
+  once the branch lands these are simply the reference's verbs and codes) —
+  **0** success including every idempotent no-op
   (`stop` with nothing running, `start` with a bar already up), **1** the
-  operation failed, **2** the invocation was wrong (usage errors from every
-  local verb, `autostart`/`theme` included; message-grammar errors stay at 1):
+  operation failed, **2** the invocation was wrong. The port applies **2**
+  to usage errors from every local verb, `autostart`/`theme` included; that
+  is one step past the staged branch, where the four verbs' and
+  `autostart`'s usage errors exit 2 but `theme`'s still exit 1.
+  Message-grammar errors stay at 1 on both sides:
   - `start` refuses a `-c` that does not exist, probes the socket with a
     connect (not `--ping`: a bar mid-config-run cannot answer one, and reading
     that as "not running" would launch a second instance), then
@@ -406,9 +428,13 @@ independent instance.
   - `restart` = `stop` (quiet when nothing runs) + `start`; `status` prints
     running/instance/socket/exe/config-a-fresh-start-would-pick (labelled with
     the theme when the recorded theme produced it)/autostart/log, plus notes.
-  - The macOS verbs refuse to run as root; the Windows ones do **not** refuse
-    elevation. The reason there is TCC attribution, which has no analogue
-    here, and an elevated bar is a legitimate setup next to an elevated tiler.
+  - Of the staged macOS verbs (`wip/process-control-cli`), `start`, `stop`,
+    `restart` and `autostart enable`/`disable` refuse to run as root, while
+    `status` and `autostart status` run and print a note that they describe
+    root's session (`main`'s `theme` and `autostart` do not check the uid);
+    the Windows ones do **not** refuse elevation. The reason there is TCC
+    attribution, which has no analogue here, and an elevated bar is a
+    legitimate setup next to an elevated tiler.
 - Console ownership. `ybar.exe` stays a console-subsystem binary: the CLI has
   to behave in a terminal (the shell waits, `$LASTEXITCODE` is real, output
   lands before the prompt), which a GUI-subsystem exe cannot give. The price
@@ -495,8 +521,10 @@ stale file before bind; `closesocket` not `_close`; no `SIGPIPE` on Windows
 
 **Cross-component coupling**: the theme switcher must use the same path. The
 POSIX `scripts/ybar-theme` became the built-in `ybar theme
-list|current|use <name>|reset` subcommand (no `.ps1`; `install <git-url>` is
-not ported, `reset` is new). `use` records `current-theme` and sends
+list|current|use <name>|reset` subcommand here first (no `.ps1`; `install
+<git-url>` is not ported, `reset` is new), and the reference has since adopted
+the same built-in — `ybar theme list|current|use|reset|install`, its script
+reduced to a forwarding shim — so the verb is parity. `use` records `current-theme` and sends
 `--reload <entry>` over the same socket, falling back to "recorded; `ybar start`
 to apply" when no daemon answers (the next start picks it up through config
 discovery, §5). The `~/.config/ybar/themes/` + `current-theme` state file
@@ -577,6 +605,14 @@ HWND  WS_POPUP | (borderless)
   (the default) **auto-hides** the surface while fullscreen is detected on
   its monitor and shows it again otherwise — the Win11-taskbar convention,
   and the analog of the macOS bar not drawing over a fullscreen Space.
+  (Parity note: on the reference `fullscreen_show=off` stays that raise-less
+  default — the panels are carried onto the Space at their level and covered
+  — and hiding is a separate opt-in, `fullscreen_hide=on`, which drops
+  `.fullScreenAuxiliary` from the bar, popup and tooltip panels and wins over
+  `fullscreen_show`; its `--query bar` reports both flags. This port does not
+  know `fullscreen_hide` (it falls to the `[?] unknown bar property` arm) and
+  does not serialize `fullscreen_show`, so a shared theme sets
+  `fullscreen_hide` from its macOS branch only until both are closed.)
   Auto-hide ORs with the user's `hidden=` toggle and keeps the appbar
   reservation (no window reflow when toggling). Switching to a workspace
   without the fullscreen window restores the bar because its foreground no
@@ -663,7 +699,11 @@ on a `SpriteVisual`; `win/composition_host.cpp`), because the Mica layers
 (§7.6) need a backdrop brush that only that API has; the popup open/close
 fade is a linear `ScalarKeyFrameAnimation` on the tree's root opacity
 (`CompositionHost::rampOpacity`), where it used to be a DirectComposition
-effect group. DirectComposition survives only as the animation pump's
+effect group (`popup.fade_in` / `popup.fade_out`, frames at 60 Hz, 0 = hard
+cut; the reference has since adopted both keys with the same semantics — an
+`NSAnimationContext` ramp of the panel alpha, a closing panel deaf to the
+mouse, a mid-fade reopen restarting from 0 — except that its tooltips keep
+the hard cut). DirectComposition survives only as the animation pump's
 `DCompositionWaitForCompositorClock` (§7.2). This is the canonical
 transparent GPU-window recipe (Kenny Kerr, MSDN 2014; Qt uses the same),
 with the WinRT compositor in place of the DComp device. The compositor,
@@ -724,11 +764,13 @@ machines but is only documented as supported for UWP apps — app-local is the
 supported path for desktop apps and preserves the no-build-time-toolchain
 property.
 
-**Shadows — two additive Windows extensions (§3.9).** The reference draws a
-shadow as a hard offset COPY of the plate with no blur, and only for non-bracket
-items (`SceneBuilder.swift`, bracket pass emits a background quad and nothing
-else). Both still hold by default here, because both extensions are opt-in and
-both default to off:
+**Shadows — soft blur and bracket shadows (§3.9).** Both began as Windows
+extensions over a reference that drew a shadow only as a hard offset COPY of
+the plate, and only for non-bracket items; the reference has since adopted
+both ABI-identically (its `flagShadow` is the same bit 4, fed from the same
+`fill2.xy` / `gradientDir.x` fields, and its brackets and slider tracks route
+through the same shadow path as items), so they are shared. Both are opt-in
+and default to off:
 
 - `background.shadow.blur` (points, default **0**). Above 0 the shadow quad is
   grown by the blur on every side, the true shape half-size is carried in
@@ -739,8 +781,8 @@ both default to off:
   sets the flag is unaffected. A LIGHT shadow colour at distance 0 with a blur
   is a GLOW; that is the only bloom this pipeline has, and the workspace focus
   halo in sketchybar-glass uses it.
-- Brackets emit shadows too, via the shared `pushShadow`. The reference does
-  not. This matters because in a bracket-based theme every pill IS a bracket,
+- Brackets emit shadows too, via the shared `pushShadow`; the reference does
+  as well now, through its `emitBackground`. This matters because in a bracket-based theme every pill IS a bracket,
   so shadows and glows would otherwise be unreachable on exactly the elements
   that want them. Invisible unless `background.shadow.drawing` is set, which
   defaults off.
@@ -761,9 +803,13 @@ toward the pointer at FIXED elevation, because leaning the whole vector also
 drops `L.z`, which is the flat-face reference the bevel is measured against, and
 the effect then cancels itself to 1–2 levels out of 255.
 
-`Uniforms` is **32 bytes here, not the reference's 16**: it carries the pointer
+`Uniforms` is **32 bytes here, not the reference's 24**: both carry the pointer
 position (device px on the surface being drawn, negative = pointer away) for
-that key light. It is a per-frame constant buffer, not the shared per-item
+that key light — the reference has since adopted the field, so the first
+24 bytes are laid out the same on both sides (`viewportSize`, `holeCount`, a
+4-byte `_pad`, `pointer`; the reference's stride is pinned at 24 in
+`InstancesTests.swift`) and the 32 here is only the cbuffer rounding up to
+16. It is a per-frame constant buffer, not the shared per-item
 instance ABI. The daemon gates the pointer path three ways — only when a glass
 quad is actually on screen, only past 3pt of travel, and never faster than
 60 Hz — so a flat theme pays nothing and zero-work-at-rest is preserved.
@@ -778,13 +824,23 @@ a runtime-created `ID3D11SamplerState` (LINEAR, CLAMP); `fwidth/dfdx/dfdy` →
 `SV_Position.xy` in the pixel shader gives top-left pixel coords exactly like
 `[[position]]` (the hole-cutout math depends on this and ports unchanged);
 Metal and D3D share NDC conventions so `to_clip` is untouched. The GPU
-instance ABI (QuadInstance 112 B / GlyphInstance 64 B / ShapeVertex 32 B /
-Hole 32 B, flag bits, binding slots t0/b1/t0+t1 textures, holes at PS `t2`)
-is preserved with static asserts. `cornerExponent` stays transmitted-but-unused,
-as on macOS. One Windows-added flag bit extends the ABI: `kGlyphFlagDesaturate`
+instance ABI (QuadInstance 112 B / GlyphInstance 64 B / ShapeVertex 32 B,
+flag bits, binding slots t0/b1/t0+t1 textures, holes at PS `t2`)
+is preserved with static asserts — byte-identical for those three structs;
+`Hole` is the one exception, 32 B here against 48 B on the reference, where
+Swift/Metal align the `float3` pad to 16 bytes (pinned on both sides:
+`instances_tests.cpp`, `InstancesTests.swift`). `cornerExponent` stays
+transmitted-but-unused, as on macOS. One flag bit was added here and has since
+been ported to the reference (`GlyphInstance.flagDesaturate` /
+`kGlyphFlagGrey` in `YBar.metal`, same bit): `kGlyphFlagDesaturate`
 (`1u << 1`; `kGlyphFlagGrey` in the HLSL) applies a Rec. 709 luma conversion
 to colour-atlas samples — valid directly on premultiplied colour — backing
-`image.desaturate` (§3.3). The painted glass rim (`flagGlass`) ships with
+`image.desaturate` (§3.3). Of `QuadInstance.flags`, bits 0–4 (gradient, glass,
+arc, holes, shadow) are the shared ABI — `instances.h` and the HLSL define
+exactly those. The reference additionally reserves bits 5–7 for effects that
+are macOS-only (its pre-26 painted sheen, which a native `NSGlassEffectView`
+backdrop replaces); the HLSL neither defines nor reads them. The glyph flags
+are shared in full (bits 0–1). The painted glass rim (`flagGlass`) ships with
 its exact constants and stays ON over the Mica backdrop — the opposite of the
 reference's `nativeGlassBackdrops` gate, which drops the rim over macOS-26
 Liquid Glass because that material refracts and carries its own edge. Mica is
@@ -835,8 +891,9 @@ Model on Windows Terminal AtlasEngine + `lhecker/dwrite-hlsl`:
   **exactly** `width = (int)(inkBounds.width + 1.5)`. Every padding and
   alignment in every ported config depends on this truncation. The headless
   tests in `tests/ink_metric_tests.cpp` pin the truncation and the ink-union
-  accumulation with synthetic values; a golden-value comparison against the
-  macOS build is still outstanding (§14).
+  accumulation with synthetic values; the golden values from the macOS build
+  now exist (§14: `Tests/Fixtures/text-metrics.json` on `main`) — replaying
+  them through DirectWrite is still outstanding.
 - **Fonts**: spec grammar `"Family:Style:Size"` unchanged; empty family →
   **Segoe UI Variable** with the style-string→weight table
   (`ultralight…black` → `DWRITE_FONT_WEIGHT_*`); named families go straight to
@@ -1019,7 +1076,7 @@ backing scale (Windows scales are commonly 1.0/1.25/1.5).
 | system_woke / system_will_sleep | `WM_POWERBROADCAST`: `PBT_APMRESUMEAUTOMATIC` / `PBT_APMSUSPEND` (forwarded from the bar windows' WndProc to the message-only mailbox, which never receives broadcasts directly — no `RegisterSuspendResumeNotification`) | |
 | app_launched / app_terminated | From komorebi `Show`/`Destroy` window events (or the YTile adapter's manage/unmanage diffs) when a WM is attached; else 2 s process-snapshot diff (`CreateToolhelp32Snapshot`, armed lazily on first subscription) | **Semantics change**: window-scoped with komorebi (background processes invisible); WMI tracing needs admin — rejected. Document. |
 | Power | `GetSystemPowerStatus` + `RegisterPowerSettingNotification(GUID_ACDC_POWER_SOURCE, GUID_BATTERY_PERCENTAGE_REMAINING)` → `PBT_POWERSETTINGCHANGE` | Push, no polling. `"AC"`/`"BATTERY"` strings + dedupe/forced split preserved; the third source condition `PoHot` (UPS) maps to `"AC"` |
-| Audio | `IMMDeviceEnumerator` → `IAudioEndpointVolume` (+`IAudioEndpointVolumeCallback`), `IMMNotificationClient::OnDefaultDeviceChanged` re-arm | Callbacks marshal to UI thread. Muted → 0, integer percent. **Write path (ybar-win extension, no macOS analog)**: `--volume <0-100>` / `ybar.volume(pct)` → `SetMasterVolumeLevelScalar` on the held endpoint (0 mutes keeping the scalar; >0 sets then unmutes, scalar first so a muted endpoint cannot blip its old level); the set's own `OnNotify` publishes the new value back through the normal path. **Per-app sessions (ybar-win extension)**: `--query audio` / `--volume <0-100> <app>` enumerate `IAudioSessionManager2` on the default endpoint STATELESSLY per call (the tray_icons pattern — no session sinks, no lifetime surface; a fresh manager per call also always sees new sessions). Sessions group by lowercase exe stem (`system` = Explorer's system-sounds session, pinned last); Expired sessions and sessions whose process image path is unreadable (SYSTEM-owned, or the pid died while merely Inactive) are skipped so a group id is never empty; group volume is the max across sessions, muted only when all are. Reads mirror muted→0; writes mirror the master ordering (0 mutes keeping the scalar, >0 sets the scalar then unmutes). Session scalars are RELATIVE to master (100 = follow master) — the Windows 11 Settings mixer convention, kept as-is deliberately. Each group also reports **`background`**: no process running that image owns a visible, titled, unowned top-level window. Keyed by IMAGE and not by the session's pid, because the two are frequently different — Chrome routes audio through a utility process, so a per-pid window test would hide Chrome. The provider only REPORTS it; `--query audio` stays a complete view of the endpoint, and sketchybar-glass's mixer is what drops rows that are `background && !active`. That is what keeps a merely-resident app off the list: closing the Xbox app leaves `XboxPcApp.exe` running (unsuspended, ~100 threads) holding a live Inactive session, and a row for it is indistinguishable from a mixer that failed to refresh. `active` is checked first so anything actually producing sound stays listed even with no window. Caveat: an older UWP app's window belongs to `ApplicationFrameHost.exe`, so such an app reads as background even while visible |
+| Audio | `IMMDeviceEnumerator` → `IAudioEndpointVolume` (+`IAudioEndpointVolumeCallback`), `IMMNotificationClient::OnDefaultDeviceChanged` re-arm | Callbacks marshal to UI thread. Muted → 0, integer percent. **Write path (added here first; the reference has since adopted `--volume` / `ybar.volume` in-process over CoreAudio, plus `+N`/`-N` relative steps, so the master verb is parity)**: `--volume <0-100>` / `ybar.volume(pct)` → `SetMasterVolumeLevelScalar` on the held endpoint (0 mutes keeping the scalar; >0 sets then unmutes, scalar first so a muted endpoint cannot blip its old level); the set's own `OnNotify` publishes the new value back through the normal path. **Per-app sessions (ybar-win extension; the reference refuses the app token by name — macOS has no per-app volume API)**: `--query audio` / `--volume <0-100> <app>` enumerate `IAudioSessionManager2` on the default endpoint STATELESSLY per call (the tray_icons pattern — no session sinks, no lifetime surface; a fresh manager per call also always sees new sessions). Sessions group by lowercase exe stem (`system` = Explorer's system-sounds session, pinned last); Expired sessions and sessions whose process image path is unreadable (SYSTEM-owned, or the pid died while merely Inactive) are skipped so a group id is never empty; group volume is the max across sessions, muted only when all are. Reads mirror muted→0; writes mirror the master ordering (0 mutes keeping the scalar, >0 sets the scalar then unmutes). Session scalars are RELATIVE to master (100 = follow master) — the Windows 11 Settings mixer convention, kept as-is deliberately. Each group also reports **`background`**: no process running that image owns a visible, titled, unowned top-level window. Keyed by IMAGE and not by the session's pid, because the two are frequently different — Chrome routes audio through a utility process, so a per-pid window test would hide Chrome. The provider only REPORTS it; `--query audio` stays a complete view of the endpoint, and sketchybar-glass's mixer is what drops rows that are `background && !active`. That is what keeps a merely-resident app off the list: closing the Xbox app leaves `XboxPcApp.exe` running (unsuspended, ~100 threads) holding a live Inactive session, and a row for it is indistinguishable from a mixer that failed to refresh. `active` is checked first so anything actually producing sound stays listed even with no window. Caveat: an older UWP app's window belongs to `ApplicationFrameHost.exe`, so such an app reads as background even while visible |
 | Network | `NotifyNetworkConnectivityHintChange` + `WlanRegisterNotification` (ACM connect/disconnect); SSID via `WlanQueryInterface(wlan_intf_opcode_current_connection)` | **Win11 24H2 gates SSID behind Location privacy** — degrade to `"connected"` exactly like macOS-without-authorization; `wifi_ssid_prompt=on` opens `ms-settings:privacy-location` |
 | SystemStats | `GetSystemTimes` deltas (busy = (kernel−idle)+user), `GlobalMemoryStatusEx` (Total−Avail)/Total; `GetDiskFreeSpaceExA` on `%USERPROFILE%` (else `C:\`) for `DISK_*_GB` | Microsoft explicitly recommends this over PDH for ≥1 Hz sampling. Same 2 s interval, 0–100 contract |
 | Media | **GSMTC** (`GlobalSystemMediaTransportControlsSessionManager`, C++/WinRT): `CurrentSessionChanged` + `SessionsChanged` + `MediaPropertiesChanged` + `PlaybackInfoChanged`, plus a 10 s revalidation tick (GSMTC does not reliably report a vanished session — a closed browser tab leaves a `Playing` ghost) → `media_change` with `MEDIA_APP/STATE/TITLE/ARTIST/ALBUM` | Strict superset of the macOS distributed-notification hack: covers Spotify, browsers, most players, plus artwork/seek/transport for a future now-playing popup. `MEDIA_APP` carries the session's app id — scripts matching `"Music"|"Spotify"` need the documented mapping table. Cached-env replay on reload preserved. Fails only under session-0 (not applicable) |
@@ -1043,8 +1100,10 @@ value is read with `_wgetenv` so non-ASCII shell paths survive. Dispatch is
 `sh -c <script>` / `cmd /c <script>` / `powershell -NoProfile -Command
 <script>` by kind, cwd = config dir, 60 s watchdog that closes a
 **`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`** Job Object (kills the whole child
-*tree* — the latent "children of the shell survive" gap macOS shares is
-fixed here), fire-and-forget, PATH prepended with the `ybar.exe` directory
+*tree*; macOS signals the child's process group — Process spawns the shell
+as its own group leader — and escalates to SIGKILL, so only a helper that
+`setsid()`s into its own session outlives its 60 s there), fire-and-forget,
+PATH prepended with the `ybar.exe` directory
 and the resolved shell's directory (`;` separator). `ybar.exec` shares the
 interpreter choice, the PATH prepend and the 60 s limit but not the rest: its
 watchdog `TerminateProcess`es the shell alone (no Job Object, so grandchildren
@@ -1374,7 +1433,9 @@ the README's third-party section.)
   obsolete — media is native (GSMTC) and volume goes through the audio
   provider (`volume_change` in) and, for absolute sets from sliders, the
   in-process `ybar.volume(pct[, app])` Lua verb / `ybar --volume <0-100> [app]`
-  CLI verb (§10, Audio row) — no shell round-trip.
+  CLI verb (§10, Audio row) — no shell round-trip (the reference's themes have
+  since moved to its own `ybar.volume`, so the volume snippet is no longer a
+  porting edit).
 
 ---
 
@@ -1424,9 +1485,15 @@ the README's third-party section.)
   socket, or daemon; `exec`/`delay` degrade to no-ops — so the Lua end-to-end
   tests run in CI. The Swift tests keep the same seam (a `BarManager` without
   `begin()`) deliberately.
-- **Text-metric parity suite**: golden `ShapedLine` values (width per the
-  +1.5 formula, ink bounds) exported from the macOS build for a fixed test
-  font shipped in the repo; DirectWrite must match integer-exactly.
+- **Text-metric parity suite**: golden `ShapedLine` values exported from the
+  macOS build — `Tests/Fixtures/text-metrics.json` on `main`, 72 entries (18
+  strings × 12/13/14/16 pt) measured with the vendored
+  `Tests/Fixtures/YBarTestSans-Regular.ttf` (an OFL subset of Source Sans 3;
+  load it as a private DirectWrite font collection); each entry carries
+  `width`, `inkWidth`, `inkMinX`/`inkMinY`/`inkMaxY` (baseline-relative,
+  y-up), `ascent` and `descent`. `width` (the +1.5 formula) must match
+  integer-exactly, the ink extents within 0.01 pt; the reference regenerates
+  them with `YBAR_EXPORT_GOLDENS=1 make test`.
 - **komorebi protocol tests**: recorded notification/State JSON fixtures from
   v0.1.41 (checked in) parsed by the provider; a canary CI job runs against
   komorebi's latest release to catch schema drift.
@@ -1561,8 +1628,9 @@ backdrops and Mica popup panels (§7.6; both surfaces moved to
 Windows.UI.Composition for them, DirectComposition remains only as the
 frame pump's clock), `ybar theme
 list|current|use|reset`, `ybar autostart enable|disable|status`, `ybar
-start|stop|restart|status` with the reference's 0/1/2 exit codes and the
-windowless `ybarw.exe` launcher (§5), the
+start|stop|restart|status` with the 0/1/2 exit codes of the verbs the
+reference stages on `wip/process-control-cli` (§5), the windowless
+`ybarw.exe` launcher (§5), the
 `AppUserModelID`, the shipped `examples/catppuccin-komorebi` theme, and CI
 packaging of `examples/` + app-local `d3dcompiler_47.dll`.
 
@@ -1613,9 +1681,11 @@ winget portable symlink breaking every exe-relative lookup, and more. A
 three-lens review of the fix commit itself then confirmed 8 regressions the
 fixes introduced (arm serialization, teardown orderings, drag-release
 consumption, `\\?\UNC\` path mangling, instance hijack via current-theme) —
-also fixed. One deliberate skip, now documented in place: slider hit-mapping
-clamps align slack while the emit side is unclamped, because the Swift
-reference has the identical asymmetry.
+also fixed. One deliberate skip, since overtaken: slider hit-mapping
+clamped align slack while the emit side was unclamped, because the Swift
+reference had the identical asymmetry — the reference has since unclamped
+both sides behind one track-origin helper shared by its renderer and its drag
+hit-test, so the clamp in `updateSlider` is now the divergence to drop.
 
 **Third live pass** (audited build): the reworked providers were re-verified
 on screen (volume/SSID/battery/clock populate; `--trigger battery_change`
@@ -1896,11 +1966,12 @@ test cases:
   version 6, which 3.24 rejects at configure.
 
 Deliberate divergences (never 1:1): alias items but a tray widget + verbs +
-`ybar.tray` instead (§10.6, §3.7), the `--volume` verb + `ybar.volume`
-write path on the audio provider plus the `--query audio` /
-`--volume <pct> <app>` per-app session mixer (§10, §3.6, §3.7), the added
-`slider.interactive` / `image.desaturate` / `image.y_offset` keys and bar
-`reserve` (§3.3, §6.1) with the desaturate shader flag behind them (§7.3),
+`ybar.tray` instead (§10.6, §3.7), the `--query audio` /
+`--volume <pct> <app>` per-app session mixer (§10, §3.6, §3.7 — the master
+`--volume` verb + `ybar.volume` write path began here and is now shared with
+the reference), bar `reserve` (§6.1 — `slider.interactive` /
+`image.desaturate` / `image.y_offset` and the desaturate shader flag, §3.3 /
+§7.3, also began here and are now shared),
 graph baseline clamping and squared plate bottoms (§3.9), per-item glass
 pills as Mica rather than Liquid Glass, rim kept, popup panels as Mica rather
 than frosted glass, and glass popup rows with their own material (§7.6),
@@ -1915,8 +1986,9 @@ distributed-notification bindings (§9), THERMAL_STATE always
   bounds has no single-call DWrite equivalent; per-glyph accumulation may
   differ by a pixel on some fonts. Mitigation: the accumulation math and the
   +1.5 formula are pinned headlessly (`tests/ink_metric_tests.cpp`); the
-  macOS golden-value export (§14) is still open past W2 — cross-platform
-  pixel equality remains unproven.
+  macOS golden-value export (§14) has landed on `main`
+  (`Tests/Fixtures/text-metrics.json`); the DirectWrite replay is still to be
+  wired, so cross-platform pixel equality remains unproven.
 - **komorebi schema drift** — no formal stability guarantee; the tagged serde
   output could change variant names. Mitigation: tolerant parsing,
   pinned fixtures + latest-release canary CI, all komorebi coupling isolated
