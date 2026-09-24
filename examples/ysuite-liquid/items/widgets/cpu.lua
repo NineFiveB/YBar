@@ -50,7 +50,6 @@ local header = sbar.add("item", "widgets.cpu.popup.header", {
     padding_left = inset,
   },
   label = { drawing = false },
-  padding_top = 4,
 })
 
 -- The aside is a short trailing word ("Free Up", a temperature). The title
@@ -88,7 +87,6 @@ local function add_card(title, aside)
     },
     padding_left = 4,
     padding_right = 4,
-    padding_top = 4,
   })
 end
 
@@ -107,8 +105,6 @@ local footer = sbar.add("item", "widgets.cpu.footer", {
     font = { size = 11 },
   },
   label = { drawing = false },
-  padding_top = 8,
-  padding_bottom = 6,
 })
 
 local function parse_stats(out)
