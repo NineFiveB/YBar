@@ -144,7 +144,6 @@ local scan_label = sbar.add("item", "widgets.wifi.scan", {
   },
   label = { drawing = false },
   background = { height = 2, color = colors.with_alpha(colors.white, 0.12), y_offset = 12 },
-  padding_top = 8,
 })
 
 local spinner = require("helpers.spinner").attach(scan_label, {
