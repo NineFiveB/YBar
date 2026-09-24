@@ -100,7 +100,7 @@ import Testing
                      hz: Double, seconds: Double) -> [Double] {
         var reported: [Double] = []
         for i in 1...Int(hz * seconds) {
-            if let fps = trace.record(now: start + Double(i) / hz) { reported.append(fps) }
+            if let report = trace.record(now: start + Double(i) / hz) { reported.append(report.fps) }
         }
         return reported
     }
@@ -143,5 +143,72 @@ import Testing
         let reported = run(&trace, from: 10, hz: 60, seconds: 2)
         #expect(reported.count == 1)
         #expect(abs((reported.first ?? 0) - 60) < 0.01)
+    }
+
+    /// The sustained rate alone cannot tell a smooth 120 from a juddering
+    /// one: it counts delivered ticks over elapsed time, so a clean run and a
+    /// run that dropped every other frame and made it up elsewhere both read
+    /// 120.0. These are the fields that separate them.
+    @Test func aCleanRunMissesNothingAndKeepsTheGapAtOneInterval() throws {
+        var trace = FrameRateTrace(window: 2)
+        let interval = 1.0 / 120
+        _ = trace.record(now: 0, interval: interval, cost: 0)
+        var report: FrameRateTrace.Report?
+        for tick in 1...240 {
+            if let closed = trace.record(now: Double(tick) * interval,
+                                         interval: interval, cost: 0.0002) {
+                report = closed
+            }
+        }
+        let closed = try #require(report)
+        #expect(abs(closed.fps - 120) < 0.01)
+        #expect(abs(closed.linkHz - 120) < 0.01)
+        #expect(closed.missed == 0)
+        #expect(abs(closed.maxGap - interval) < 1e-9)
+        #expect(abs(closed.p99Cost - 0.0002) < 1e-9)
+        #expect(abs(closed.budget - interval) < 1e-9)
+    }
+
+    @Test func aSkippedVsyncIsCountedAndWidensTheWorstGap() throws {
+        var trace = FrameRateTrace(window: 1)
+        let interval = 1.0 / 120
+        _ = trace.record(now: 0, interval: interval, cost: 0)
+        var now = 0.0
+        var report: FrameRateTrace.Report?
+        for tick in 1...240 {
+            // One callback arrives three intervals late: two vsyncs missed.
+            now += tick == 60 ? 3 * interval : interval
+            if let closed = trace.record(now: now, interval: interval, cost: 0.0001),
+               report == nil {
+                report = closed
+            }
+        }
+        let closed = try #require(report)
+        #expect(closed.missed == 2)
+        #expect(abs(closed.maxGap - 3 * interval) < 1e-9)
+    }
+
+    /// Core Animation arbitrates the cadence: a 60-120 request can be answered
+    /// with 60 at any moment. Counting misses across that change would report
+    /// a run of phantom drops, so the change opens a fresh window instead.
+    @Test func aCadenceChangeOpensAFreshWindowInsteadOfCountingPhantomMisses() {
+        var trace = FrameRateTrace(window: 2)
+        let fast = 1.0 / 120
+        let slow = 1.0 / 60
+        _ = trace.record(now: 0, interval: fast, cost: 0)
+        for tick in 1...120 { _ = trace.record(now: Double(tick) * fast, interval: fast, cost: 0) }
+        // The link drops to 60 Hz: the first 60 Hz gap is two 120 Hz
+        // intervals wide and must not read as one missed vsync.
+        #expect(trace.record(now: 1 + slow, interval: slow, cost: 0) == nil)
+        #expect(trace.frames == 0)
+        var report: FrameRateTrace.Report?
+        for tick in 1...121 {
+            if let closed = trace.record(now: 1 + slow + Double(tick) * slow,
+                                         interval: slow, cost: 0) {
+                report = closed
+            }
+        }
+        #expect(report?.missed == 0)
+        #expect(abs((report?.linkHz ?? 0) - 60) < 0.01)
     }
 }

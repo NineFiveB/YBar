@@ -229,22 +229,40 @@ public final class AnimationScheduler {
     }
 
     @objc private func step(_ link: CADisplayLink) {
+        // The whole tick is timed, not just the interpolation: `onFrame` is
+        // called from inside it, so this one number covers renderAll, the
+        // scene build, the glass sync, nextDrawable and the present — the
+        // number that says whether the requested cadence is sustainable.
+        let began = DebugTrace.enabled ? CACurrentMediaTime() : 0
         tick(now: link.targetTimestamp)
         // After the tick: when this frame finished the last animation the link
         // is already gone and the trace reset, so an idle gap never enters
         // the average.
-        if displayLink != nil { traceFrame(link) }
+        if displayLink != nil {
+            traceFrame(link, cost: DebugTrace.enabled ? CACurrentMediaTime() - began : 0)
+        }
     }
 
-    /// YBAR_DEBUG: the measured animation frame rate, every ~2 s while the
-    /// link runs. Counts delivered ticks — CADisplayLink skips a callback
-    /// whenever a frame overruns its budget, so this reads the sustained rate
-    /// against the link's nominal cadence rather than the cadence itself.
-    private func traceFrame(_ link: CADisplayLink) {
-        guard DebugTrace.enabled, let fps = frameTrace.record(now: link.targetTimestamp) else { return }
-        let nominal = link.duration > 0 ? 1 / link.duration : 0
-        DebugTrace.log(String(format: "[ybar:frames] %.1f fps sustained (animation clock, link %.0f Hz)",
-                              fps, nominal))
+    /// YBAR_DEBUG: what the animation clock actually delivered, every ~2 s
+    /// while the link runs. The sustained rate alone cannot tell a smooth 120
+    /// from a juddering one — it counts delivered ticks and divides by
+    /// elapsed, so two callbacks 4.0 ms and 12.6 ms apart average to exactly
+    /// 120.0 and read as perfect — so the line also carries the arbitrated
+    /// cadence, the vsyncs the clock skipped, the worst gap between
+    /// callbacks, what a tick cost against its budget, and how many of those
+    /// ticks actually put a different picture on screen.
+    private func traceFrame(_ link: CADisplayLink, cost: TimeInterval) {
+        guard DebugTrace.enabled,
+              let report = frameTrace.record(now: link.targetTimestamp,
+                                             interval: link.duration, cost: cost)
+        else { return }
+        let render = RenderTrace.drain()
+        DebugTrace.log(String(
+            format: "[ybar:frames] %.1f fps sustained (link %.0f Hz), %d missed, "
+                + "max gap %.1f ms, tick p99 %.2f ms / %.2f ms, %d/%d frames changed",
+            report.fps, report.linkHz, report.missed, report.maxGap * 1000,
+            report.p99Cost * 1000, report.budget * 1000,
+            render.changed, render.presents))
     }
 
     /// One frame at `now`. Finished keys are removed BEFORE their completions
@@ -277,38 +295,136 @@ public enum DebugTrace {
 }
 
 /// The accumulator behind `[ybar:frames]`: counts display-link ticks and
-/// reports frames / elapsed once at least `window` seconds have passed, then
-/// opens the next window. Pure, so a test drives it with synthetic
-/// timestamps. The first tick after a (re)start only opens the window — a
-/// run is never averaged across the idle gap before it.
+/// reports the window once at least `window` seconds have passed, then opens
+/// the next one. Pure, so a test drives it with synthetic timestamps. The
+/// first tick after a (re)start only opens the window — a run is never
+/// averaged across the idle gap before it.
 struct FrameRateTrace {
+    /// One closed window.
+    struct Report {
+        let fps: Double
+        /// The cadence Core Animation actually arbitrated, from the link's
+        /// own `duration`. A request of 60–120 can be answered with 60 at any
+        /// moment, and only this number says which answer we got.
+        let linkHz: Double
+        /// Vsyncs the clock skipped: a callback two intervals after the last
+        /// one missed exactly one. Counted against the PREVIOUS tick's
+        /// interval, because on a variable-rate panel `duration` tracks the
+        /// arbitrated cadence and would silently re-baseline the very moment
+        /// the link degrades.
+        let missed: Int
+        let maxGap: TimeInterval
+        /// What a whole tick (interpolation, layout, scene build, present)
+        /// cost, against the interval it had to fit in.
+        let p99Cost: TimeInterval
+        let budget: TimeInterval
+    }
+
     let window: TimeInterval
     private(set) var frames = 0
     private(set) var windowStart: TimeInterval?
+    private var lastTick: TimeInterval?
+    private var lastInterval: TimeInterval = 0
+    private var missed = 0
+    private var gaps: [TimeInterval] = []
+    private var costs: [TimeInterval] = []
 
     init(window: TimeInterval = 2) {
         self.window = window
     }
 
-    /// One tick at `now`; the sustained rate when this tick closes a window.
-    mutating func record(now: TimeInterval) -> Double? {
-        guard let start = windowStart else {
-            windowStart = now
-            frames = 0
+    /// One tick at `now`, delivered on a link whose current cadence is
+    /// `interval` and whose whole body cost `cost`; the window's numbers when
+    /// this tick closes it.
+    @discardableResult
+    mutating func record(now: TimeInterval, interval: TimeInterval = 0,
+                         cost: TimeInterval = 0) -> Report? {
+        guard let start = windowStart, let previous = lastTick else {
+            open(at: now, interval: interval)
+            return nil
+        }
+        // A cadence change (ProMotion arbitrating down, Low Power Mode) makes
+        // every rate in the window mean two different things, so it opens a
+        // fresh one instead of averaging across it.
+        if lastInterval > 0, interval > 0, abs(interval - lastInterval) > lastInterval * 0.05 {
+            open(at: now, interval: interval)
             return nil
         }
         frames += 1
+        let gap = now - previous
+        gaps.append(gap)
+        costs.append(cost)
+        if lastInterval > 0 {
+            missed += max(0, Int((gap / lastInterval).rounded()) - 1)
+        }
+        lastTick = now
+        lastInterval = interval > 0 ? interval : lastInterval
+
         let elapsed = now - start
         guard elapsed >= window else { return nil }
-        let rate = Double(frames) / elapsed
-        windowStart = now
-        frames = 0
-        return rate
+        let report = Report(
+            fps: Double(frames) / elapsed,
+            linkHz: lastInterval > 0 ? 1 / lastInterval : 0,
+            missed: missed,
+            maxGap: gaps.max() ?? 0,
+            p99Cost: FrameRateTrace.percentile(costs, 0.99),
+            budget: lastInterval)
+        open(at: now, interval: interval)
+        return report
     }
 
     /// The clock stopped: the next tick opens a fresh window.
     mutating func reset() {
-        windowStart = nil
+        open(at: nil, interval: 0)
+        lastInterval = 0
+    }
+
+    private mutating func open(at now: TimeInterval?, interval: TimeInterval) {
+        windowStart = now
+        lastTick = now
+        if interval > 0 { lastInterval = interval }
         frames = 0
+        missed = 0
+        gaps.removeAll(keepingCapacity: true)
+        costs.removeAll(keepingCapacity: true)
+    }
+
+    static func percentile(_ values: [TimeInterval], _ fraction: Double) -> TimeInterval {
+        guard !values.isEmpty else { return 0 }
+        let sorted = values.sorted()
+        let index = min(sorted.count - 1,
+                        max(0, Int((Double(sorted.count - 1) * fraction).rounded())))
+        return sorted[index]
+    }
+}
+
+/// Render-side counters the `[ybar:frames]` line reads. A frame that is
+/// byte-identical to the one before it was presented for nothing: the panel
+/// refreshed and the picture did not change, which is exactly what pixel
+/// snapping produces when a motion's per-frame step is under a device pixel.
+/// `[ybar:frames]` cannot see that on its own — such a frame still counts as
+/// delivered — so the renderer reports it. Only maintained under YBAR_DEBUG.
+@MainActor
+enum RenderTrace {
+    private(set) static var presents = 0
+    private(set) static var changed = 0
+    private static var lastFrameHash: [ObjectIdentifier: Int] = [:]
+
+    /// One present of `hash` into `layer`; whether it differs from that
+    /// layer's previous frame.
+    static func present(layer: AnyObject, hash: Int) {
+        presents += 1
+        let key = ObjectIdentifier(layer)
+        if lastFrameHash.updateValue(hash, forKey: key) != hash { changed += 1 }
+    }
+
+    /// Read the counts and open the next window. The per-layer hashes survive
+    /// it — they describe what is on screen — so only the counts restart.
+    static func drain() -> (presents: Int, changed: Int) {
+        defer {
+            presents = 0
+            changed = 0
+        }
+        return (presents, changed)
     }
 }

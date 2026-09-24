@@ -166,7 +166,25 @@ public final class Renderer {
         commandBuffer.addCompletedHandler { _ in semaphore.signal() }
         commandBuffer.present(drawable)
         commandBuffer.commit()
+        if DebugTrace.enabled {
+            RenderTrace.present(layer: layer, hash: Renderer.contentHash(list))
+        }
         return true
+    }
+
+    /// Identity of what this frame puts on screen, for the `[ybar:frames]`
+    /// changed-frame count. Only the instance geometry and colour matter — a
+    /// frame whose quads and glyphs hash the same is the same picture, and
+    /// presenting it again cost a refresh for nothing.
+    private static func contentHash(_ list: DisplayList) -> Int {
+        var hasher = Hasher()
+        list.quads.withUnsafeBytes { hasher.combine(bytes: $0) }
+        list.triangles.withUnsafeBytes { hasher.combine(bytes: $0) }
+        list.glyphs.withUnsafeBytes { hasher.combine(bytes: $0) }
+        list.holes.withUnsafeBytes { hasher.combine(bytes: $0) }
+        hasher.combine(list.pointer.x)
+        hasher.combine(list.pointer.y)
+        return hasher.finalize()
     }
 
     private func fill<T>(buffer: MTLBuffer?, with instances: [T]) -> MTLBuffer? {
