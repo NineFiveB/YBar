@@ -39,7 +39,9 @@ palette). Optional: `ybar --bar wifi_ssid_prompt=on` once for the Wi-Fi
 network name (Location Services).
 
 Prerequisites: [Symbols Nerd Font](https://www.nerdfonts.com) for the port's
-glyphs, and `blueutil` (`brew install blueutil`) for the Bluetooth popup. The
+Wi-Fi and Bluetooth widgets (the right-edge glyphs and the Bluetooth logo;
+`items/widgets/wifi.lua` and `bluetooth.lua` are the only files that set that
+family), and `blueutil` (`brew install blueutil`) for the Bluetooth popup. The
 app-menus swap needs the port's `menus` helper, which only `make helpers`
 from a clone builds — a `brew install` never has it, so the swap is a no-op
 there (see [`../sketchybar-port/README.md`](../sketchybar-port/README.md)).
