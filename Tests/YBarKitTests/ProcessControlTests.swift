@@ -603,6 +603,26 @@ private func makeTemporaryDirectory() throws -> URL {
     }
 }
 
+// MARK: - theme use
+
+@Suite struct ThemeUseTests {
+    /// With no bar running, `use` goes through `start`. For the default
+    /// instance that is a plain `start`: the recorded name is what discovery
+    /// picks up, and a loaded login job is kickstarted rather than bypassed
+    /// by an unmanaged `-c` copy. `-c` stays for a renamed instance (its
+    /// discovery never reads current-theme) and for a theme that only
+    /// YBAR_THEME_ROOTS can see.
+    @Test func startIsPlainWhenDiscoveryWouldFindTheTheme() {
+        let entry = URL(fileURLWithPath: "/Users/me/.config/ybar/themes/darxk/ybarrc.lua")
+        #expect(ThemeVerbs.startArguments(entry: entry, instanceName: "ybar", discoverable: true)
+            == ["start"])
+        #expect(ThemeVerbs.startArguments(entry: entry, instanceName: "ybar", discoverable: false)
+            == ["start", "-c", entry.path])
+        #expect(ThemeVerbs.startArguments(entry: entry, instanceName: "bar2", discoverable: true)
+            == ["start", "-c", entry.path])
+    }
+}
+
 // MARK: - Help text
 
 @Suite struct HelpTextTests {
