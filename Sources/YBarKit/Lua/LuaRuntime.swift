@@ -704,8 +704,12 @@ public final class LuaRuntime {
         }
     }
 
-    /// Saved-network join, also off the main thread. Exit code is
-    /// `networksetup`'s status.
+    /// Saved-network join, also off the main thread. The exit code is 0 only
+    /// when `networksetup` exited 0 and printed nothing: a non-zero status
+    /// passes through, and a refusal it prints while exiting 0 ("Could not
+    /// find network …") becomes 1 with that text as the output
+    /// (`WifiScan.joinRejected`). No watchdog runs on this path, so
+    /// `WifiScan.timedOutCode` is only ever seen by the password prompt.
     private func scheduleWifiJoin(ssid: String, ref: Int32) {
         let generation = stateGeneration
         DispatchQueue.global(qos: .utility).async {
