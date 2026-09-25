@@ -97,15 +97,11 @@ for i = 1, MAX_SLOTS do
   brackets[i] = sbar.add("bracket", { space.name }, {
     background = {
       color = colors.transparent,
-      -- Light, not dark: this ring marks a workspace that holds windows, and
-      -- it sits 1pt outside the pill's own lit edge. A dark ring there reads
-      -- as a shadow cast inside the glass rather than as emphasis.
-      border_color = colors.with_alpha(colors.white, 0.30),
+      border_color = colors.bg2,
       height = 28,
-      -- 0, not 2: bracket_border() sets 2 the moment a space is confirmed
-      -- non-empty, but a space that hasn't appeared in a query yet (a
-      -- brand-new workspace) never runs that path before its first reveal —
-      -- defaulting to "no ring" avoids a one-frame flash on that reveal.
+      -- 0, not 2: the ring belongs to the focused pill and apply_focus sets
+      -- it there. Starting at 0 avoids a one-frame ring on a pill revealed
+      -- before focus has been applied to it.
       border_width = 0,
     },
   })
@@ -361,8 +357,11 @@ end
 
 -- The bracket ring only outlines workspaces that actually hold windows; an
 -- empty/new workspace shows as a bare pill.
+-- Only the focused pill wears the ring. It sits 1pt outside the pill's own
+-- lit edge, so on the focused pill it reads as a second capsule and gives the
+-- selection depth; on every other pill it is just an outline around the glass.
 local function bracket_border(slot)
-  return (empty[slot] == false) and 2 or 0
+  return (last_focused and slot_of[last_focused] == slot) and 2 or 0
 end
 
 local function sync_active_item()
@@ -675,7 +674,10 @@ function apply_focus(focused)
         },
       })
       brackets[slot]:set({
-        background = { border_color = selected and colors.grey or colors.bg2 },
+        background = {
+          border_color = selected and colors.grey or colors.bg2,
+          border_width = selected and 2 or 0,
+        },
       })
     end
   end
