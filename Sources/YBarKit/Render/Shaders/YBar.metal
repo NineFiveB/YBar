@@ -236,9 +236,16 @@ fragment float4 quad_fragment(
         float2 puv = (uniforms.pointer - origin) / size;
         bool over = puv.x >= 0.0 && puv.x <= 1.0 && puv.y >= 0.0 && puv.y <= 1.0;
         bool hot = over || (in.flags & kQuadFlagHot) != 0u;
-        // Near-clear fills (inactive-glass compensation) still need a floor
-        // so lip/shade read as depth without a dark Metal slab.
-        float presence = max(smoothstep(0.0, 0.06, max(fill.a, alpha)), 0.75);
+        // A plate with no fill AND no system material under it is structure,
+        // not glass — a bracket that exists only to group its members. Lighting
+        // its edge draws a second capsule around the real one, which is the
+        // "pill inside a pill" a bracketed item used to show. Where there IS a
+        // material the edge is lit in full; where the plate owns its fill the
+        // old floor stands, so near-clear fills still read as depth pre-26.
+        float material = max(fill.a, alpha);
+        float presence = (in.flags & kQuadFlagNativeGlass) != 0u
+            ? 1.0
+            : (material > 0.02 ? max(smoothstep(0.0, 0.06, material), 0.75) : 0.0);
 
         // With the system material underneath, the body is already modelled:
         // paint the edge and nothing else. The bottom shade especially has to

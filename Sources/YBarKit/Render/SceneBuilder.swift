@@ -838,7 +838,11 @@ public final class SceneBuilder {
         if background.sheen {
             quad.flags |= QuadInstance.flagSheen
         }
-        if (background.glass || background.sheen), nativeGlassBackdrops {
+        // Mirrors the condition BarManager builds glass specs under: a plate
+        // with no fill gets no NSGlassEffectView, so the flag must not claim
+        // one is there.
+        if background.glass, background.drawing, background.color.alpha > 0.02,
+           nativeGlassBackdrops {
             quad.flags |= QuadInstance.flagNativeGlass
         }
         return quad

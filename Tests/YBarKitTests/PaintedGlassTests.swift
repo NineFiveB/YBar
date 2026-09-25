@@ -51,10 +51,31 @@ import Testing
         let quads = scene.build([pill(glass: true, sheen: true)]).list.quads
         let lit = quads.filter { $0.flags & QuadInstance.flagSheen != 0 }
         #expect(!lit.isEmpty)
-        if SceneBuilder.nativeGlassBackdrops {
-            #expect(lit.allSatisfy { $0.flags & QuadInstance.flagNativeGlass != 0 })
-        } else {
+        if !SceneBuilder.nativeGlassBackdrops {
             #expect(lit.allSatisfy { $0.flags & QuadInstance.flagNativeGlass == 0 })
+        }
+    }
+
+    /// A bracket with no fill of its own is structure, not glass: it groups
+    /// members and must not claim a system backdrop it never got. BarManager
+    /// only builds one when the fill alpha clears 0.02, so a transparent
+    /// plate that claimed one drew a second lit capsule around the real pill.
+    @Test func anEmptyPlateClaimsNoMaterial() {
+        let scene = HeadlessScene()
+        let hollow = pill(glass: true, sheen: true)
+        hollow.background.color = YColor(argb: 0x0000_0000)
+        let quads = scene.build([hollow]).list.quads
+        #expect(quads.allSatisfy { $0.flags & QuadInstance.flagNativeGlass == 0 })
+    }
+
+    /// A plate that does carry a fill still claims it, on this OS.
+    @Test func aFilledGlassPlateClaimsItsMaterial() {
+        let scene = HeadlessScene()
+        let quads = scene.build([pill(glass: true, sheen: true)]).list.quads
+        let lit = quads.filter { $0.flags & QuadInstance.flagSheen != 0 }
+        #expect(!lit.isEmpty)
+        if SceneBuilder.nativeGlassBackdrops {
+            #expect(lit.contains { $0.flags & QuadInstance.flagNativeGlass != 0 })
         }
     }
 
