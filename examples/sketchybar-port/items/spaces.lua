@@ -326,12 +326,12 @@ local function animate_rearrange(list, focused, seq)
   end
   -- paint_liquid puts the ring back; the slide keeps it off.
   hide_outlines()
-  sbar.animate("tanh", 22, function()
+  sbar.animate("tanh", 16, function()
     for slot = 1, MAX_SLOTS do
       if names[slot] then spaces[slot]:set({ x_offset = 0 }) end
     end
   end)
-  sbar.delay(0.38, function()
+  sbar.delay(0.28, function()
     finish_rearrange(focused, seq)
     for slot = 1, MAX_SLOTS do
       if names[slot] then update_windows(slot) end
@@ -443,13 +443,13 @@ local function begin_name_transition(slot)
   local seq = name_transition_seq
   name_transition_slot = slot
   brackets[slot]:set({ background = { border_width = 0 } })
-  sbar.animate("tanh", 12, function()
+  sbar.animate("tanh", 9, function()
     space:set({
       icon = { color = { alpha = 0.0 }, padding_left = 2, padding_right = 0 },
       label = { color = { alpha = 0.0 }, padding_left = 0, padding_right = 2 },
     })
   end)
-  sbar.delay(0.22, function()
+  sbar.delay(0.17, function()
     if seq ~= name_transition_seq or names[slot] ~= last_focused or not icons_settled then
       if name_transition_slot == slot then name_transition_slot = nil end
       paint_liquid(slot)
@@ -472,7 +472,7 @@ local function begin_name_transition(slot)
         y_offset = 1,
       },
     })
-    sbar.animate("tanh", 14, function()
+    sbar.animate("tanh", 11, function()
       space:set({
         label = {
           padding_left = 12,
@@ -481,7 +481,7 @@ local function begin_name_transition(slot)
         },
       })
     end)
-    sbar.delay(0.25, function()
+    sbar.delay(0.20, function()
       if name_transition_slot == slot then name_transition_slot = nil end
       if seq ~= name_transition_seq then return end
       paint_liquid(slot)
@@ -615,7 +615,7 @@ local function reveal_pill(slot)
       label = { color = { alpha = 0.0 } },
     })
     sbar.set("space.padding." .. slot, { drawing = true })
-    sbar.animate("tanh", 17, function()
+    sbar.animate("tanh", 13, function()
       spaces[slot]:set({
         y_offset = 0,
         icon = { color = { alpha = 1.0 } },
@@ -632,7 +632,7 @@ local function collapse_pill(slot)
   hide_seq = hide_seq + 1
   local seq = hide_seq
   hiding[slot] = seq
-  sbar.animate("tanh", 17, function()
+  sbar.animate("tanh", 13, function()
     spaces[slot]:set({
       padding_left = 0,
       padding_right = 0,
@@ -645,7 +645,7 @@ local function collapse_pill(slot)
     -- leaving the paddings un-animated would snap 10pt shut at cleanup.
     sbar.set("space.padding." .. slot, { width = 0, padding_left = 0, padding_right = 0 })
   end)
-  sbar.delay(0.28, function()   -- 17 frames at 60Hz
+  sbar.delay(0.22, function()   -- 13 frames at 60Hz
     if hiding[slot] ~= seq then return end
     hiding[slot] = nil
     shown[slot] = nil
