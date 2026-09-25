@@ -15,8 +15,6 @@ public final class PopupSurface {
     public var itemFrames: [(itemID: Int, frame: CGRect)] = []
     public var hoveredItemID: Int?
     /// The last scene rendered here carried a sheen plate, whose pointer
-    /// specular must be redrawn as the cursor moves (handlePopupMouse).
-    var lastSceneHadSheen = false
     /// Label-plate glass, under the Metal layer. nil before macOS 26.
     private let chipHost: NSView?
     private var chipViews: [Int: NSView] = [:]

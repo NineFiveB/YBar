@@ -383,7 +383,6 @@ public final class BarManager {
                 popupSurfaces[host.id] = popupSurface
             }
             popupSurface.itemFrames = scene.itemFrames
-            popupSurface.lastSceneHadSheen = scene.list.hasSheen
             popupSurface.hidesInFullscreen = settings.fullscreenPolicy == .hide
 
             // Host frame (bar-local, y-down) -> global AppKit coords (y-up).
@@ -521,15 +520,10 @@ public final class BarManager {
             // Same item on every move: a chart still has to name the bar
             // under the pointer, which the item-level enter/exit does not.
             updateGraphHover(item: hovered, localX: info.point.x, frames: popup.itemFrames)
-            // The sheen specular follows the pointer, which every render
-            // samples afresh: one damage-driven frame per move, no display
-            // link while the pointer rests.
-            if popup.lastSceneHadSheen { setNeedsRender() }
+
         case .exited:
             pointerInsideSurfaces.remove(ObjectIdentifier(popup))
             releaseHover(in: popup)
-            // Once more with the pointer gone, so the specular clears.
-            if popup.lastSceneHadSheen { setNeedsRender() }
             scheduleGlobalExitCheck()
         }
     }
@@ -699,7 +693,6 @@ public final class BarManager {
         }
         // The sheen's pointer specular is damage-driven: handleMouse redraws
         // on moves over a surface whose scene carries it.
-        surface.lastSceneHadSheen = list.hasSheen
         // Marquee text needs continuous frames; everything else stays
         // damage-driven.
         return list.needsContinuousFrames
@@ -845,15 +838,9 @@ public final class BarManager {
             noteSurfaceEntered(ObjectIdentifier(surface))
             let hovered = hitTest(point: info.point, on: surface)
             updateHover(surface: surface, to: hovered)
-            // The sheen specular follows the pointer, which every render
-            // samples afresh: one damage-driven frame per move, no display
-            // link while the pointer rests.
-            if surface.lastSceneHadSheen { setNeedsRender() }
         case .exited:
             pointerInsideSurfaces.remove(ObjectIdentifier(surface))
             updateHover(surface: surface, to: nil)
-            // Once more with the pointer gone, so the specular clears.
-            if surface.lastSceneHadSheen { setNeedsRender() }
             scheduleGlobalExitCheck()
         }
     }

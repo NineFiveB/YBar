@@ -51,8 +51,10 @@ import Testing
     }
 
     /// The flag bits are ABI too. Bits 0-4 are shared with the Windows port,
-    /// which sets the same ones; the higher bits (painted sheen, the
-    /// open-popup highlight) are macOS-only and the port must not reuse them.
+    /// which sets the same ones; the higher bits are macOS-only and the port
+    /// must not reuse them. Bit 6 held the open-popup highlight that fed the
+    /// pointer-following specular and is free now that the specular is gone;
+    /// bit 7 marks a plate with a system glass backdrop under it.
     @Test func flagBitsMatchThePort() {
         #expect(QuadInstance.flagGradient == 1)
         #expect(QuadInstance.flagGlass == 2)
@@ -60,7 +62,7 @@ import Testing
         #expect(QuadInstance.flagHoles == 8)
         #expect(QuadInstance.flagShadow == 16)
         #expect(QuadInstance.flagSheen == 32)
-        #expect(QuadInstance.flagHot == 64)
+        #expect(QuadInstance.flagNativeGlass == 128)
         #expect(GlyphInstance.flagColorGlyph == 1)
         #expect(GlyphInstance.flagDesaturate == 2)
     }

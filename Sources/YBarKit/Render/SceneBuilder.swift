@@ -95,7 +95,6 @@ public final class SceneBuilder {
                 width: union.width,
                 height: height)
             emitBackground(item.background, rect: rect, scale: scale, into: &list)
-            if item.popup.isOpen { SceneBuilder.markHot(&list) }
         }
 
         for item in items {
@@ -224,7 +223,6 @@ public final class SceneBuilder {
             let backgroundRect = SceneBuilder.backgroundRect(
                 item: item, contentBox: contentBox, contentHeight: contentHeight)
             emitBackground(item.background, rect: backgroundRect, scale: scale, into: &list)
-            if item.popup.isOpen { SceneBuilder.markHot(&list) }
         }
 
         let measured = MeasuredContent(iconSize: iconSize, labelSize: labelSize)
@@ -849,12 +847,6 @@ public final class SceneBuilder {
     }
 
     /// The plate just emitted is the open-popup trigger: its sheen specular
-    /// stays lit for as long as the popup is up.
-    private static func markHot(_ list: inout DisplayList) {
-        guard !list.quads.isEmpty else { return }
-        list.quads[list.quads.count - 1].flags |= QuadInstance.flagHot
-    }
-
     /// The same plate, trimmed to a clip rect (device px) the way
     /// `glyphInstance` trims a glyph. Quads carry no clip field and the
     /// pipeline sets no scissor, so the trim is geometric: intersect, and drop

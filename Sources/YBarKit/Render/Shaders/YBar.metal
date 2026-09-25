@@ -51,7 +51,6 @@ constant uint kQuadFlagArc      = 1u << 2;
 constant uint kQuadFlagHoles    = 1u << 3;
 constant uint kQuadFlagShadow   = 1u << 4;
 constant uint kQuadFlagSheen    = 1u << 5;
-constant uint kQuadFlagHot      = 1u << 6;
 constant uint kQuadFlagNativeGlass = 1u << 7;
 constant uint kGlyphFlagColor   = 1u << 0;
 constant uint kGlyphFlagGrey    = 1u << 1;
@@ -228,14 +227,10 @@ fragment float4 quad_fragment(
     }
 
     // Per-pill depth on top of (possibly inactive) system glass: top lip,
-    // bottom shade, and a specular only while the pointer is inside this
-    // capsule — never a light shared across neighboring pills.
+    // bottom shade. No pointer-following highlight: the system material
+    // does not have one, and a light that chases the cursor reads as a
+    // gimmick beside it.
     if (in.flags & kQuadFlagSheen) {
-        float2 size = max(in.halfSize * 2.0, float2(1.0));
-        float2 origin = in.position.xy - in.uv * size;
-        float2 puv = (uniforms.pointer - origin) / size;
-        bool over = puv.x >= 0.0 && puv.x <= 1.0 && puv.y >= 0.0 && puv.y <= 1.0;
-        bool hot = over || (in.flags & kQuadFlagHot) != 0u;
         // A plate with no fill AND no system material under it is structure,
         // not glass — a bracket that exists only to group its members. Lighting
         // its edge draws a second capsule around the real one, which is the
@@ -267,13 +262,6 @@ fragment float4 quad_fragment(
         rgb = clamp(rgb + float3(topLip + rim) - float3(bottomShade), 0.0, 1.0);
         alpha = clamp(alpha + (topLip + rim) * 0.55, 0.0, 1.0);
 
-        if (hot) {
-            float2 delta = (in.uv - puv) * float2(1.2, 0.62);
-            float radial = 1.0 - smoothstep(0.02, 0.48, length(delta));
-            float spec = radial * 0.7 * outer * presence;
-            rgb = clamp(rgb + float3(spec), 0.0, 1.0);
-            alpha = clamp(alpha + spec * 0.45, 0.0, 1.0);
-        }
     }
     return float4(rgb * holeMask, alpha * holeMask);
 }

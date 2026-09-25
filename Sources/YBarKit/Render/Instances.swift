@@ -43,8 +43,6 @@ public struct QuadInstance {
     /// NSGlassEffectView is the backdrop.
     public static let flagSheen: UInt32 = 1 << 5
     /// Open-popup trigger: its sheen specular stays lit while the popup is
-    /// up, as if the pointer had never left the pill.
-    public static let flagHot: UInt32 = 1 << 6
     /// A system glass backdrop sits under this plate (macOS 26+). The
     /// painted pass then draws the EDGE only — the rim and the pointer
     /// specular — and skips the body modelling, because the material already

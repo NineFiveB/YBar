@@ -201,26 +201,25 @@ struct HeadlessScene {
         #expect(list.needsContinuousFrames)
     }
 
-    @Test func pointerMovesRedrawABarWhoseSceneHasSheen() throws {
+    /// Nothing in the painted glass follows the cursor any more, so sweeping
+    /// the pointer across the bar paints nothing. It used to redraw on every
+    /// move to animate a specular the system material has no equivalent of.
+    @Test func pointerMovesOverTheBarPaintNothing() throws {
         let manager = try BarManager()
         let screen = try #require(NSScreen.screens.first)
         let surface = BarSurface(screen: screen, arrangementIndex: 1)
         manager.handleMouse(move(.moved), on: surface)
         #expect(!manager.renderScheduled)
-        surface.lastSceneHadSheen = true
         manager.handleMouse(move(.moved), on: surface)
-        #expect(manager.renderScheduled)
+        #expect(!manager.renderScheduled)
     }
 
-    @Test func pointerExitRedrawsAPopupWhoseSceneHasSheen() throws {
+    @Test func pointerMovesOverAPopupPaintNothing() throws {
         let manager = try BarManager()
         let popup = PopupSurface(hostItemID: -1, device: manager.device)
         manager.handlePopupMouse(move(.moved), on: popup)
         manager.handlePopupMouse(move(.exited), on: popup)
         #expect(!manager.renderScheduled)
-        popup.lastSceneHadSheen = true
-        manager.handlePopupMouse(move(.exited), on: popup)
-        #expect(manager.renderScheduled)
     }
 }
 

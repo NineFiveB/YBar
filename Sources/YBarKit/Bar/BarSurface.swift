@@ -25,8 +25,6 @@ public final class BarSurface {
     public var itemFrames: [(itemID: Int, frame: CGRect)] = []
     public var hoveredItemID: Int?
     /// The last scene rendered here carried a sheen pill, whose pointer
-    /// specular must be redrawn as the cursor moves (BarManager.handleMouse).
-    var lastSceneHadSheen = false
     /// Per-item glass backdrops keyed by item id: NSGlassEffectView (real
     /// Liquid Glass) on macOS 26+, NSVisualEffectView blur before that.
     private var glassViews: [Int: NSView] = [:]
