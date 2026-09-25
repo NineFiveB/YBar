@@ -26,7 +26,7 @@ sbar.default({
   },
   background = {
     height = 28,
-    corner_radius = 9,
+    corner_radius = 20,
     border_width = 0,
     glass = true,
     sheen = false,
@@ -35,7 +35,7 @@ sbar.default({
     blur_radius = 30,
     background = {
       border_width = 0,
-      corner_radius = 9,
+      corner_radius = 16,
       color = colors.popup.bg,
       glass = true,
     },
