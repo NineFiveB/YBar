@@ -50,7 +50,7 @@ public final class SceneBuilder {
             barQuad.gradientDir = SceneBuilder.gradientDirection(angleDegrees: settings.gradientAngle)
             barQuad.flags |= QuadInstance.flagGradient
         }
-        if settings.glass && !SceneBuilder.nativeGlassBackdrops {
+        if settings.glass {
             barQuad.flags |= QuadInstance.flagGlass
         }
         // background.clip: punch item-shaped holes in the bar background.
@@ -784,7 +784,7 @@ public final class SceneBuilder {
         }
 
         list.quads.append(SceneBuilder.backgroundQuad(background, rect: rect, scale: scale))
-        if background.sheen, !SceneBuilder.nativeGlassBackdrops { list.hasSheen = true }
+        if background.sheen { list.hasSheen = true }
 
         // background.image: aspect-fit inside the background rect, scaled.
         if background.imageDrawing, !background.imageSource.isEmpty,
@@ -826,13 +826,16 @@ public final class SceneBuilder {
             quad.gradientDir = gradientDirection(angleDegrees: background.gradientAngle)
             quad.flags |= QuadInstance.flagGradient
         }
-        if background.glass && !nativeGlassBackdrops {
+        if background.glass {
             quad.flags |= QuadInstance.flagGlass
         }
-        // Painted lip/shade/specular is the pre-26 stand-in. On macOS 26 the
-        // system material is the glass, and a Metal highlight over it reads
-        // as a fake shine.
-        if background.sheen, !nativeGlassBackdrops {
+        // Painted lip/shade/specular layers OVER the native material rather
+        // than standing in for it. Measured on a plain dark wallpaper the
+        // system material alone is all but invisible at pill size: a floating
+        // bar has nothing behind it to refract, and a uniform backdrop
+        // refracts to itself. The edge is what reads as glass, so the rim and
+        // the pointer specular are drawn on every OS.
+        if background.sheen {
             quad.flags |= QuadInstance.flagSheen
         }
         return quad
@@ -997,7 +1000,7 @@ public final class SceneBuilder {
             if let quad = SceneBuilder.clippedQuad(
                 part.background, rect: plate, scale: scale, clip: clip) {
                 list.quads.append(quad)
-                if part.background.sheen, !SceneBuilder.nativeGlassBackdrops {
+                if part.background.sheen {
                     list.hasSheen = true
                 }
             }

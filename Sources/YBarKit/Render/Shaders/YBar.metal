@@ -198,7 +198,17 @@ fragment float4 quad_fragment(
         // Purely directional key light: a glint on the top arc that dies out
         // along the sides — a full-perimeter ring reads as an outline, not glass.
         float keySpec = pow(max(dot(n, normalize(float2(-0.25, -1.0))), 0.0), 3.0);
-        float rimLight = band * 0.30 * keySpec;
+        // Dispersion: the shell is sampled at a slightly different distance
+        // per channel, so red rides a touch outside the edge and blue a touch
+        // inside. Where the three agree the fringe cancels and the rim stays
+        // white; only the boundary splits, which is what the eye reads as a
+        // lens rather than a lit outline. Under a point the separation is
+        // well under a pixel, so it colours the edge without tinting the pill.
+        const float dispersion = 0.75;                        // device px
+        float3 shell = float3(smoothstep(-3.0, -0.8, d + dispersion),
+                              band / max(outer, 1e-5),
+                              smoothstep(-3.0, -0.8, d - dispersion)) * outer;
+        float3 rimLight = shell * 0.30 * keySpec;
 
         // Thickness: a whisper of glow just inside the rim.
         float innerGlow = max((smoothstep(-10.0, -2.5, d) - band), 0.0) * 0.03 * outer;
@@ -209,9 +219,11 @@ fragment float4 quad_fragment(
         // Glass presence follows the fill: a transparent pill (hover fade-out,
         // invisible-until-hover items) must show no rim/backdrop ghost.
         float presence = smoothstep(0.0, 0.06, fill.a);
-        float light = (rimLight + innerGlow + sheen) * presence;
-        rgb = clamp(rgb + float3(light), 0.0, 1.0);
-        alpha = clamp(alpha + light * 0.85, 0.0, 1.0);
+        float3 light = (rimLight + innerGlow + sheen) * presence;
+        rgb = clamp(rgb + light, 0.0, 1.0);
+        // Alpha follows the achromatic part: the fringe colours the edge, it
+        // does not make it more opaque on one side than the other.
+        alpha = clamp(alpha + dot(light, float3(1.0 / 3.0)) * 0.85, 0.0, 1.0);
     }
 
     // Per-pill depth on top of (possibly inactive) system glass: top lip,

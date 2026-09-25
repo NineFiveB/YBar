@@ -29,7 +29,10 @@ sbar.default({
     corner_radius = 20,
     border_width = 0,
     glass = true,
-    sheen = false,
+    -- The rim and the pointer specular: over a plain wallpaper the system
+    -- material alone has nothing to refract, and the edge is what reads as
+    -- glass.
+    sheen = true,
   },
   popup = {
     blur_radius = 30,
