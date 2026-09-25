@@ -97,7 +97,10 @@ for i = 1, MAX_SLOTS do
   brackets[i] = sbar.add("bracket", { space.name }, {
     background = {
       color = colors.transparent,
-      border_color = colors.bg2,
+      -- Light, not dark: this ring marks a workspace that holds windows, and
+      -- it sits 1pt outside the pill's own lit edge. A dark ring there reads
+      -- as a shadow cast inside the glass rather than as emphasis.
+      border_color = colors.with_alpha(colors.white, 0.30),
       height = 28,
       -- 0, not 2: bracket_border() sets 2 the moment a space is confirmed
       -- non-empty, but a space that hasn't appeared in a query yet (a
