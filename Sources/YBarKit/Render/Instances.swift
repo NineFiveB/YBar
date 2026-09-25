@@ -45,6 +45,13 @@ public struct QuadInstance {
     /// Open-popup trigger: its sheen specular stays lit while the popup is
     /// up, as if the pointer had never left the pill.
     public static let flagHot: UInt32 = 1 << 6
+    /// A system glass backdrop sits under this plate (macOS 26+). The
+    /// painted pass then draws the EDGE only — the rim and the pointer
+    /// specular — and skips the body modelling, because the material already
+    /// supplies the body. Its bottom shade in particular reads as a drop
+    /// shadow under a real glass capsule, which Liquid Glass does not have.
+    /// macOS-only: the Windows port leaves bit 7 free.
+    public static let flagNativeGlass: UInt32 = 1 << 7
 
     public init(
         origin: SIMD2<Float>, size: SIMD2<Float>, radii: SIMD4<Float>,

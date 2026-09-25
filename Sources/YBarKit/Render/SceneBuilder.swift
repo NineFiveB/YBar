@@ -838,6 +838,9 @@ public final class SceneBuilder {
         if background.sheen {
             quad.flags |= QuadInstance.flagSheen
         }
+        if (background.glass || background.sheen), nativeGlassBackdrops {
+            quad.flags |= QuadInstance.flagNativeGlass
+        }
         return quad
     }
 

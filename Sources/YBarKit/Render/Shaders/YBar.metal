@@ -52,6 +52,7 @@ constant uint kQuadFlagHoles    = 1u << 3;
 constant uint kQuadFlagShadow   = 1u << 4;
 constant uint kQuadFlagSheen    = 1u << 5;
 constant uint kQuadFlagHot      = 1u << 6;
+constant uint kQuadFlagNativeGlass = 1u << 7;
 constant uint kGlyphFlagColor   = 1u << 0;
 constant uint kGlyphFlagGrey    = 1u << 1;
 constant uint kGlyphFlagFade    = 1u << 2;
@@ -239,8 +240,17 @@ fragment float4 quad_fragment(
         // so lip/shade read as depth without a dark Metal slab.
         float presence = max(smoothstep(0.0, 0.06, max(fill.a, alpha)), 0.75);
 
-        float topLip = smoothstep(0.28, 0.0, in.uv.y) * outer * 0.42 * presence;
-        float bottomShade = smoothstep(0.62, 1.0, in.uv.y) * outer * 0.32 * presence;
+        // With the system material underneath, the body is already modelled:
+        // paint the edge and nothing else. The bottom shade especially has to
+        // go — under a real glass capsule it reads as a drop shadow, which
+        // Liquid Glass does not cast inside itself.
+        bool bodyIsOurs = (in.flags & kQuadFlagNativeGlass) == 0u;
+        float topLip = bodyIsOurs
+            ? smoothstep(0.28, 0.0, in.uv.y) * outer * 0.42 * presence
+            : smoothstep(0.20, 0.0, in.uv.y) * outer * 0.16 * presence;
+        float bottomShade = bodyIsOurs
+            ? smoothstep(0.62, 1.0, in.uv.y) * outer * 0.32 * presence
+            : 0.0;
         float2 grad = float2(dfdx(d), dfdy(d));
         float2 n = normalize(grad + float2(1e-5, 1e-5));
         float topFacing = pow(max(dot(n, float2(0.0, -1.0)), 0.0), 1.6);

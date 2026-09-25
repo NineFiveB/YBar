@@ -43,6 +43,21 @@ import Testing
         #expect(!list.hasSheen)
     }
 
+    /// Where the system material sits under the plate, the painted pass is
+    /// told so, and draws the edge only — no bottom shade, which under a real
+    /// glass capsule reads as a drop shadow.
+    @Test func aNativeBackdropSuppressesTheBodyModelling() {
+        let scene = HeadlessScene()
+        let quads = scene.build([pill(glass: true, sheen: true)]).list.quads
+        let lit = quads.filter { $0.flags & QuadInstance.flagSheen != 0 }
+        #expect(!lit.isEmpty)
+        if SceneBuilder.nativeGlassBackdrops {
+            #expect(lit.allSatisfy { $0.flags & QuadInstance.flagNativeGlass != 0 })
+        } else {
+            #expect(lit.allSatisfy { $0.flags & QuadInstance.flagNativeGlass == 0 })
+        }
+    }
+
     /// The specular must not pin the frame clock: it repaints on pointer
     /// movement, not every frame.
     @Test func sheenAloneDoesNotDemandContinuousFrames() {
