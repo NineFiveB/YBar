@@ -39,7 +39,7 @@ local bt_icon = sbar.add("item", "widgets.bluetooth", {
 
 local bt_bracket = sbar.add("bracket", "widgets.bluetooth.bracket", { bt_icon.name }, {
   background = { color = colors.bg1 },
-  popup = { align = "center" },
+  popup = { align = "center", wrap_width = popup_width },
 })
 
 require("helpers.hover").pill(bt_bracket, bt_icon)
@@ -84,15 +84,67 @@ end
 
 -- The row is a fixed width. The name uses all of it until a button is
 -- showing, then it gives that slot up so the capsule is not clipped off.
-local name_width = popup_width - 32
-local name_width_with_button = popup_width - 24 - button_width
+-- A glyph column ahead of the name. The popup wraps at popup_width, so the
+-- glyph and the row have to sum to it or the row drops onto its own line.
+local icon_width = 26
+local row_width = popup_width - 16 - icon_width
+local name_width = popup_width - 32 - icon_width
+local name_width_with_button = popup_width - 24 - button_width - icon_width
 
+-- blueutil reports no device class, so the name is the only signal. Plain
+-- substring matches, longest first; anything unrecognised keeps the generic
+-- radio glyph rather than guessing.
+local function device_symbol(name)
+  local n = (name or ""):lower()
+  local function has(s) return n:find(s, 1, true) ~= nil end
+  if has("airpods max") then return "sf:airpodsmax" end
+  if has("airpods pro") then return "sf:airpods.pro" end
+  if has("airpod") then return "sf:airpods" end
+  if has("beats") or has("buds") or has("headphone") or has("earbud") then
+    return "sf:beats.headphones"
+  end
+  if has("trackpad") then return "sf:rectangle.and.hand.point.up.left" end
+  if has("keyboard") then return "sf:keyboard" end
+  if has("mouse") then return "sf:magicmouse" end
+  if has("iphone") then return "sf:iphone" end
+  if has("ipad") then return "sf:ipad" end
+  if has("watch") then return "sf:applewatch" end
+  if has("apple tv") or has(" tv") or n == "tv" then return "sf:appletv" end
+  if has("macbook") or has("imac") or has("mac ") then return "sf:laptopcomputer" end
+  if has("homepod") or has("speaker") then return "sf:homepod" end
+  if has("controller") or has("gamepad") then return "sf:gamecontroller" end
+  if has("printer") then return "sf:printer" end
+  if has("pencil") then return "sf:applepencil" end
+  return "sf:dot.radiowaves.left.and.right"
+end
+
+local function glyph_piece()
+  return {
+    position = popup_pos,
+    drawing = false,
+    width = icon_width,
+    icon = {
+      string = "",
+      align = "center",
+      color = colors.with_alpha(colors.white, 0.75),
+      font = { size = 13 },
+      width = icon_width,
+    },
+    label = { drawing = false },
+    padding_left = 8,
+    padding_right = 0,
+  }
+end
+
+local paired_glyphs = {}
+local nearby_glyphs = {}
 local paired_rows = {}
 for i = 1, max_devices do
+  paired_glyphs[i] = sbar.add("item", "widgets.bluetooth.dev." .. i .. ".icon", glyph_piece())
   paired_rows[i] = sbar.add("item", "widgets.bluetooth.dev." .. i, {
     position = popup_pos,
     drawing = false,
-    width = popup_width - 16,
+    width = row_width,
     align = "left",
     background = {
       height = 36,
@@ -111,10 +163,10 @@ for i = 1, max_devices do
       -- A name longer than the slot ramps out under the button instead of
       -- being cut mid-letter.
       fade_width = 18,
-      padding_left = 10,
+      padding_left = 2,
     },
     label = { drawing = false },
-    padding_left = 8,
+    padding_left = 0,
     padding_right = 8,
   })
 end
@@ -140,21 +192,22 @@ local spinner = require("helpers.spinner").attach(scan_label, {
 
 local nearby_rows = {}
 for i = 1, max_devices do
+  nearby_glyphs[i] = sbar.add("item", "widgets.bluetooth.near." .. i .. ".icon", glyph_piece())
   nearby_rows[i] = sbar.add("item", "widgets.bluetooth.near." .. i, {
     position = popup_pos,
     drawing = false,
-    width = popup_width - 16,
+    width = row_width,
     icon = {
       string = "",
       align = "left",
       color = colors.with_alpha(colors.white, 0.8),
       font = { size = 13 },
-      width = popup_width - 16 - button_width - 8,
+      width = row_width - button_width - 8,
       fade_width = 18,
-      padding_left = 10,
+      padding_left = 2,
     },
     label = action_label("Pair", blue, true),
-    padding_left = 8,
+    padding_left = 0,
     padding_right = 8,
   })
 end
@@ -172,6 +225,18 @@ local function paint_paired()
   local show = bt_power
   for i = 1, max_devices do
     local dev = show and paired_cache[i] or nil
+    if dev then
+      paired_glyphs[i]:set({
+        drawing = true,
+        icon = {
+          string = device_symbol(dev.name),
+          color = dev.connected and colors.white
+            or colors.with_alpha(colors.white, 0.72),
+        },
+      })
+    else
+      paired_glyphs[i]:set({ drawing = false })
+    end
     if not dev then
       paired_rows[i]:set({ drawing = false })
     elseif dev.connected then
@@ -261,8 +326,13 @@ local function run_inquiry()
     for i = 1, max_devices do
       local dev = nearby_cache[i]
       if dev then
+        nearby_glyphs[i]:set({
+          drawing = true,
+          icon = { string = device_symbol(dev.name) },
+        })
         nearby_rows[i]:set({ drawing = true, icon = { string = dev.name } })
       else
+        nearby_glyphs[i]:set({ drawing = false })
         nearby_rows[i]:set({ drawing = false })
       end
     end
