@@ -13,9 +13,25 @@ local hover = require("helpers.hover")
 local popup_width = 280
 local inset = 12
 -- Enough rows for a real app menu, not just the item list: Raycast's has 13
--- entries and AeroSpace's 43. Unused rows are hidden, so the only cost of a
--- generous cap is that many item objects.
-local max_rows = 26
+-- entries and AeroSpace's 43, and one row is spent on the back link. Unused
+-- rows are hidden, so the only cost of a generous cap is that many item
+-- objects.
+local max_rows = 48
+
+-- A popup is clamped to the screen horizontally but NOT vertically
+-- (PopupSurface), so a menu taller than the display runs off the bottom and
+-- the rest is unreachable with no hint that it is there. Long menus compact
+-- their rows instead: AeroSpace's 43 entries do not fit at 30pt, they do at
+-- 20pt. The item list always uses the roomy height.
+local ROW_H, COMPACT_ROW_H = 30, 20
+
+local function row_budget()
+  local displays = sbar.query("displays")
+  local frame = displays and displays[1] and displays[1].frame
+  local height = (frame and frame.h) or 982
+  -- bar, popup inset, and the hint row the list always ends with
+  return height - 40 - 16
+end
 
 local helper = (PORT_DIR or (os.getenv("HOME") .. "/.config/ybar"))
   .. "/helpers/bin/statusitems"
@@ -88,7 +104,7 @@ local access_row = sbar.add("item", {
     padding_right = inset,
   },
 })
-hover.row(access_row)
+hover.row(access_row, { flat = true })
 
 local rows = {}
 for i = 1, max_rows do
@@ -112,7 +128,7 @@ for i = 1, max_rows do
       align = "left",
     },
   })
-  hover.row(rows[i])
+  hover.row(rows[i], { flat = true })
 end
 
 sbar.add("item", {
@@ -194,28 +210,48 @@ local function populate_menu()
   end
   view.shown = shown
 
+  -- The list is laid in at zero alpha and faded up, so drilling in or back
+  -- reads as a transition instead of the rows snapping to new text. Colour is
+  -- the only thing animated: a row's geometry drives the popup's own size, and
+  -- animating that would make the panel breathe on every hop.
+  local final = {}
+  local clear = function(c) return colors.with_alpha(c, 0) end
+  -- Pick the row height before laying anything out: everything below counts
+  -- rows against it.
+  local budget = row_budget()
+  local row_h = ROW_H
+  if (#shown + 2) * ROW_H > budget then row_h = COMPACT_ROW_H end
+  bracket:set({ popup = { height = row_h } })
+  local fits = math.max(1, math.floor(budget / row_h) - 1)   -- less the hint
+  local capacity = math.min(#rows, fits) - 1                 -- less the back row
+
   for i, row in ipairs(rows) do
-    if i == 1 then
+    if i > capacity + 1 then
+      row:set({ drawing = false })
+    elseif i == 1 then
+      final[i] = { icon = colors.grey, label = colors.grey }
       row:set({
         drawing = true,
         image = { drawing = false },
         icon = { drawing = true, string = "‹", align = "left",
-                 color = colors.grey, padding_left = inset + 4,
+                 color = clear(colors.grey), padding_left = inset + 4,
                  font = { size = 14, style = settings.font.style_map["Bold"] } },
-        label = { string = display_name(view.entry), color = colors.grey },
+        label = { string = display_name(view.entry), color = clear(colors.grey) },
       })
     else
       local e = shown[i - 1]
       if e then
+        local label_color = e.enabled and colors.white or colors.grey
+        final[i] = { icon = colors.grey, label = label_color }
         row:set({
           drawing = true,
           image = { drawing = false },
           icon = { drawing = true, string = e.submenu and "›" or " ", align = "right",
-                   color = colors.grey, padding_left = 0,
+                   color = clear(colors.grey), padding_left = 0,
                    padding_right = inset, font = { size = 12 } },
           label = {
             string = e.title,
-            color = e.enabled and colors.white or colors.grey,
+            color = clear(label_color),
             padding_left = inset + 4,
           },
         })
@@ -224,7 +260,11 @@ local function populate_menu()
       end
     end
   end
-  local capacity = #rows - 1
+  sbar.animate("sin", 9, function()
+    for i, c in pairs(final) do
+      rows[i]:set({ icon = { color = c.icon }, label = { color = c.label } })
+    end
+  end)
   local hint = "click runs · ‹ back"
   if #shown > capacity then
     hint = hint .. " · " .. (#shown - capacity) .. " more not shown"
@@ -234,6 +274,9 @@ end
 
 local function populate()
   if menu_view then return populate_menu() end
+  -- Back to the item list: it is short, so it always gets the roomy height a
+  -- drilled-into menu may have compacted away.
+  bracket:set({ popup = { height = ROW_H } })
   access_row:set({ drawing = no_access })
 
   local hidden_count = 0

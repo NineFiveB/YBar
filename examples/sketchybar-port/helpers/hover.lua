@@ -96,14 +96,20 @@ end
 -- Windows port's measurement on its tray list at 2x: content centre 143.5
 -- against a plate centre of 144.5 unadjusted.
 local function plate(item, opts)
-  item:set({
-    background = {
-      color = colors.transparent,
-      height = opts.height or 22,
-      corner_radius = opts.radius or 4,
-      y_offset = opts.y_offset or -1,   -- positive is up
-    },
-  })
+  local background = {
+    color = colors.transparent,
+    height = opts.height or 22,
+    corner_radius = opts.radius or 4,
+    y_offset = opts.y_offset or -1,   -- positive is up
+  }
+  -- opts.flat: a selection is a selection, not an object. Themes that put
+  -- glass on every plate by default give the highlight a rim and a material
+  -- of its own, which reads as a second surface sliding under the text.
+  if opts.flat then
+    background.glass = false
+    background.sheen = false
+  end
+  item:set({ background = background })
 end
 
 function M.row(item, opts)
