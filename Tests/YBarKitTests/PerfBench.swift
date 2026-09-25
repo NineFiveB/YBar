@@ -185,6 +185,9 @@ struct PerfBench {
                             labelSize: fontCache.measure(part: probe.label))
         }
         let duration = Double(durationFrames) / 60
+        // What the daemon does while this property is in flight: the item is
+        // animating, so its quads are placed at their true value.
+        builder.animatingItems = [item.id]
         var signatures: [String] = []
         var now = 0.0
         while now <= duration + 1e-9 {

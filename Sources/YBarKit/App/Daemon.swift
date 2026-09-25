@@ -287,6 +287,9 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         barManager.onMarqueeDemand = { [weak self] active in
             self?.scheduler.continuousDemand = active
         }
+        barManager.animatingItems = { [weak self] in
+            self?.scheduler.animatingItemIDs ?? []
+        }
         barManager.onGlobalMouseEnter = { [weak self] in
             self?.eventBus.trigger(name: "mouse.entered.global")
         }

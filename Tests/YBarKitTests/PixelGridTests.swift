@@ -99,3 +99,57 @@ import Testing
         }
     }
 }
+
+/// Quads snap to the pixel grid while an item is still and are placed at
+/// their true value while it animates. Snapping a moving pill quantizes its
+/// travel: a 3 pt lift at 2x has six pixels to land on, so it showed the same
+/// handful of pictures whether the panel refreshed 60 or 120 times a second.
+@MainActor
+@Suite struct AnimatedQuadPlacementTests {
+    private func plate(_ name: String, yOffset: Float) -> Item {
+        let item = Item(name: name, position: .left)
+        item.label.string = "CPU"
+        item.background.drawing = true
+        item.background.height = 20
+        item.yOffset = yOffset
+        return item
+    }
+
+    /// A still item lands on whole device pixels, whatever its offset.
+    @Test func aStillItemSnapsToTheGrid() {
+        let scene = HeadlessScene()
+        let quads = scene.build([plate("s", yOffset: 1.37)]).list.quads
+        #expect(!quads.isEmpty)
+        for quad in quads {
+            #expect(quad.origin.y == quad.origin.y.rounded())
+        }
+    }
+
+    /// The same item, animating, keeps the fraction — and a sub-pixel change
+    /// in the property moves the quad instead of being rounded away.
+    @Test func anAnimatingItemKeepsItsSubPixelOffset() {
+        let scene = HeadlessScene()
+        let item = plate("a", yOffset: 1.37)
+        scene.builder.animatingItems = [item.id]
+        let first = scene.build([item]).list.quads.map(\.origin.y)
+
+        item.yOffset = 1.37 + 0.2   // less than one device pixel at 2x
+        let second = scene.build([item]).list.quads.map(\.origin.y)
+
+        #expect(!first.isEmpty)
+        #expect(first != second, "a sub-pixel move must change the picture")
+        #expect(first.contains { $0 != $0.rounded() })
+    }
+
+    /// Only the animating item is unsnapped; its neighbours stay crisp.
+    @Test func aNeighbourOfAnAnimatingItemStaysSnapped() {
+        let scene = HeadlessScene()
+        let moving = plate("m", yOffset: 1.37)
+        let still = plate("n", yOffset: 1.37)
+        scene.builder.animatingItems = [moving.id]
+
+        let list = scene.build([moving, still]).list
+        let stillQuads = list.quads.filter { $0.origin.y == $0.origin.y.rounded() }
+        #expect(!stillQuads.isEmpty, "the still item must still land on the grid")
+    }
+}

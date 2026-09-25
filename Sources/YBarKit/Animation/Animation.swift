@@ -145,6 +145,23 @@ public final class AnimationScheduler {
 
     public var isAnimating: Bool { !animations.isEmpty }
 
+    /// Item IDs with a property animation in flight, parsed from the live
+    /// animation keys (`item.<id>.<property>`, the shape every item property
+    /// animation is registered under). Derived on demand rather than kept as
+    /// a counted set: a retarget replaces a key in place and `cancel(prefix:)`
+    /// drops a whole namespace, so a maintained tally would have to mirror
+    /// both, while reading the table cannot fall out of step with it.
+    public var animatingItemIDs: Set<Int> {
+        var ids: Set<Int> = []
+        for key in animations.keys where key.hasPrefix("item.") {
+            let rest = key.dropFirst(5)
+            guard let dot = rest.firstIndex(of: "."),
+                  let id = Int(rest[rest.startIndex..<dot]) else { continue }
+            ids.insert(id)
+        }
+        return ids
+    }
+
     /// Keeps the display link alive with zero property animations (marquee
     /// text): each frame still fires onFrame so the scene re-encodes.
     public var continuousDemand = false {
