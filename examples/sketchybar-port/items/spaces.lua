@@ -671,6 +671,12 @@ function apply_focus(focused)
         label = { color = selected and colors.white or colors.grey },
         background = {
           color = selected and colors.with_alpha(colors.grey, 0.5) or colors.bg1,
+          -- The selection is a plain highlight: its fill is opaque enough to
+          -- hide the material anyway, and lighting a half-opaque plate reads
+          -- as paint. Both off together — with glass off the painted pass
+          -- would fall back to modelling a body, bottom shade included.
+          glass = not selected,
+          sheen = not selected,
         },
       })
       brackets[slot]:set({

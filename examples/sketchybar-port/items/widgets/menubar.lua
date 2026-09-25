@@ -27,7 +27,7 @@ local chevron = sbar.add("item", "widgets.menubar", {
   icon = {
     string = "‹",
     font = { size = 17, style = settings.font.style_map["Bold"] },
-    color = colors.grey,
+    color = colors.white,
     padding_left = 8,
     padding_right = 8,
     y_offset = 1,
