@@ -41,6 +41,10 @@ sbar.default({
       corner_radius = 16,
       color = colors.popup.bg,
       glass = true,
+      -- The panel gets the same lit edge the pills have. Frosted glass over a
+      -- mostly uniform backdrop blurs to a uniform tone, so without the rim
+      -- only the corners — where the geometry curves — show any material.
+      sheen = true,
     },
   },
   padding_left = 2,
