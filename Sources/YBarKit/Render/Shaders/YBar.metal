@@ -26,8 +26,8 @@ struct GlyphInstance {
     float2 uvSize;
     float4 color;
     uint   flags;
-    uint   _pad0;
-    uint   _pad1;
+    float  fadeStart;
+    float  fadeEnd;
     uint   _pad2;
 };
 
@@ -54,6 +54,7 @@ constant uint kQuadFlagSheen    = 1u << 5;
 constant uint kQuadFlagHot      = 1u << 6;
 constant uint kGlyphFlagColor   = 1u << 0;
 constant uint kGlyphFlagGrey    = 1u << 1;
+constant uint kGlyphFlagFade    = 1u << 2;
 
 // Vertex-pulled unit quad: vid 0..3 as a triangle strip.
 static inline float2 unit_corner(uint vid) {
@@ -285,6 +286,11 @@ struct GlyphVOut {
     float2 uv;
     float4 color;
     uint   flags;
+    /// Trailing-fade multiplier, 1 at the start of the ramp and 0 at its
+    /// end. The ramp is linear in device x and the quad is axis-aligned, so
+    /// interpolating it across the quad is exact, and a glyph outside the
+    /// ramp carries a constant 1.
+    float  fade;
 };
 
 vertex GlyphVOut glyph_vertex(
@@ -302,6 +308,11 @@ vertex GlyphVOut glyph_vertex(
     out.uv = g.uvOrigin + corner * g.uvSize;
     out.color = g.color;
     out.flags = g.flags;
+    out.fade = 1.0;
+    if (g.flags & kGlyphFlagFade) {
+        float span = g.fadeEnd - g.fadeStart;
+        out.fade = span > 0.0 ? saturate((g.fadeEnd - pixel.x) / span) : 1.0;
+    }
     return out;
 }
 
@@ -315,7 +326,7 @@ fragment float4 glyph_fragment(
     if (in.flags & kGlyphFlagColor) {
         // Color page stores premultiplied BGRA (emoji, multicolor symbols).
         float4 texel = colorAtlas.sample(atlasSampler, in.uv);
-        texel *= in.color.a;
+        texel *= in.color.a * in.fade;
         if (in.flags & kGlyphFlagGrey) {
             // Rec. 709 luma. Valid on PREMULTIPLIED colour: alpha scales all
             // three channels equally, so the weighted sum stays premultiplied
@@ -326,6 +337,6 @@ fragment float4 glyph_fragment(
         return texel;
     }
     float coverage = maskAtlas.sample(atlasSampler, in.uv).r;
-    float alpha = coverage * in.color.a;
+    float alpha = coverage * in.color.a * in.fade;
     return float4(in.color.rgb * alpha, alpha);
 }

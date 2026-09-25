@@ -534,6 +534,9 @@ public enum PropertySetter {
                             "\(prefix).padding_right", value, ctx)
         case "y_offset":
             return setFloat(item, base.appending(path: \TextPart.yOffset), "\(prefix).y_offset", value, ctx)
+        case "fade_width":
+            return setFloat(item, base.appending(path: \TextPart.fadeWidth),
+                            "\(prefix).fade_width", value, ctx)
         case "scroll_duration":
             guard let frames = Int(value), frames > 0 else { return "[!] invalid scroll_duration: \(value)" }
             item[keyPath: base.appending(path: \TextPart.scrollDuration)] = frames

@@ -159,6 +159,11 @@ public struct BackgroundStyle: Equatable, Sendable {
 public struct TextPart: Equatable, Sendable {
     public var string: String = ""
     /// Marquee cycle length in frames (~60/s) when the item scrolls texts.
+    /// Points over which overflowing text ramps to transparent at its slot's
+    /// trailing edge, instead of being cut mid-glyph. 0 keeps the hard cut
+    /// (sketchybar behaviour). Only applies to a fixed-width part whose text
+    /// does not fit and is not scrolling.
+    public var fadeWidth: Float = 0
     public var scrollDuration: Int = 100
     public var drawing: Bool = true
     public var color: YColor = .white

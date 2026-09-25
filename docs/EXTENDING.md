@@ -84,6 +84,10 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
   macOS may prompt on the first click)
 - **Marquee text** (`scroll_texts`), **hover tooltips**, `background.image` +
   `background.clip` cutouts, **idle inhibitor**
+- **Trailing fade** (`icon.fade_width` / `label.fade_width`, points) — text
+  that overflows a fixed-width slot ramps out at the slot's trailing edge
+  instead of being cut mid-glyph. 0 (the default) keeps sketchybar's hard
+  cut; a scrolling part ignores it, since a marquee already answers overflow
 - **Arc gauges** — speedometer-style rings with the label centered in the dial
   (`gauge.*`)
 - **Images** — `image.string` renders real app icons (`app.<Name>`), SF symbols

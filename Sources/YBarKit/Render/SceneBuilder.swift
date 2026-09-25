@@ -929,6 +929,7 @@ public final class SceneBuilder {
         var penX = penX
         var clip = clip
         var marqueeOffset: CGFloat = 0
+        var fade: (start: Float, end: Float)?
         if part.customWidth >= 0 {
             let ink = fontCache.naturalMeasure(part: part).width
             let slack = CGFloat(part.customWidth)
@@ -957,6 +958,15 @@ public final class SceneBuilder {
                 width: (CGFloat(part.customWidth) * scale).rounded(),
                 height: .greatestFiniteMagnitude / 2)
             clip = clip.map { $0.intersection(partBox) } ?? partBox
+            // Overflowing text ends in a hard cut through whatever glyph
+            // straddles the slot edge. With `fade_width` it ramps out over
+            // the last few points instead, so a name that does not fit reads
+            // as continuing rather than as damaged. A marquee already has an
+            // answer for overflow, so the two never both apply.
+            if part.fadeWidth > 0, slack < 0, marqueeCycle == 0, let box = clip, !box.isEmpty {
+                fade = (start: Float(box.maxX - CGFloat(part.fadeWidth) * scale),
+                        end: Float(box.maxX))
+            }
         }
         // An empty clip means the whole part is hidden — a collapsed slot, or
         // a collapsed ITEM (width=0, or any --animate width frame below the
@@ -1069,7 +1079,7 @@ public final class SceneBuilder {
             }
         }
         list.glyphs.append(contentsOf: SceneBuilder.layeredGlyphs(
-            placements, color: color, shadow: shadow, clip: clip))
+            placements, color: color, shadow: shadow, clip: clip, fade: fade))
     }
 
     /// `icon.shadow` / `label.shadow` resolved to device pixels: the glyphs
@@ -1096,7 +1106,8 @@ public final class SceneBuilder {
         _ placements: [(entry: GlyphAtlas.Entry, origin: SIMD2<Float>)],
         color: SIMD4<Float>,
         shadow: TextShadow?,
-        clip: CGRect?
+        clip: CGRect?,
+        fade: (start: Float, end: Float)? = nil
     ) -> [GlyphInstance] {
         var instances: [GlyphInstance] = []
         instances.reserveCapacity(placements.count * (shadow == nil ? 1 : 2))
@@ -1112,14 +1123,15 @@ public final class SceneBuilder {
                 guard !placement.entry.isColor else { continue }
                 if let instance = glyphInstance(
                     origin: placement.origin + shadow.offsetPx,
-                    entry: placement.entry, color: shadow.color, clip: clip) {
+                    entry: placement.entry, color: shadow.color, clip: clip, fade: fade) {
                     instances.append(instance)
                 }
             }
         }
         for placement in placements {
             if let instance = glyphInstance(
-                origin: placement.origin, entry: placement.entry, color: color, clip: clip) {
+                origin: placement.origin, entry: placement.entry, color: color,
+                clip: clip, fade: fade) {
                 instances.append(instance)
             }
         }
@@ -1133,7 +1145,8 @@ public final class SceneBuilder {
         origin: SIMD2<Float>,
         entry: GlyphAtlas.Entry,
         color: SIMD4<Float>,
-        clip: CGRect?
+        clip: CGRect?,
+        fade: (start: Float, end: Float)? = nil
     ) -> GlyphInstance? {
         var quadOrigin = origin
         var quadSize = entry.sizePx
@@ -1159,13 +1172,17 @@ public final class SceneBuilder {
             }
         }
 
+        var flags: UInt32 = entry.isColor ? GlyphInstance.flagColorGlyph : 0
+        if fade != nil { flags |= GlyphInstance.flagFade }
         return GlyphInstance(
             origin: quadOrigin,
             size: quadSize,
             uvOrigin: uvOrigin,
             uvSize: uvSize,
             color: color,
-            flags: entry.isColor ? GlyphInstance.flagColorGlyph : 0)
+            flags: flags,
+            fadeStart: fade?.start ?? 0,
+            fadeEnd: fade?.end ?? 0)
     }
 
     // MARK: - Helpers

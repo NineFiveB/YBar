@@ -75,8 +75,14 @@ public struct GlyphInstance {
     /// Tint for mask glyphs; ignored for color glyphs except alpha.
     public var color: SIMD4<Float>
     public var flags: UInt32
-    var _pad0: UInt32 = 0
-    var _pad1: UInt32 = 0
+    /// Device x where the trailing fade begins, and where it reaches zero.
+    /// Only read when `flagFade` is set. Text clipped to a fixed width used
+    /// to end in a hard cut through whatever glyph straddled the edge; a
+    /// fade ramps the ink out instead, so a name that does not fit reads as
+    /// continuing rather than as damaged. Two spare words of the instance,
+    /// so the 64-byte stride the Windows port shares is unchanged.
+    public var fadeStart: Float = 0
+    public var fadeEnd: Float = 0
     var _pad2: UInt32 = 0
 
     /// Set when the glyph lives in the color (BGRA) atlas page rather than the mask page.
@@ -85,11 +91,15 @@ public struct GlyphInstance {
     /// greyed-out icon for a not-running app or a disabled row). Same bit
     /// as the Windows port's kGlyphFlagDesaturate.
     public static let flagDesaturate: UInt32 = 1 << 1
+    /// Ramp alpha to zero between `fadeStart` and `fadeEnd` (device x).
+    /// macOS-only: the Windows port leaves bit 2 free.
+    public static let flagFade: UInt32 = 1 << 2
 
     public init(
         origin: SIMD2<Float>, size: SIMD2<Float>,
         uvOrigin: SIMD2<Float>, uvSize: SIMD2<Float>,
-        color: SIMD4<Float>, flags: UInt32 = 0
+        color: SIMD4<Float>, flags: UInt32 = 0,
+        fadeStart: Float = 0, fadeEnd: Float = 0
     ) {
         self.origin = origin
         self.size = size
@@ -97,6 +107,8 @@ public struct GlyphInstance {
         self.uvSize = uvSize
         self.color = color
         self.flags = flags
+        self.fadeStart = fadeStart
+        self.fadeEnd = fadeEnd
     }
 }
 

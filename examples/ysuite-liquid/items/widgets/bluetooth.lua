@@ -108,6 +108,9 @@ for i = 1, max_devices do
       color = colors.white,
       font = { size = 13 },
       width = name_width,
+      -- A name longer than the slot ramps out under the button instead of
+      -- being cut mid-letter.
+      fade_width = 18,
       padding_left = 10,
     },
     label = { drawing = false },
@@ -147,6 +150,7 @@ for i = 1, max_devices do
       color = colors.with_alpha(colors.white, 0.8),
       font = { size = 13 },
       width = popup_width - 16 - button_width - 8,
+      fade_width = 18,
       padding_left = 10,
     },
     label = action_label("Pair", blue, true),
