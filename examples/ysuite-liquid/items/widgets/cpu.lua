@@ -33,7 +33,10 @@ local cpu_bracket = sbar.add("bracket", "widgets.cpu.bracket", { cpu.name }, {
   padding_left = 8,
   padding_right = 8,
   background = { color = colors.bg1 },
-  popup = { align = "center" },
+  -- horizontal + wrap_width so the CPU/GPU/RAM tabs share one line. Every
+  -- other item in this popup is popup_width wide (the cards are
+  -- popup_width - 8 inside 4pt padding), so they each still take a line.
+  popup = { align = "center", horizontal = true, wrap_width = popup_width },
 })
 
 hover.pill(cpu_bracket, cpu)
@@ -110,25 +113,77 @@ for _, item in ipairs({ mem_card, cpu_card, gpu_card }) do
   hover.attachColor(item, { item }, card, card_hover)
 end
 
--- ── Load history ───────────────────────────────────────────────────────────
+-- ── Usage history ──────────────────────────────────────────────────────────
 -- The pill's sparkline is 42 samples with no scale and no readout: it says
--- "busy" and nothing else. The popup gets the same stream as a scrubbable
--- bar chart, the way the battery popup plots its charge. Bars, not a line,
--- because the engine only hit-tests bars graphs for graph.hovered.
+-- "busy" and nothing else. The popup plots the same stream as a scrubbable
+-- bar chart behind a CPU / GPU / RAM switch, the way the battery popup plots
+-- its charge behind 24 Hours / 10 Days. Bars, not a line, because the engine
+-- only hit-tests bars graphs for graph.hovered.
+--
+-- All three series come off the one system_stats event the pill already
+-- subscribes to (CPU_USAGE, GPU_USAGE, MEMORY_USAGE), so switching tabs reads
+-- history that was already being kept rather than starting a new recording.
 local history_buckets = 64
 local plot_width = popup_width - 2 * inset - 36   -- room for the y-axis strip
-local load_history = {}
-local load_times = {}
-for i = 1, history_buckets do
-  load_history[i] = false
-  load_times[i] = false
+local inner = popup_width - 2 * inset
+local tab_track = colors.with_alpha(0xff000000, 0.38)
+local tab_active = 0xff0a84ff
+
+local series = {
+  cpu = { title = "CPU Load", values = {}, times = {} },
+  gpu = { title = "GPU Load", values = {}, times = {} },
+  ram = { title = "Memory Used", values = {}, times = {} },
+}
+for _, entry in pairs(series) do
+  for i = 1, history_buckets do
+    entry.values[i] = false
+    entry.times[i] = false
+  end
 end
+local shown_series = "cpu"
+
+-- Three tabs when the machine reports a GPU, two when it does not: the GPU
+-- card hides itself on the same signal, and a tab onto a chart that can never
+-- fill is worse than no tab.
+local tab_w3 = (inner - 8) / 3
+local tab_w2 = (inner - 4) / 2
+
+local function add_tab(key, text, pad_left, pad_right)
+  local tab = sbar.add("item", "widgets.cpu.tab." .. key, {
+    position = popup_pos,
+    width = tab_w3,
+    align = "center",
+    icon = {
+      string = text,
+      font = { size = 12, style = settings.font.style_map["Regular"] },
+      color = colors.white,
+    },
+    label = { drawing = false },
+    background = {
+      height = 26,
+      corner_radius = 7,
+      color = tab_track,
+      drawing = true,
+      glass = false,
+      sheen = false,
+    },
+    padding_left = pad_left or 0,
+    padding_right = pad_right or 0,
+  })
+  return tab
+end
+
+local tabs = {
+  cpu = add_tab("cpu", "CPU", inset, 0),
+  gpu = add_tab("gpu", "GPU", 0, 0),
+  ram = add_tab("ram", "RAM", 0, inset),
+}
 
 local chart_title = sbar.add("item", "widgets.cpu.chart_title", {
   position = popup_pos,
   width = popup_width,
   icon = {
-    string = "CPU Load",
+    string = series.cpu.title,
     align = "left",
     font = { size = 13, style = settings.font.style_map["Regular"] },
     color = colors.white,
@@ -154,25 +209,32 @@ local chart_detail = sbar.add("item", "widgets.cpu.chart_detail", {
   label = { drawing = false },
 })
 
-local history = sbar.add("graph", "widgets.cpu.history", history_buckets, {
-  position = popup_pos,
-  graph = {
-    color = colors.with_alpha(colors.white, 0.7),
-    style = "bars",
-    plot_width = plot_width,
-    tick = "off",
-  },
-  background = {
-    height = 72,
-    color = { alpha = 0 },
-    border_color = { alpha = 0 },
-    drawing = true,
-  },
-  icon = { drawing = false },
-  label = { drawing = false },
-  padding_left = inset,
-  padding_right = 0,
-})
+local function add_history(key, drawing)
+  return sbar.add("graph", "widgets.cpu.history." .. key, history_buckets, {
+    position = popup_pos,
+    drawing = drawing,
+    graph = {
+      color = colors.with_alpha(colors.white, 0.7),
+      style = "bars",
+      plot_width = plot_width,
+      tick = "off",
+    },
+    background = {
+      height = 72,
+      color = { alpha = 0 },
+      border_color = { alpha = 0 },
+      drawing = true,
+    },
+    icon = { drawing = false },
+    label = { drawing = false },
+    padding_left = inset,
+    padding_right = 0,
+  })
+end
+
+series.cpu.graph = add_history("cpu", true)
+series.gpu.graph = add_history("gpu", false)
+series.ram.graph = add_history("ram", false)
 
 local function ago(seconds)
   if seconds < 10 then return "now" end
@@ -180,29 +242,88 @@ local function ago(seconds)
   return string.format("%dm ago", math.floor(seconds / 60 + 0.5))
 end
 
-local function record_load(load)
-  table.move(load_history, 2, history_buckets, 1)
-  table.move(load_times, 2, history_buckets, 1)
-  load_history[history_buckets] = load
-  load_times[history_buckets] = os.time()
-  history:push({ math.max(0, math.min(1, load / 100)) })
+local function record(key, value)
+  local entry = series[key]
+  if not entry or not value then return end
+  table.move(entry.values, 2, history_buckets, 1)
+  table.move(entry.times, 2, history_buckets, 1)
+  entry.values[history_buckets] = value
+  entry.times[history_buckets] = os.time()
+  entry.graph:push({ math.max(0, math.min(1, value / 100)) })
 end
 
-history:subscribe("graph.hovered", function(env)
+local function paint_tabs()
+  for key, tab in pairs(tabs) do
+    tab:set({
+      background = { color = key == shown_series and tab_active or tab_track },
+      icon = { color = key == shown_series and colors.white
+        or colors.with_alpha(colors.white, 0.88) },
+    })
+  end
+end
+
+local function set_series(key)
+  if shown_series == key or not series[key] then return end
+  shown_series = key
+  chart_detail:set({ icon = { string = " " } })
+  chart_title:set({ icon = { string = series[key].title } })
+  for name, entry in pairs(series) do
+    entry.graph:set({ drawing = name == key })
+  end
+  paint_tabs()
+end
+
+for key, tab in pairs(tabs) do
+  tab:subscribe("mouse.clicked", function() set_series(key) end)
+  -- The track tone is the resting state, so the hover lift has to come back
+  -- to whichever tone the tab is currently wearing.
+  tab:subscribe("mouse.entered", function()
+    if shown_series == key then return end
+    hover.fade(tab, colors.with_alpha(colors.white, 0.16), hover.ENTER_FRAMES)
+  end)
+  tab:subscribe("mouse.exited", function()
+    if shown_series == key then return end
+    hover.fade(tab, tab_track, hover.EXIT_FRAMES)
+  end)
+end
+
+-- One handler for all three: a graph only reports hovers while it is drawing,
+-- so the readout always belongs to the series on screen.
+local function on_scrub(env)
   local index = tonumber(env.INFO)
-  local load = index and load_history[index + 1]
-  if not load then
+  local entry = series[shown_series]
+  local value = index and entry and entry.values[index + 1]
+  if not value then
     chart_detail:set({ icon = { string = " " } })
     return
   end
-  local when = load_times[index + 1]
+  local when = entry.times[index + 1]
   chart_detail:set({
     icon = {
       string = string.format("%s  ·  %d%%",
-        ago(os.time() - (when or os.time())), load),
+        ago(os.time() - (when or os.time())), value),
     },
   })
-end)
+end
+
+for _, entry in pairs(series) do
+  entry.graph:subscribe("graph.hovered", on_scrub)
+end
+
+-- Until a GPU reading lands, CPU and RAM split the strip between them.
+local function fit_tabs(with_gpu)
+  if with_gpu then
+    tabs.cpu:set({ width = tab_w3 })
+    tabs.gpu:set({ drawing = true, width = tab_w3 })
+    tabs.ram:set({ width = tab_w3 })
+  else
+    tabs.cpu:set({ width = tab_w2 })
+    tabs.gpu:set({ drawing = false, width = 0 })
+    tabs.ram:set({ width = tab_w2 })
+  end
+end
+fit_tabs(false)
+paint_tabs()
 
 local footer = sbar.add("item", "widgets.cpu.footer", {
   position = popup_pos,
@@ -334,15 +455,21 @@ end
 cpu:subscribe("system_stats", function(env)
   local load = tonumber(env.CPU_USAGE) or 0
   cpu:push({ waveform(load) })
-  record_load(load)
+  record("cpu", load)
+  record("ram", tonumber(env.MEMORY_USAGE))
   cpu_card:set({
     icon = { string = string.format("CPU    Load: %d%%", load) },
   })
   local gpu = tonumber(env.GPU_USAGE)
   if gpu then
+    record("gpu", gpu)
     if not gpu_shown then
       gpu_shown = true
       gpu_card:set({ drawing = true })
+      -- The GPU tab appears on the same signal as the GPU card, and only
+      -- once: a machine that never reports one keeps a two-way switch
+      -- rather than a tab onto a chart that can never fill.
+      fit_tabs(true)
     end
     gpu_card:set({
       icon = { string = string.format("GPU    Load: %d%%", gpu) },
