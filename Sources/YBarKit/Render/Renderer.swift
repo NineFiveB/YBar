@@ -88,6 +88,12 @@ public final class Renderer {
     /// Render one frame into the layer. Presents even an empty list (clears the bar).
     /// Returns false when the frame could not be produced (display asleep,
     /// drawables exhausted) — the caller must reschedule or the update is lost.
+    /// Backdrop for `--bar refraction`, set by the manager between frames.
+    /// Nil leaves the rim on its own dispersion — the shader is told so
+    /// through a zeroed BackdropParams rather than by an unbound texture,
+    /// so a surface with no backdrop (a popup) simply never takes the branch.
+    public var backdrop: MTLTexture?
+
     @discardableResult
     public func render(list: DisplayList, layer: CAMetalLayer, atlas: GlyphAtlas) -> Bool {
         frameSemaphore.wait()
@@ -142,6 +148,15 @@ public final class Renderer {
             holes.withUnsafeBytes { raw in
                 encoder.setFragmentBytes(raw.baseAddress!, length: raw.count, index: 2)
             }
+            // Normalised sampling, so the backdrop's RESOLUTION is free —
+            // the capture is downscaled hard on purpose, since a rim band a
+            // few pixels wide carries no high frequencies. What must match is
+            // the AREA: the provider captures the surface's own frame, and the
+            // caller withholds the texture when that geometry is stale rather
+            // than letting the shader refract an offset copy of the screen.
+            var params = backdrop != nil ? BackdropParams.tuned : BackdropParams()
+            encoder.setFragmentBytes(&params, length: MemoryLayout<BackdropParams>.stride, index: 3)
+            if let backdrop { encoder.setFragmentTexture(backdrop, index: 0) }
             encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4,
                                    instanceCount: list.quads.count)
         }

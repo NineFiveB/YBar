@@ -781,7 +781,8 @@ public final class SceneBuilder {
             list.quads.append(shadow)
         }
 
-        list.quads.append(SceneBuilder.backgroundQuad(background, rect: rect, scale: scale))
+        list.quads.append(SceneBuilder.backgroundQuad(
+            background, rect: rect, scale: scale, refract: refractBackdrop))
         if background.sheen { list.hasSheen = true }
 
         // background.image: aspect-fit inside the background rect, scaled.
@@ -810,7 +811,11 @@ public final class SceneBuilder {
 
     /// The plate quad of a background style (fill, border, gradient, glass),
     /// shared by emitBackground and the per-part plates emitText draws.
-    static func backgroundQuad(_ background: BackgroundStyle, rect: CGRect, scale: CGFloat) -> QuadInstance {
+    /// `refract` is the frame's state, not the item's, so it arrives as an
+    /// argument: this is a static helper and cannot read the builder.
+    static func backgroundQuad(
+        _ background: BackgroundStyle, rect: CGRect, scale: CGFloat, refract: Bool = false
+    ) -> QuadInstance {
         var quad = QuadInstance(
             origin: pixelOrigin(rect, scale: scale),
             size: pixelSize(rect, scale: scale),
@@ -826,6 +831,11 @@ public final class SceneBuilder {
         }
         if background.glass {
             quad.flags |= QuadInstance.flagGlass
+            // Set only while the renderer actually holds a backdrop for this
+            // surface, so the flag never outlives the texture it needs.
+            if refract {
+                quad.flags |= QuadInstance.flagRefract
+            }
         }
         // Painted lip/shade/specular layers OVER the native material rather
         // than standing in for it. Measured on a plain dark wallpaper the
@@ -854,9 +864,10 @@ public final class SceneBuilder {
     /// straight edge instead of a rounded bulge mid-item. nil when the clip
     /// removes the plate entirely.
     static func clippedQuad(
-        _ background: BackgroundStyle, rect: CGRect, scale: CGFloat, clip: CGRect?
+        _ background: BackgroundStyle, rect: CGRect, scale: CGFloat, clip: CGRect?,
+        refract: Bool = false
     ) -> QuadInstance? {
-        var quad = backgroundQuad(background, rect: rect, scale: scale)
+        var quad = backgroundQuad(background, rect: rect, scale: scale, refract: refract)
         guard let clip else { return quad }
         let device = CGRect(x: CGFloat(quad.origin.x), y: CGFloat(quad.origin.y),
                             width: CGFloat(quad.size.x), height: CGFloat(quad.size.y))
@@ -872,6 +883,10 @@ public final class SceneBuilder {
         quad.size = SIMD2(Float(visible.width), Float(visible.height))
         return quad
     }
+
+    /// Set per frame by BarManager: true while a backdrop texture is bound for
+    /// the surface being built, so glass plates carry flagRefract.
+    public var refractBackdrop = false
 
     /// Real Liquid Glass (NSGlassEffectView) exists on macOS 26+: the backdrop
     /// itself refracts, so the shader's painted rim and sheen stay off there.

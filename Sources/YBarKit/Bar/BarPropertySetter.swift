@@ -108,6 +108,17 @@ public enum BarPropertySetter {
             return nil
         case "glass_tint":
             return setColor(manager, \BarManager.settings.glassTint, "glass_tint", rest, value, context)
+        case "refraction":
+            guard let mode = RefractionMode(rawValue: value) else {
+                return "[!] invalid refraction: \(value) (off|auto|screen|wallpaper)"
+            }
+            manager.settings.refraction = mode
+            // Starting or stopping the source is the manager's job: `screen`
+            // is the one value allowed to ask for Screen Recording, and it
+            // must ask HERE, where a person typed it, not at some later
+            // repaint that happens to need a backdrop.
+            manager.applyRefractionMode()
+            return nil
         case "fullscreen_show", "show_in_fullscreen":
             guard let flag = PropertySetter.parseBool(value) else { return "[!] invalid boolean: \(value)" }
             manager.settings.fullscreenShow = flag

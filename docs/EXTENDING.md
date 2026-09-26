@@ -41,6 +41,23 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
   the tint — drop the override so the plate inherits the bar's); the same
   `glass`/`sheen`/`glass_tint` keys exist under `popup.background`. `--query`
   reports all of them, `default` where a plate inherits
+- **Chromatic refraction** — `--bar refraction=off|auto|screen|wallpaper`
+  bends the real backdrop at each glass rim, red riding a touch outside the
+  edge and blue a touch inside. The renderer draws OVER the system material
+  and never reads it, so the backdrop has to come from somewhere: `screen`
+  captures the strip with ScreenCaptureKit (correct over any window, and the
+  only value that can raise the Screen Recording prompt), `wallpaper` reads
+  the desktop picture and steps aside while a window sits under the bar,
+  `auto` takes whichever is already available without ever asking, and `off`
+  (the default) leaves the rim on its own dispersion. What the shader adds is
+  the DIFFERENCE between the bent sample and the straight one, so a flat
+  backdrop contributes exactly nothing and the pill is never tinted by what
+  happens to be behind it. Confined to the rim, because that is the only part
+  of a lozenge that is curved. Costs nothing at rest — frames ScreenCaptureKit
+  marks idle are dropped before any texture work, and the capture is taken at
+  a quarter size (a 1512x44 strip becomes 378x11). `--query bar` reports
+  `refraction_source` and `refraction_active` so a missing grant is visible
+  rather than silent
 - `background.sheen=on` (opt-in) is the painted glass highlight — lip, shade
   and a specular that follows the pointer — for macOS 14/15, where the shader
   is the material. It is damage-driven: one frame per pointer move over a

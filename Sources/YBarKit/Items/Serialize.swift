@@ -79,6 +79,13 @@ public enum Serialize {
             "glass": settings.glass ? "on" : "off",
             "glass_variant": settings.glassVariant.rawValue,
             "glass_tint": hex(settings.glassTint),
+            "refraction": settings.refraction.rawValue,
+            // What the mode actually resolved to, and whether a backdrop is
+            // live. `refraction=screen` with `refraction_source=off` is what a
+            // missing Screen Recording grant looks like from the outside —
+            // without this the feature just silently does nothing.
+            "refraction_source": manager.backdropProvider?.effectiveMode.rawValue ?? "off",
+            "refraction_active": manager.backdropProvider?.texture != nil,
             "hidden": settings.hidden,
             "topmost": settings.level.rawValue,
             "sticky": settings.sticky,

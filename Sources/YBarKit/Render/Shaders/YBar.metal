@@ -45,12 +45,23 @@ struct Hole {
     float3 _pad;
 };
 
+// --bar refraction. The backdrop texture covers this drawable exactly (the
+// capture's sourceRect is the window's own frame), so the sample coordinate
+// is just the fragment position over the viewport.
+struct BackdropParams {
+    float strength;    // device px the rim bends the backdrop by; 0 = disabled
+    float dispersion;  // device px of channel separation on top of the bend
+    float band;        // device px inward from the edge that the lens covers
+    float _pad;
+};
+
 constant uint kQuadFlagGradient = 1u << 0;
 constant uint kQuadFlagGlass    = 1u << 1;
 constant uint kQuadFlagArc      = 1u << 2;
 constant uint kQuadFlagHoles    = 1u << 3;
 constant uint kQuadFlagShadow   = 1u << 4;
 constant uint kQuadFlagSheen    = 1u << 5;
+constant uint kQuadFlagRefract  = 1u << 6;
 constant uint kQuadFlagNativeGlass = 1u << 7;
 constant uint kGlyphFlagColor   = 1u << 0;
 constant uint kGlyphFlagGrey    = 1u << 1;
@@ -122,7 +133,9 @@ static inline float sd_rounded_box(float2 p, float2 halfSize, float4 radii) {
 fragment float4 quad_fragment(
     QuadVOut in [[stage_in]],
     constant Uniforms &uniforms [[buffer(1)]],
-    const device Hole *holes [[buffer(2)]]
+    const device Hole *holes [[buffer(2)]],
+    constant BackdropParams &backdropParams [[buffer(3)]],
+    texture2d<float> backdrop [[texture(0)]]
 ) {
     float d = sd_rounded_box(in.local, in.halfSize, in.radii);
     float aa = max(fwidth(d), 1e-4);
@@ -209,6 +222,43 @@ fragment float4 quad_fragment(
                               band / max(outer, 1e-5),
                               smoothstep(-3.0, -0.8, d - dispersion)) * outer;
         float3 rimLight = shell * 0.30 * keySpec;
+
+        // Chromatic refraction of the real backdrop, when --bar refraction
+        // gave the renderer something to sample.
+        //
+        // What is added is the DIFFERENCE between the bent sample and the
+        // straight one, never the backdrop itself. Three things follow from
+        // that, and all three matter: a flat backdrop contributes exactly
+        // zero, so the pill cannot be tinted by whatever happens to be
+        // behind it; the system material underneath still supplies the body,
+        // because nothing here paints over it; and a backdrop that is out of
+        // date — the wallpaper source while a window slides across the strip
+        // — contributes only its local contrast instead of a wrong colour
+        // wash, which is what makes the cheap source survivable at all.
+        //
+        // The lens is confined to the rim because that is where a real one
+        // bends light: the body of a lozenge is flat and refracts nothing.
+        if ((in.flags & kQuadFlagRefract) != 0u && backdropParams.strength > 0.0) {
+            float lens = smoothstep(-backdropParams.band, 0.0, d) * outer;
+            if (lens > 0.002) {
+                constexpr sampler backdropSampler(
+                    mag_filter::linear, min_filter::linear, address::clamp_to_edge);
+                // One device pixel along the surface normal, in UV.
+                float2 px = n / max(uniforms.viewportSize, float2(1.0));
+                float2 bend  = px * backdropParams.strength * lens;
+                float2 split = px * backdropParams.dispersion * lens;
+                float3 straight = backdrop.sample(backdropSampler, in.position.xy
+                                                  / max(uniforms.viewportSize, float2(1.0))).rgb;
+                float2 uv = in.position.xy / max(uniforms.viewportSize, float2(1.0)) + bend;
+                float3 bent = float3(
+                    backdrop.sample(backdropSampler, uv + split).r,
+                    backdrop.sample(backdropSampler, uv).g,
+                    backdrop.sample(backdropSampler, uv - split).b);
+                // No alpha term: refraction moves light, it does not make the
+                // edge more opaque.
+                rgb = clamp(rgb + (bent - straight) * lens, 0.0, 1.0);
+            }
+        }
 
         // Thickness: a whisper of glow just inside the rim.
         float innerGlow = max((smoothstep(-10.0, -2.5, d) - band), 0.0) * 0.03 * outer;

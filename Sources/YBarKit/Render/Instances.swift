@@ -42,6 +42,12 @@ public struct QuadInstance {
     /// Pre-26 painted lip / shade / pointer specular. Not set when
     /// NSGlassEffectView is the backdrop.
     public static let flagSheen: UInt32 = 1 << 5
+    /// Refract the captured backdrop at this plate's rim (`--bar refraction`).
+    /// Only meaningful when the renderer has a backdrop texture bound; the
+    /// shader checks both, so a stale flag draws nothing rather than sampling
+    /// a texture that is not there. macOS-only, like bit 7 — the Windows port
+    /// leaves bit 6 free (it was flagHot, removed with the pointer specular).
+    public static let flagRefract: UInt32 = 1 << 6
     /// Open-popup trigger: its sheen specular stays lit while the popup is
     /// A system glass backdrop sits under this plate (macOS 26+). The
     /// painted pass then draws the EDGE only — the rim and the pointer
@@ -128,6 +134,31 @@ public struct ShapeVertex {
         self.position = position
         self.color = color
     }
+}
+
+/// Twin of the shader's `BackdropParams` (fragment buffer 3). Pinned by
+/// InstancesTests like every other struct that crosses into Metal.
+public struct BackdropParams: Sendable {
+    /// Device pixels the rim bends the backdrop by. 0 disables the sampling
+    /// outright, which is also what the renderer sets when no texture is bound.
+    public var strength: Float = 0
+    /// Device pixels of per-channel separation on top of the bend.
+    public var dispersion: Float = 0
+    /// Device pixels inward from the edge that the lens reaches.
+    public var band: Float = 0
+    public var _pad: Float = 0
+
+    public init(strength: Float = 0, dispersion: Float = 0, band: Float = 0) {
+        self.strength = strength
+        self.dispersion = dispersion
+        self.band = band
+    }
+
+    /// The tuned profile. Separate from the defaults so the numbers live in
+    /// one place: 2.5px of bend is a visible displacement at a rim that is
+    /// itself ~1.5pt, 1.2px of split colours it without reading as a fringe,
+    /// and a 7px band keeps the lens off the flat body.
+    public static let tuned = BackdropParams(strength: 2.5, dispersion: 1.2, band: 7)
 }
 
 public struct Uniforms {

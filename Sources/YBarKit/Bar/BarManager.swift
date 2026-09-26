@@ -29,6 +29,9 @@ public final class BarManager {
     let displayManager = DisplayManager()
 
     public private(set) var surfaces: [BarSurface] = []
+    /// Backdrop source for `--bar refraction`. Created with the renderer and
+    /// idle until a mode asks for one.
+    public private(set) var backdropProvider: BackdropProvider?
     private var popupSurfaces: [Int: PopupSurface] = [:]
     private var atlases: [CGFloat: GlyphAtlas] = [:]
     private(set) var renderScheduled = false
@@ -103,6 +106,30 @@ public final class BarManager {
         device = metalDevice
         renderer = try Renderer(device: metalDevice)
         sceneBuilder = SceneBuilder(fontCache: fontCache)
+        backdropProvider = BackdropProvider(device: metalDevice)
+    }
+
+    /// Start, stop or re-aim the backdrop source. Called when `--bar
+    /// refraction` changes and whenever the bar's geometry does, because a
+    /// capture is taken for one rect and is wrong for any other.
+    ///
+    /// One display: the provider captures a single strip, so with bars on
+    /// several screens only the one whose frame it holds refracts. The others
+    /// keep the rim's own dispersion, which is a degradation, not a defect.
+    public func applyRefractionMode() {
+        guard let provider = backdropProvider else { return }
+        guard settings.refraction != .off, let surface = surfaces.first else {
+            provider.stop()
+            renderer.backdrop = nil
+            setNeedsRender()
+            return
+        }
+        provider.onFrame = { [weak self] in self?.setNeedsRender() }
+        provider.apply(
+            mode: settings.refraction,
+            rect: surface.panel.frame,
+            scale: surface.screen.backingScaleFactor)
+        setNeedsRender()
     }
 
     public func begin() {
@@ -408,6 +435,7 @@ public final class BarManager {
                 edgeMargin: popupEdgeMargin,
                 fadeInFrames: CGFloat(host.popup.fadeInFrames))
             popupSurface.syncGlassChips(scene.glassChips)
+            renderer.backdrop = nil
             if renderer.render(list: scene.list, layer: popupSurface.hostView.metalLayer, atlas: atlas) {
                 liveHostIDs.insert(host.id)
             } else {
@@ -679,6 +707,14 @@ public final class BarManager {
 
         sceneBuilder.clock = CACurrentMediaTime()
         sceneBuilder.pointer = Self.pointerPixels(in: surface.hostView, scale: scale)
+        // A capture belongs to the rect it was taken for. Comparing the frame
+        // is what keeps a bar that has moved, or a second display's bar, from
+        // refracting somebody else's strip.
+        let backdrop = backdropProvider.flatMap {
+            $0.capturedRect == surface.panel.frame ? $0.texture : nil
+        }
+        renderer.backdrop = backdrop
+        sceneBuilder.refractBackdrop = backdrop != nil
         let list = sceneBuilder.build(
             items: items,
             settings: settings,
@@ -1001,6 +1037,7 @@ public final class BarManager {
         tooltip.present(anchor: anchor, size: built.sizePoints,
                         barPosition: settings.position, yOffset: 4, align: "c",
                         screen: surface.screen, edgeMargin: popupEdgeMargin)
+        renderer.backdrop = nil
         _ = renderer.render(list: built.list, layer: tooltip.hostView.metalLayer, atlas: atlas)
     }
 

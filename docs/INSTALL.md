@@ -169,9 +169,25 @@ script it spawns. Only the features you actually configure ask for anything:
   dialog, so no further grant; the password goes to `networksetup` and
   nowhere else.
 - **Screen Recording** — needed by the `alias` component, which screenshots
-  other apps' menu bar items via ScreenCaptureKit. macOS prompts on first
-  capture; if you dismissed it, grant manually under Privacy & Security →
-  Screen & System Audio Recording, then `ybar restart`.
+  other apps' menu bar items via ScreenCaptureKit, and by
+  `--bar refraction=screen`, which captures the strip behind the bar so the
+  glass rim can refract it. macOS prompts on first capture; if you dismissed
+  it, grant manually under Privacy & Security → Screen & System Audio
+  Recording, then `ybar restart`. Nothing else in YBar asks for it, and
+  `refraction` is `off` by default.
+
+  `refraction=screen` is the only value that can raise the prompt. Because the
+  bar runs as a LaunchAgent with no foreground window, the request registers
+  YBar in that Settings pane rather than showing a sheet — enable it there and
+  restart. Until then the mode falls back to `wallpaper`, and
+  `ybar --query bar` reports which source is actually running:
+
+  ```sh
+  ybar --query bar | jq '{refraction, refraction_source, refraction_active}'
+  # refraction        what you asked for
+  # refraction_source what it resolved to (off|screen|wallpaper)
+  # refraction_active whether a backdrop is live right now
+  ```
 
 ### Keeping permissions across rebuilds
 

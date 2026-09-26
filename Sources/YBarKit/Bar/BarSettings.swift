@@ -42,6 +42,31 @@ public enum FullscreenPolicy: Equatable, Sendable {
     case hide
 }
 
+/// Where the glass rim reads the backdrop it refracts.
+///
+/// Refraction needs a picture of what is behind the bar, and the Metal layer
+/// draws OVER the system material without ever reading it — so the source has
+/// to come from outside the renderer. There are only two, and they trade
+/// accuracy against a permission prompt.
+public enum RefractionMode: String, Sendable, CaseIterable {
+    /// No backdrop sampling. The rim keeps its own per-channel dispersion,
+    /// which needs no source at all. The default: nothing prompts, nothing
+    /// captures.
+    case off
+    /// ScreenCaptureKit, filtered to the bar's own strip with YBar's windows
+    /// excluded. Correct over any window. The ONLY value that can raise the
+    /// Screen Recording prompt — and it raises it because someone typed it.
+    case screen
+    /// The desktop picture, used only while no window sits under the strip.
+    /// No permission, no capture, and a static texture — but it is a lie the
+    /// moment a window reaches the top of the screen, so it steps aside then.
+    case wallpaper
+    /// `screen` when Screen Recording has ALREADY been granted, `wallpaper`
+    /// while the desktop is what is behind, `off` otherwise. Never prompts:
+    /// it takes what is already available and asks for nothing.
+    case auto
+}
+
 /// Global bar configuration (`--bar` domain).
 public struct BarSettings: Sendable {
     public var position: BarPosition = .top
@@ -98,6 +123,8 @@ public struct BarSettings: Sendable {
     public var notchOffset: Float = 0
     /// Bar height override on notched displays; 0 = use `height`.
     public var notchDisplayHeight: Float = 0
+    /// Backdrop source for chromatic refraction at the glass rim.
+    public var refraction: RefractionMode = .off
 
     public init() {}
 

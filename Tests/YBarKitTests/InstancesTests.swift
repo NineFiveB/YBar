@@ -16,6 +16,8 @@ import Testing
         // which is 16-byte aligned on both sides of the buffer.
         #expect(MemoryLayout<HoleInstance>.stride == 48)
         #expect(MemoryLayout<Uniforms>.stride == 24)
+        // Fragment buffer 3, four floats. Its Metal twin is BackdropParams.
+        #expect(MemoryLayout<BackdropParams>.stride == 16)
         #expect(InstanceLayout.mismatch() == nil)
     }
 
@@ -53,8 +55,10 @@ import Testing
     /// The flag bits are ABI too. Bits 0-4 are shared with the Windows port,
     /// which sets the same ones; the higher bits are macOS-only and the port
     /// must not reuse them. Bit 6 held the open-popup highlight that fed the
-    /// pointer-following specular and is free now that the specular is gone;
-    /// bit 7 marks a plate with a system glass backdrop under it.
+    /// pointer-following specular; it was freed when the specular went and is
+    /// now the backdrop lens (`--bar refraction`). Bit 7 marks a plate with a
+    /// system glass backdrop under it. Both are macOS-only — the port leaves
+    /// them clear, which is why they sit at the top of the word.
     @Test func flagBitsMatchThePort() {
         #expect(QuadInstance.flagGradient == 1)
         #expect(QuadInstance.flagGlass == 2)
@@ -62,6 +66,7 @@ import Testing
         #expect(QuadInstance.flagHoles == 8)
         #expect(QuadInstance.flagShadow == 16)
         #expect(QuadInstance.flagSheen == 32)
+        #expect(QuadInstance.flagRefract == 64)
         #expect(QuadInstance.flagNativeGlass == 128)
         #expect(GlyphInstance.flagColorGlyph == 1)
         #expect(GlyphInstance.flagDesaturate == 2)

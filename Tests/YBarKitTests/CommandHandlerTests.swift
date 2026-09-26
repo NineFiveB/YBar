@@ -46,6 +46,21 @@ import Testing
         #expect(bar["glass_tint"] as? String == "0x00000000")
     }
 
+    /// `--bar refraction` round-trips through the socket and shows up in
+    /// `--query bar`, and a bad token is refused by name rather than silently
+    /// turning a capture on.
+    @Test func barRefractionParsesAndQueries() throws {
+        let stack = try makeStack()
+        #expect(try query(stack, "bar")["refraction"] as? String == "off")
+        #expect(stack.handler.handle(arguments: ["--bar", "refraction=wallpaper"]).isEmpty)
+        #expect(stack.barManager.settings.refraction == .wallpaper)
+        #expect(try query(stack, "bar")["refraction"] as? String == "wallpaper")
+
+        let bad = stack.handler.handle(arguments: ["--bar", "refraction=yes"])
+        #expect(bad.contains("invalid refraction"))
+        #expect(stack.barManager.settings.refraction == .wallpaper)
+    }
+
     /// `default` / `off` restore the built-in `clear` at bar level, the same
     /// tokens that drop the per-item override.
     @Test func barGlassVariantAcceptsDefaultAndOff() throws {
