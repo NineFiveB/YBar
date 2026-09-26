@@ -37,11 +37,12 @@ import Testing
         background.cornerRadius = 14
         let rect = CGRect(x: 0, y: 0, width: 60, height: 28)
 
-        let without = SceneBuilder.backgroundQuad(background, rect: rect, scale: 2, refract: false)
+        let builder = HeadlessScene().builder
+        let without = builder.backgroundQuad(background, rect: rect, scale: 2, refract: false)
         #expect(without.flags & QuadInstance.flagGlass != 0)
         #expect(without.flags & QuadInstance.flagRefract == 0)
 
-        let with = SceneBuilder.backgroundQuad(background, rect: rect, scale: 2, refract: true)
+        let with = builder.backgroundQuad(background, rect: rect, scale: 2, refract: true)
         #expect(with.flags & QuadInstance.flagRefract != 0)
     }
 
@@ -52,7 +53,7 @@ import Testing
         background.drawing = true
         background.glass = false
         background.color = YColor(argb: 0xFF20_2020)
-        let quad = SceneBuilder.backgroundQuad(
+        let quad = HeadlessScene().builder.backgroundQuad(
             background, rect: CGRect(x: 0, y: 0, width: 40, height: 20),
             scale: 2, refract: true)
         #expect(quad.flags & QuadInstance.flagRefract == 0)

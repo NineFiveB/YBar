@@ -17,6 +17,19 @@ public final class SceneBuilder {
     public var clock: CFTimeInterval = 0
     /// Cursor in the surface being built, pixels, top-left y-down.
     public var pointer = SIMD2<Float>(repeating: -1e6)
+    /// Items with a property animation in flight, refreshed from the
+    /// scheduler every frame (set by the render loop). Derived, never
+    /// maintained: a retarget or a cancel is reflected the next frame by
+    /// construction, so it cannot drift out of step with what is moving.
+    public var animatingItems: Set<Int> = []
+    /// Whether the quads being emitted right now land on whole device pixels.
+    /// A still pill snaps, so its edge is as crisp as the panel allows. A
+    /// pill that is mid-animation does not: snapping quantizes its travel to
+    /// the pixel grid, which is why a 3 pt hover lift showed the same handful
+    /// of pictures whether the panel refreshed 60 or 120 times a second. The
+    /// quad is an SDF, so a fractional edge is antialiased analytically
+    /// rather than resampled — the softness lasts only while it moves.
+    private var snapQuads = true
 
     public init(fontCache: FontCache) {
         self.fontCache = fontCache
@@ -63,8 +76,8 @@ public final class SceneBuilder {
             let rect = SceneBuilder.backgroundRect(
                 item: item, contentBox: contentBox, contentHeight: contentHeight)
             list.holes.append(HoleInstance(
-                origin: SceneBuilder.pixelOrigin(rect, scale: scale),
-                size: SceneBuilder.pixelSize(rect, scale: scale),
+                origin: quadOrigin(rect, scale: scale),
+                size: quadSize(rect, scale: scale),
                 radius: item.background.cornerRadius * Float(scale),
                 _pad: SIMD3(repeating: 0)))
         }
@@ -212,6 +225,8 @@ public final class SceneBuilder {
         atlas: GlyphAtlas,
         into list: inout DisplayList
     ) {
+        snapQuads = !animatingItems.contains(item.id)
+        defer { snapQuads = true }
         let iconSize = fontCache.measure(part: item.icon)
         let labelSize = fontCache.measure(part: item.label)
         let contentHeight = max(iconSize.height, labelSize.height)
@@ -512,8 +527,8 @@ public final class SceneBuilder {
             let y = yFor(fraction: fraction)
             let line = CGRect(x: boxPoints.minX, y: y - 0.5, width: boxPoints.width, height: 1)
             list.quads.append(QuadInstance(
-                origin: SceneBuilder.pixelOrigin(line, scale: scale),
-                size: SceneBuilder.pixelSize(line, scale: scale),
+                origin: quadOrigin(line, scale: scale),
+                size: quadSize(line, scale: scale),
                 radii: .zero,
                 fill: SIMD4(1, 1, 1, fraction == 0 ? 0.16 : 0.12)))
         }
@@ -523,8 +538,8 @@ public final class SceneBuilder {
                 let x = boxPoints.minX + CGFloat(index) * stride
                 let line = CGRect(x: x, y: boxPoints.minY, width: 1, height: plotHeight)
                 list.quads.append(QuadInstance(
-                    origin: SceneBuilder.pixelOrigin(line, scale: scale),
-                    size: SceneBuilder.pixelSize(line, scale: scale),
+                    origin: quadOrigin(line, scale: scale),
+                    size: quadSize(line, scale: scale),
                     radii: .zero,
                     fill: SIMD4(1, 1, 1, 0.08)))
             }
@@ -546,8 +561,8 @@ public final class SceneBuilder {
                 height: barHeight)
             let fill = emphasized ? brighten(color, amount: emphasis) : color
             list.quads.append(QuadInstance(
-                origin: SceneBuilder.pixelOrigin(bar, scale: scale),
-                size: SceneBuilder.pixelSize(bar, scale: scale),
+                origin: quadOrigin(bar, scale: scale),
+                size: quadSize(bar, scale: scale),
                 radii: SIMD4(Float(2 * scale), Float(2 * scale), 0, 0),
                 fill: fill))
         }
@@ -562,8 +577,8 @@ public final class SceneBuilder {
                 width: barWidth,
                 height: 5)
             list.quads.append(QuadInstance(
-                origin: SceneBuilder.pixelOrigin(mark, scale: scale),
-                size: SceneBuilder.pixelSize(mark, scale: scale),
+                origin: quadOrigin(mark, scale: scale),
+                size: quadSize(mark, scale: scale),
                 radii: SIMD4(repeating: Float(1 * scale)),
                 fill: color))
         }
@@ -576,8 +591,8 @@ public final class SceneBuilder {
                 let x = boxPoints.minX + CGFloat(index) * stride + (stride - barWidth) / 2
                 let stub = CGRect(x: x, y: plotBottom, width: barWidth, height: stubHeight)
                 list.quads.append(QuadInstance(
-                    origin: SceneBuilder.pixelOrigin(stub, scale: scale),
-                    size: SceneBuilder.pixelSize(stub, scale: scale),
+                    origin: quadOrigin(stub, scale: scale),
+                    size: quadSize(stub, scale: scale),
                     radii: SIMD4(0, 0, Float(2 * scale), Float(2 * scale)),
                     fill: emphasized ? brighten(chargeColor, amount: emphasis) : chargeColor))
             }
@@ -674,8 +689,8 @@ public final class SceneBuilder {
         let size = CGFloat(gauge.diameter)
         let rect = CGRect(x: penX, y: centerY - size / 2, width: size, height: size)
         var quad = QuadInstance(
-            origin: SceneBuilder.pixelOrigin(rect, scale: scale),
-            size: SceneBuilder.pixelSize(rect, scale: scale),
+            origin: quadOrigin(rect, scale: scale),
+            size: quadSize(rect, scale: scale),
             radii: SIMD4(repeating: Float(size / 2) * Float(scale)),
             fill: gauge.trackColor.simd,
             borderWidth: gauge.thickness * Float(scale),
@@ -721,8 +736,8 @@ public final class SceneBuilder {
                                        width: max(inner.width * fraction, 0), height: inner.height)
                 let fillRadius = max(0, slider.background.cornerRadius - Float(inset))
                 list.quads.append(QuadInstance(
-                    origin: SceneBuilder.pixelOrigin(highlight, scale: scale),
-                    size: SceneBuilder.pixelSize(highlight, scale: scale),
+                    origin: quadOrigin(highlight, scale: scale),
+                    size: quadSize(highlight, scale: scale),
                     radii: SIMD4(repeating: fillRadius * Float(scale)),
                     fill: slider.highlightColor.simd))
             }
@@ -757,8 +772,8 @@ public final class SceneBuilder {
             let offset = background.shadow.offset
             let shadowRect = rect.offsetBy(dx: offset.width, dy: -offset.height)
             var shadow = QuadInstance(
-                origin: SceneBuilder.pixelOrigin(shadowRect, scale: scale),
-                size: SceneBuilder.pixelSize(shadowRect, scale: scale),
+                origin: quadOrigin(shadowRect, scale: scale),
+                size: quadSize(shadowRect, scale: scale),
                 radii: radii,
                 fill: background.shadow.color.simd)
             // shadow.blur > 0 turns the hard offset copy into a falloff. The
@@ -781,7 +796,7 @@ public final class SceneBuilder {
             list.quads.append(shadow)
         }
 
-        list.quads.append(SceneBuilder.backgroundQuad(
+        list.quads.append(backgroundQuad(
             background, rect: rect, scale: scale, refract: refractBackdrop))
         if background.sheen { list.hasSheen = true }
 
@@ -811,14 +826,16 @@ public final class SceneBuilder {
 
     /// The plate quad of a background style (fill, border, gradient, glass),
     /// shared by emitBackground and the per-part plates emitText draws.
-    /// `refract` is the frame's state, not the item's, so it arrives as an
-    /// argument: this is a static helper and cannot read the builder.
-    static func backgroundQuad(
+    /// `refract` is the frame's state, not the item's, and stays an explicit
+    /// argument rather than a read of `refractBackdrop`: the call sites say
+    /// what they are asking for, and a test can pin the flag without standing
+    /// up a builder.
+    func backgroundQuad(
         _ background: BackgroundStyle, rect: CGRect, scale: CGFloat, refract: Bool = false
     ) -> QuadInstance {
         var quad = QuadInstance(
-            origin: pixelOrigin(rect, scale: scale),
-            size: pixelSize(rect, scale: scale),
+            origin: quadOrigin(rect, scale: scale),
+            size: quadSize(rect, scale: scale),
             radii: SIMD4(repeating: background.cornerRadius * Float(scale)),
             fill: background.color.simd,
             borderWidth: background.borderWidth * Float(scale),
@@ -826,7 +843,7 @@ public final class SceneBuilder {
             borderColor: background.borderColor.simd)
         if let gradient = background.gradientColor {
             quad.fill2 = gradient.simd
-            quad.gradientDir = gradientDirection(angleDegrees: background.gradientAngle)
+            quad.gradientDir = Self.gradientDirection(angleDegrees: background.gradientAngle)
             quad.flags |= QuadInstance.flagGradient
         }
         if background.glass {
@@ -850,7 +867,7 @@ public final class SceneBuilder {
         // with no fill gets no NSGlassEffectView, so the flag must not claim
         // one is there.
         if background.glass, background.drawing, background.color.alpha > 0.02,
-           nativeGlassBackdrops {
+           Self.nativeGlassBackdrops {
             quad.flags |= QuadInstance.flagNativeGlass
         }
         return quad
@@ -863,7 +880,7 @@ public final class SceneBuilder {
     /// the radius of every corner sitting on a cut edge so the cut reads as a
     /// straight edge instead of a rounded bulge mid-item. nil when the clip
     /// removes the plate entirely.
-    static func clippedQuad(
+    func clippedQuad(
         _ background: BackgroundStyle, rect: CGRect, scale: CGFloat, clip: CGRect?,
         refract: Bool = false
     ) -> QuadInstance? {
@@ -1011,7 +1028,7 @@ public final class SceneBuilder {
             // sized from can overflow a narrower slot (label.width=N below the
             // text, a marquee) or a fixed-width item, and an unclipped quad
             // would paint that overflow over its neighbours.
-            if let quad = SceneBuilder.clippedQuad(
+            if let quad = clippedQuad(
                 part.background, rect: plate, scale: scale, clip: clip) {
                 list.quads.append(quad)
                 if part.background.sheen {
@@ -1087,9 +1104,21 @@ public final class SceneBuilder {
                     // measurement's rounding slack split evenly — otherwise up
                     // to 1.5pt of slack pools on the right and single glyphs
                     // (the apple symbol) sit visibly left of center.
-                    let glyphPenX = ((penX + passOffset + positions[index].x
-                                      - shaped.inkMinX + roundingSlack)
-                                     * scale).rounded()
+                    let penDevice = (penX + passOffset + positions[index].x
+                                     - shaped.inkMinX + roundingSlack) * scale
+                    // Static text snaps to whole device pixels: stem widths
+                    // stay even and the glyph is as crisp as the rasterizer
+                    // made it. Marquee text is moving every frame, and there
+                    // snapping is what the eye reads as judder — at a default
+                    // scroll_duration the advance is ~2.2 device px per frame
+                    // on a 120 Hz panel, so rounding alternates 2,2,3 and the
+                    // text visibly changes speed twice a cycle. Placing the
+                    // moving copy at its true sub-pixel pen costs nothing: the
+                    // glyph's atlas cell is padded (`GlyphAtlas.padding`), so
+                    // linear sampling at a fractional origin stays inside its
+                    // own transparent border, and the crispness that is lost
+                    // is only lost while the text is in motion.
+                    let glyphPenX = marqueeCycle > 0 ? penDevice : penDevice.rounded()
                     placements.append((entry, SIMD2(Float(glyphPenX) + entry.bearingPx.x,
                                                     Float(baselinePx) + entry.bearingPx.y)))
                 }
@@ -1221,8 +1250,29 @@ public final class SceneBuilder {
         SIMD2(Float((rect.minX * scale).rounded()), Float((rect.minY * scale).rounded()))
     }
 
+    /// Size from the rounded EDGES, not the rounded extent. Rounding origin
+    /// and extent independently lets them disagree — `round(x·s) + round(w·s)`
+    /// is not `round((x+w)·s)` — so a pill sliding a whole number of points
+    /// breathed by a pixel on the frames where the two disagreed. Every call
+    /// site pairs this with `pixelOrigin` on the same rect, so the far edge
+    /// now lands exactly where the next item's near edge does.
+    /// Quad placement for the item being emitted: snapped while it is still,
+    /// true-valued while it is animating (see `snapQuads`).
+    func quadOrigin(_ rect: CGRect, scale: CGFloat) -> SIMD2<Float> {
+        snapQuads
+            ? SceneBuilder.pixelOrigin(rect, scale: scale)
+            : SIMD2(Float(rect.minX * scale), Float(rect.minY * scale))
+    }
+
+    func quadSize(_ rect: CGRect, scale: CGFloat) -> SIMD2<Float> {
+        snapQuads
+            ? SceneBuilder.pixelSize(rect, scale: scale)
+            : SIMD2(Float(rect.width * scale), Float(rect.height * scale))
+    }
+
     static func pixelSize(_ rect: CGRect, scale: CGFloat) -> SIMD2<Float> {
-        SIMD2(Float((rect.width * scale).rounded()), Float((rect.height * scale).rounded()))
+        SIMD2(Float((rect.maxX * scale).rounded() - (rect.minX * scale).rounded()),
+              Float((rect.maxY * scale).rounded() - (rect.minY * scale).rounded()))
     }
 
     static func gradientDirection(angleDegrees: Float) -> SIMD2<Float> {
