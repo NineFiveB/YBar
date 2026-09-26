@@ -23,8 +23,22 @@ local max_hotspots = 3
 -- own plate, drawn taller than the row pitch so consecutive ones overlap and
 -- only the group's outer corners are left showing.
 local frame_row = 34
-local frame_plate = frame_row + 4
+-- One point shorter than the row, so consecutive plates leave a 1pt line of
+-- popup between them: that gap IS the divider. Overlapping them instead does
+-- not work — the fill is a translucent wash, so an overlap reads as a darker
+-- seam rather than one surface.
+local frame_plate = frame_row - 1
 local frame_radius = 12
+
+-- Corners are rounded only on the group's outside, which is what makes a run
+-- of rows read as one card. Order is top-left, top-right, bottom-right,
+-- bottom-left.
+local function frame_radii(pos, count)
+  if not pos or count <= 1 then return frame_radius end
+  if pos == 1 then return frame_radius .. "," .. frame_radius .. ",0,0" end
+  if pos == count then return "0,0," .. frame_radius .. "," .. frame_radius end
+  return "0,0,0,0"
+end
 local disconnect_red = 0xccff453a
 
 local wifi = sbar.add("item", "widgets.wifi", {
@@ -275,17 +289,17 @@ end
 -- The plate belongs to the row's name item but has to cover the whole row,
 -- so it reaches right over the lock and fan columns. background.padding_right
 -- grows a plate rightwards the same way padding_left grows it left.
-local function frame_plate_for(tail_width)
+local function frame_plate_for(tail_width, pos, count)
   return {
     color = colors.selection,
     height = frame_plate,
-    corner_radius = frame_radius,
+    corner_radius = frame_radii(pos, count),
     drawing = true,
     padding_right = tail_width,
   }
 end
 
-local function paint_network(row, net)
+local function paint_network(row, net, pos, count)
   if not net then
     row.name:set({ drawing = false, width = 0, padding_left = 0 })
     row.button:set({ drawing = false, width = 0 })
@@ -313,7 +327,7 @@ local function paint_network(row, net)
       width = name_w + button_w,
       padding_left = edge,
       padding_right = 0,
-      background = frame_plate_for(lock_w + tail),
+      background = frame_plate_for(lock_w + tail, pos, count),
       icon = {
         drawing = true,
         string = title,
@@ -339,7 +353,8 @@ local function paint_network(row, net)
       width = name_w,
       padding_left = edge,
       padding_right = 0,
-      background = frame_plate_for(lock_w + tail + (button_on and (button_w + gap) or 0)),
+      background = frame_plate_for(
+        lock_w + tail + (button_on and (button_w + gap) or 0), pos, count),
       icon = {
         drawing = true,
         string = title,
@@ -435,14 +450,22 @@ local function paint()
       color = is_connected and colors.connected or colors.grey,
     },
   })
+  -- Hotspots and the joined network are one card; the scan results are
+  -- another. Position within the card decides which corners round.
+  local top_count = #hotspot_list + #known_list
+  local top_pos = 0
   for i, row in ipairs(hotspot_rows) do
-    paint_network(row, hotspot_list[i])
+    local net = hotspot_list[i]
+    if net then top_pos = top_pos + 1 end
+    paint_network(row, net, net and top_pos or nil, top_count)
   end
   for i, row in ipairs(known_rows) do
-    paint_network(row, known_list[i])
+    local net = known_list[i]
+    if net then top_pos = top_pos + 1 end
+    paint_network(row, net, net and top_pos or nil, top_count)
   end
   for i, row in ipairs(other_rows) do
-    paint_network(row, other_list[i])
+    paint_network(row, other_list[i], other_list[i] and i or nil, #other_list)
   end
   if scan_running then
     scan_label:set({ drawing = true, icon = { string = "Other networks" } })

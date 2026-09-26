@@ -642,6 +642,24 @@ public enum PropertySetter {
             return setFloat(item, base.appending(path: \BackgroundStyle.borderWidth),
                             "\(prefix).border_width", value, ctx)
         case "corner_radius":
+            // One value rounds all four corners, the historical form. Four
+            // (top-left, top-right, bottom-right, bottom-left) round them
+            // individually, which is what lets a run of rows read as one card
+            // instead of a stack of separate pills.
+            if value.contains(",") {
+                let parts = value.split(separator: ",").map {
+                    Float($0.trimmingCharacters(in: .whitespaces))
+                }
+                guard parts.count == 4, !parts.contains(where: { $0 == nil || !$0!.isFinite })
+                else { return "[!] invalid \(prefix).corner_radius: \(value) (N or TL,TR,BR,BL)" }
+                let radii = SIMD4<Float>(parts[0]!, parts[1]!, parts[2]!, parts[3]!)
+                item[keyPath: base.appending(path: \BackgroundStyle.cornerRadii)] = radii
+                // Keep the scalar meaningful for anything that still reads it.
+                item[keyPath: base.appending(path: \BackgroundStyle.cornerRadius)] = radii.max()
+                ctx.invalidate()
+                return nil
+            }
+            item[keyPath: base.appending(path: \BackgroundStyle.cornerRadii)] = nil
             return setFloat(item, base.appending(path: \BackgroundStyle.cornerRadius),
                             "\(prefix).corner_radius", value, ctx)
         case "height":

@@ -836,7 +836,8 @@ public final class SceneBuilder {
         var quad = QuadInstance(
             origin: quadOrigin(rect, scale: scale),
             size: quadSize(rect, scale: scale),
-            radii: SIMD4(repeating: background.cornerRadius * Float(scale)),
+            radii: (background.cornerRadii ?? SIMD4(repeating: background.cornerRadius))
+                * Float(scale),
             fill: background.color.simd,
             borderWidth: background.borderWidth * Float(scale),
             cornerExponent: background.cornerExponent,

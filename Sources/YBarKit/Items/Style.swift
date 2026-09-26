@@ -119,6 +119,13 @@ public struct BackgroundStyle: Equatable, Sendable {
     public var borderColor: YColor = .clear
     public var borderWidth: Float = 0
     public var cornerRadius: Float = 0
+    /// Per-corner override (top-left, top-right, bottom-right, bottom-left),
+    /// set by `corner_radius=TL,TR,BR,BL`. Nil means all four take
+    /// `cornerRadius`. It exists so a stack of rows can read as ONE card:
+    /// square the corners where rows meet and round only the group's outside.
+    /// QuadInstance has carried per-corner radii all along — only the property
+    /// was scalar.
+    public var cornerRadii: SIMD4<Float>?
     /// Superellipse exponent: 2 = circular corners, ~4.5 ≈ Apple continuous ("squircle").
     public var cornerExponent: Float = 2
     /// Liquid-glass material: specular top rim + vertical sheen in-shader,

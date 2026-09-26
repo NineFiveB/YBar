@@ -46,6 +46,38 @@ import Testing
         #expect(bar["glass_tint"] as? String == "0x00000000")
     }
 
+    /// corner_radius takes one value or four. Four is what lets a run of popup
+    /// rows read as one card: square where rows meet, round on the outside.
+    @Test func cornerRadiusTakesOneValueOrFour() throws {
+        let stack = try makeStack()
+        _ = stack.handler.handle(arguments: ["--add", "item", "card", "left"])
+        func card() throws -> Item {
+            try #require(stack.barManager.store.items.first { $0.name == "card" })
+        }
+
+        #expect(stack.handler.handle(
+            arguments: ["--set", "card", "background.corner_radius=8"]).isEmpty)
+        #expect(try card().background.cornerRadii == nil)
+        #expect(try card().background.cornerRadius == 8)
+
+        #expect(stack.handler.handle(
+            arguments: ["--set", "card", "background.corner_radius=12,12,0,0"]).isEmpty)
+        let radii = try #require(try card().background.cornerRadii)
+        #expect(radii == SIMD4<Float>(12, 12, 0, 0))
+        // The scalar stays meaningful for anything still reading it.
+        #expect(try card().background.cornerRadius == 12)
+
+        // Going back to one value drops the override, or a row that became a
+        // middle would keep its squared corners forever.
+        #expect(stack.handler.handle(
+            arguments: ["--set", "card", "background.corner_radius=6"]).isEmpty)
+        #expect(try card().background.cornerRadii == nil)
+
+        let bad = stack.handler.handle(
+            arguments: ["--set", "card", "background.corner_radius=12,0"])
+        #expect(bad.contains("corner_radius"))
+    }
+
     /// `--bar refraction` round-trips through the socket and shows up in
     /// `--query bar`, and a bad token is refused by name rather than silently
     /// turning a capture on.
