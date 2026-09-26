@@ -260,8 +260,65 @@ series.ram.graph = add_history("ram", false)
 local function ago(seconds)
   if seconds < 10 then return "now" end
   if seconds < 90 then return string.format("%ds ago", seconds) end
-  return string.format("%dm ago", math.floor(seconds / 60 + 0.5))
+  -- Restored history can be hours old, and reading "214m ago" is worse than
+  -- not knowing.
+  if seconds < 5400 then return string.format("%dm ago", math.floor(seconds / 60 + 0.5)) end
+  return string.format("%.1fh ago", seconds / 3600)
 end
+
+-- ── Persistence ────────────────────────────────────────────────────────────
+-- The series survive a restart. Samples arrive every 2s, so a fresh start
+-- means a chart that says nothing for two minutes and has no memory of the
+-- spike you restarted to look at. Every sample keeps its own timestamp, so a
+-- gap is never drawn as continuous — the scrub says how old each bar is, and
+-- `ago` now reaches into hours for exactly this.
+local history_file = os.getenv("HOME") .. "/.cache/ybar-monitor-history"
+
+local function save_history()
+  os.execute("mkdir -p '" .. os.getenv("HOME") .. "/.cache'")
+  local f = io.open(history_file, "w")
+  if not f then return end
+  for key, entry in pairs(series) do
+    for i = 1, history_buckets do
+      local value, when = entry.values[i], entry.times[i]
+      if value and when then
+        f:write(key, "\t", i, "\t", value, "\t", when, "\n")
+      end
+    end
+  end
+  f:close()
+end
+
+local function load_history()
+  local f = io.open(history_file, "r")
+  if not f then return end
+  for line in f:lines() do
+    local key, index, value, when = line:match("^(%a+)\t(%d+)\t([%d%.]+)\t(%d+)$")
+    local entry = key and series[key]
+    if entry then
+      local i = tonumber(index)
+      if i and i >= 1 and i <= history_buckets then
+        entry.values[i] = tonumber(value)
+        entry.times[i] = tonumber(when)
+      end
+    end
+  end
+  f:close()
+  -- Replay each buffer into its graph in one push so the bars are there on
+  -- the first open rather than filling in from the right.
+  for _, entry in pairs(series) do
+    local replay = {}
+    for i = 1, history_buckets do
+      replay[i] = math.max(0, math.min(1, (entry.values[i] or 0) / 100))
+    end
+    entry.graph:push(replay)
+  end
+end
+
+-- Written on a cadence rather than per sample: 192 lines every 2s is a lot of
+-- churn for data nobody is reading. 30 samples is about a minute.
+local SAVE_EVERY = 30
+local since_save = 0
 
 local function record(key, value)
   local entry = series[key]
@@ -271,6 +328,11 @@ local function record(key, value)
   entry.values[history_buckets] = value
   entry.times[history_buckets] = os.time()
   entry.graph:push({ math.max(0, math.min(1, value / 100)) })
+  since_save = since_save + 1
+  if since_save >= SAVE_EVERY then
+    since_save = 0
+    save_history()
+  end
 end
 
 local function paint_tabs()
@@ -347,6 +409,7 @@ local function fit_tabs(with_gpu)
 end
 fit_tabs(false)
 paint_tabs()
+load_history()
 
 local footer = sbar.add("item", "widgets.cpu.footer", {
   position = popup_pos,
@@ -512,6 +575,10 @@ for _, item in ipairs({ header, mem_card, cpu_card, gpu_card }) do
   item:subscribe("mouse.clicked", open_activity_monitor)
 end
 hover.row(header, { height = 22, radius = 6, flat = true })
+
+-- Sleep is the one shutdown we get told about; without this the last
+-- minute of samples is lost on every lid close.
+cpu:subscribe("system_will_sleep", save_history)
 
 cpu:subscribe("mouse.clicked", toggle_popup)
 cpu:subscribe("mouse.exited.global", hide_popup)

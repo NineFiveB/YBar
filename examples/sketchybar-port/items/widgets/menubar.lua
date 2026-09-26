@@ -22,6 +22,14 @@ local hover = require("helpers.hover")
 local MAX_SLOTS = 12
 local slot_w = 22
 local slot_gap = 4
+-- The chevron's glyph sits 8pt off the capsule's right rim. Padding on the
+-- leftmost slot cannot answer that: a bracket sizes to its members' content,
+-- so the plate ignores it and the first icon still lands on the rim. The
+-- PLATE takes the inset instead — background.padding_left grows it leftwards
+-- — and only while the strip is open, or the collapsed pill goes lopsided.
+-- The slot carries half a gap of its own, so the plate only owes the
+-- difference.
+local tray_edge = 8 - slot_gap / 2
 
 local helper = (PORT_DIR or (os.getenv("HOME") .. "/.config/ybar"))
   .. "/helpers/bin/statusitems"
@@ -191,6 +199,7 @@ end
 local function set_expanded(open)
   expanded = open
   chevron:set({ icon = { string = open and "›" or "‹" } })
+  bracket:set({ background = { padding_left = open and tray_edge or 0 } })
   if open then
     collapse_seq = collapse_seq + 1   -- cancel a pending retire
     for i, slot in ipairs(slots) do
