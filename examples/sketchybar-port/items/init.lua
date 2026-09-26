@@ -1,4 +1,7 @@
-require("items.apple")
+-- ysuite-liquid has no Apple pill: its strip opens on the workspace row, and
+-- the replica Apple menu duplicates a menu the system already puts one
+-- keystroke away. The port and the glass themes keep it.
+if not YSUITE_LIQUID then require("items.apple") end
 require("items.menus")
 
 -- Workspace pills: pick the adapter for the installed window manager.
