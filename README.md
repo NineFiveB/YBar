@@ -8,13 +8,13 @@
 
 It does nothing at rest. Your config is Lua running inside it. A sketchybar config ports over with the same commands.
 
-![YBar in use: AeroSpace workspace pills, then the app menus opening in the bar](docs/media/ybar-demo.gif?v=20260922)
+![YBar in use: the front app's menus swapping in over the workspace pills, then AeroSpace workspace switches](docs/media/ybar-demo.gif?v=20260925)
 
-*The `ysuite-liquid` theme on macOS: AeroSpace workspace pills, then the app menus opening in the bar and folding back. The stock menu bar is hidden underneath. (The menu swap is an opt-in helper built from a source checkout with `make helpers`; Homebrew does not ship it.)*
+*The `ysuite-liquid` theme on macOS: the front app's menus swapping in over the workspace row and folding back, then AeroSpace switches — pills revealing, app icons settling, the selection moving across. The stock menu bar is hidden underneath. (The menu swap is an opt-in helper built from a source checkout with `make helpers`; Homebrew does not ship it.)*
 
-![Calendar, system monitor, battery, Wi-Fi and Bluetooth popups on Liquid Glass](docs/media/ybar-popups.gif?v=20260922)
+![Calendar, system monitor, battery, Wi-Fi, Bluetooth and background-item popups on Liquid Glass](docs/media/ybar-popups.gif?v=20260925)
 
-*Five popups, all real glass: calendar, system monitor, battery, Wi-Fi and Bluetooth. Network and device names in this recording are placeholders.*
+*Six popups, all real glass: a calendar with today marked and the hovered day read out, the system monitor with its load history, battery with charge history and a range switch, Wi-Fi, Bluetooth with per-device icons, and the background items the stock menu bar would show. Network, device and app names in this recording are placeholders.*
 
 ## Twenty seconds to a live bar
 

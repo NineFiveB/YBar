@@ -31,6 +31,7 @@ log() { printf '[gif] %s\n' "$*"; }
 # GIF shows what a viewer would be doing. swiftc ships with the Command Line
 # Tools; without it the pointer segments are skipped and the popups still open.
 POINTER=""
+POINTER_DRIVES=0
 if command -v swiftc >/dev/null 2>&1; then
   cat > "$WORK/pointer.swift" <<'SWIFT'
 import CoreGraphics
@@ -54,12 +55,44 @@ SWIFT
 fi
 [ -n "$POINTER" ] || log "swiftc not found: recording popups without the pointer segments"
 
+# Having the binary is not the same as being able to drive. Posting a CGEvent
+# needs Accessibility for this process; without it CGWarpMouseCursorPosition
+# still moves the cursor, so the pointer LOOKS alive while every click and
+# every hover is dropped on the floor — which records a bar nothing ever
+# happens to. So prove it on a real popup before trusting it.
+pointer_drives() {
+  [ -n "$POINTER" ] || return 1
+  local x=$1 y=$2 state
+  $Y --set calendar.bracket popup.drawing=off >/dev/null 2>&1
+  "$POINTER" "$x" "$y" click
+  sleep 1.0
+  state=$($Y --query calendar.bracket 2>/dev/null \
+    | python3 -c 'import sys,json; print(json.load(sys.stdin)["popup"]["drawing"])' 2>/dev/null)
+  $Y --set calendar.bracket popup.drawing=off >/dev/null 2>&1
+  [ "$state" = "on" ]
+}
+
+# Opens a popup the best way available: a real click when the pointer drives,
+# the socket otherwise. The socket path loses the hover readouts and the
+# chart scrubs — those exist only as pointer events — but still shows every
+# popup and every animation.
+open_popup() {
+  local bracket=$1 x=$2 y=$3
+  if [ "$POINTER_DRIVES" = 1 ]; then
+    tap "$x" "$y"
+  else
+    $Y --set "$bracket" popup.drawing=on
+  fi
+}
+
+# at() only WARPS, which CGWarpMouseCursorPosition does without any grant, so
+# parking the cursor out of frame keeps working even when driving does not.
 at()  { [ -n "$POINTER" ] && "$POINTER" "$1" "$2" || true; }
-tap() { [ -n "$POINTER" ] && "$POINTER" "$1" "$2" click || true; }
+tap() { [ "$POINTER_DRIVES" = 1 ] && "$POINTER" "$1" "$2" click || true; }
 # A cursor that teleports reads as a glitch; step it so the eye can follow.
 glide() {
   local x1=$1 y1=$2 x2=$3 y2=$4 steps=${5:-14} pause=${6:-0.03} i
-  [ -n "$POINTER" ] || return 0
+  [ "$POINTER_DRIVES" = 1 ] || return 0
   for i in $(seq 1 "$steps"); do
     at $(( x1 + (x2 - x1) * i / steps )) $(( y1 + (y2 - y1) * i / steps ))
     sleep "$pause"
@@ -254,13 +287,31 @@ CPU_CARD_Y=106; CPU_CARD2_Y=166                 # Memory, CPU
 CPU_PLOT_Y=395; CPU_PLOT_L=$(( CPU_X - 140 )); CPU_PLOT_R=$(( CPU_X + 105 ))
 BATT_PLOT_Y=430; BATT_PLOT_L=$(( CAL_R - 410 )); BATT_PLOT_R=$(( CAL_R - 55 ))
 BATT_TAB_Y=218; BATT_TAB_10D=$(( CAL_R - 110 ))
-PARK_X=760; PARK_Y=520                          # off the bar, so popups settle
+
+# Twice, because one success proves nothing here: posting CGEvents from a
+# terminal is intermittent in practice — measured on this machine, a probe
+# passed and every click in the recording that followed was dropped, which
+# produces a flawless-looking run of a bar nothing happens to. A capability
+# that cannot manage two in a row is not one to build a recording on.
+# YBAR_GIF_NO_POINTER=1 skips the attempt entirely.
+if [ -n "${YBAR_GIF_NO_POINTER:-}" ]; then
+  log "pointer disabled by YBAR_GIF_NO_POINTER: popups only"
+elif pointer_drives "$CAL_X" "$CAL_Y" && pointer_drives "$CAL_X" "$CAL_Y"; then
+  POINTER_DRIVES=1
+  log "pointer drives the bar: recording hover, scrub and paging"
+else
+  log "pointer events are not reaching the bar (Accessibility?): popups only"
+fi
+# Out of frame either way, and outside both crops: a cursor parked over a pill
+# it cannot light reads as a stray arrow in the recording.
+PARK_X=40; PARK_Y=940
+at "$PARK_X" "$PARK_Y"
 
 (
   sleep 0.4
   # Calendar: open it, read three days off the grid, page a month forward and
   # back. Every one of those is a pointer interaction.
-  tap "$CAL_X" "$CAL_Y"
+  open_popup calendar.bracket "$CAL_X" "$CAL_Y"
   sleep 1.0
   glide "$CAL_X" "$CAL_Y" "$(cal_col 3)" "$(cal_row 2)" 10 0.025
   sleep 0.6
@@ -279,7 +330,7 @@ PARK_X=760; PARK_Y=520                          # off the bar, so popups settle
   # System monitor: the cards lift under the pointer, then the load history
   # is scrubbed — each bar reports its age and its load.
   sleep 0.3
-  tap "$CPU_X" "$CPU_Y"
+  open_popup widgets.cpu.bracket "$CPU_X" "$CPU_Y"
   sleep 0.9
   glide "$CPU_X" "$CPU_Y" "$CPU_X" "$CPU_CARD_Y" 10 0.03
   sleep 0.7
@@ -292,7 +343,7 @@ PARK_X=760; PARK_Y=520                          # off the bar, so popups settle
 
   # Battery: the charge history scrubs the same way, then the range switches.
   sleep 0.3
-  tap "$BATT_X" "$BATT_Y"
+  open_popup widgets.battery.bracket "$BATT_X" "$BATT_Y"
   sleep 1.0
   glide "$BATT_X" "$BATT_Y" "$BATT_PLOT_L" "$BATT_PLOT_Y" 12 0.03
   glide "$BATT_PLOT_L" "$BATT_PLOT_Y" "$BATT_PLOT_R" "$BATT_PLOT_Y" 18 0.05
@@ -321,7 +372,9 @@ PARK_X=760; PARK_Y=520                          # off the bar, so popups settle
   close_popups
 ) &
 SEQ=$!
-record_seconds 24 "$WORK/popups.mov"
+POPUP_SECONDS=24
+[ "$POINTER_DRIVES" = 1 ] || POPUP_SECONDS=20
+record_seconds "$POPUP_SECONDS" "$WORK/popups.mov"
 wait "$SEQ" 2>/dev/null || true
 # Right side of the 3024-wide retina display, tall enough for the popups.
 mov_to_gif "$WORK/popups.mov" "$OUT/ybar-popups.gif" "crop=1500:1500:1524:0" 760 15
@@ -333,7 +386,6 @@ close_popups
 # otherwise carry a real app name and its icons into a public README. Empty
 # ones still show the whole animation — the pill revealing, the ring moving
 # to the selection, the rest sliding across.
-PARK_X=${PARK_X:-760}; PARK_Y=${PARK_Y:-520}
 WS_A="${YBAR_GIF_WS_A:-9}"
 WS_B="${YBAR_GIF_WS_B:-A}"
 (
