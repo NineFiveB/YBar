@@ -60,7 +60,11 @@ local header = sbar.add("item", "widgets.bluetooth.popup.header", {
   label = { drawing = false },
 })
 
-local function action_label(text, bg, use_glass)
+-- Every button is a glass chip. The chip is a real AppKit view sized to the
+-- plate, so any row that shows one must narrow its name to
+-- name_width_with_button first — otherwise the chip lands on top of the name.
+-- Both callers below do.
+local function action_label(text, bg)
   return {
     string = text,
     drawing = true,
@@ -74,8 +78,7 @@ local function action_label(text, bg, use_glass)
       height = 24,
       corner_radius = 12,
       drawing = true,
-      -- A glass chip on this plate was covering the device name.
-      glass = use_glass == true,
+      glass = true,
       sheen = false,
       padding_left = 10,
       padding_right = 10,
@@ -154,6 +157,12 @@ for i = 1, max_devices do
       drawing = true,
       glass = false,
       sheen = false,
+      -- The device glyph is its own item ahead of this one, so a plate drawn
+      -- on the row alone starts after it: 34pt of margin on the left against
+      -- 8pt on the right. background.padding_left grows the plate leftwards
+      -- (x = contentBox.minX - paddingLeft), so reclaiming the glyph column
+      -- puts the selection 8pt from both edges.
+      padding_left = icon_width,
     },
     icon = {
       string = "",
@@ -207,7 +216,7 @@ for i = 1, max_devices do
       fade_width = 18,
       padding_left = 2,
     },
-    label = action_label("Pair", blue, true),
+    label = action_label("Pair", blue),
     padding_left = 0,
     padding_right = 8,
   })

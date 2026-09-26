@@ -77,7 +77,9 @@ local function action_label(text, bg)
       height = 20,
       corner_radius = 10,
       drawing = true,
-      glass = false,
+      -- Each network row is split into name / button / lock / signal items,
+      -- so a chip here has its own slot and cannot cover the name.
+      glass = true,
       sheen = false,
       padding_left = 8,
       padding_right = 8,
@@ -270,7 +272,11 @@ local function paint_network(row, net)
   local fan = signal_alpha(net.rssi)
   local has_fan = fan ~= nil
   local button_on = wants_button(net)
-  local tail = has_fan and (signal_w + edge) or edge
+  -- The fan's slot is reserved whether or not the network has one. A hotspot
+  -- reports no RSSI, and letting its row reclaim that width slid the lock and
+  -- the button right, so Connect on a hotspot sat off the column Disconnect
+  -- sits in one row below.
+  local tail = signal_w + edge
   local button_extra = button_on and (button_w + gap) or 0
   local name_w = line - edge - lock_w - tail - button_extra
   local on = net.current
@@ -385,7 +391,16 @@ local function paint_network(row, net)
       label = { drawing = false },
     })
   else
-    row.signal:set({ drawing = false, width = 0, padding_right = 0 })
+    -- Holds the column open without painting anything in it.
+    row.signal:set({
+      drawing = true,
+      width = signal_w,
+      padding_left = 0,
+      padding_right = edge,
+      background = { drawing = false },
+      icon = { drawing = false },
+      label = { drawing = false },
+    })
   end
 end
 
