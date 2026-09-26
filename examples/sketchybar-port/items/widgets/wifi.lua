@@ -2,6 +2,7 @@ local icons = require("icons")
 local colors = require("colors")
 local settings = require("settings")
 local hover = require("helpers.hover")
+local rule = require("helpers.separator")
 
 -- YBAR PORT: Wi-Fi popup mimicking the macOS Settings > Wi-Fi pane:
 -- header with a working power toggle, the connected network with a green
@@ -66,7 +67,7 @@ local header = sbar.add("item", {
     width = popup_width / 2,
     padding_right = inset,
   },
-  background = { height = 2, color = colors.grey, y_offset = -15 },
+  background = rule.background({ y_offset = -15 }),
 })
 
 -- Connected network block (name + lock/wifi, then the green status dot).
@@ -184,7 +185,7 @@ sbar.add("item", {
   width = popup_width,
   icon = { drawing = false },
   label = { drawing = false },
-  background = { height = 2, color = colors.with_alpha(colors.grey, 0.3) },
+  background = rule.background(),
 })
 
 local vpn_button = sbar.add("item", {

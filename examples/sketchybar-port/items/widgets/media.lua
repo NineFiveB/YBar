@@ -1,5 +1,6 @@
 local colors = require("colors")
 local settings = require("settings")
+local rule = require("helpers.separator")
 
 -- Now-playing pill: appears while Music or Spotify reports playback (the
 -- engine's media_change event — distributed notifications, no MediaRemote).
@@ -209,7 +210,7 @@ sbar.add("item", {
   padding_right = 0,
   icon = { drawing = false },
   label = { drawing = false },
-  background = { height = 2, color = colors.with_alpha(colors.grey, 0.3) },
+  background = rule.background(),
 })
 
 local source_row = sbar.add("item", "widgets.media.source", {

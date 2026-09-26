@@ -1,6 +1,7 @@
 local icons = require("icons")
 local colors = require("colors")
 local settings = require("settings")
+local rule = require("helpers.separator")
 
 -- YBAR PORT: system monitor popup in the Stats-app dashboard style:
 -- arc gauges (YBar's gauge component) for CPU and memory, disk with a
@@ -105,7 +106,7 @@ local function add_separator(opts)
     drawing = opts and opts.drawing,
     icon = { drawing = false },
     label = { drawing = false },
-    background = { height = 2, color = colors.with_alpha(colors.grey, 0.3) },
+    background = rule.background(),
   })
 end
 

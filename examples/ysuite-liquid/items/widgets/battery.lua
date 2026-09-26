@@ -1,5 +1,6 @@
 local colors = require("colors")
 local settings = require("settings")
+local rule = require("helpers.separator")
 
 -- Liquid Glass battery popup matched to ysuite-web screenshots:
 -- capsule pill; 420pt wrap popup; blue segment tabs; green bar history
@@ -38,6 +39,9 @@ local battery = sbar.add("item", "widgets.battery", {
     color = colors.white,
     padding_left = 8,
     padding_right = 8,
+    -- The SF battery symbol's ink box sat one device pixel low against the
+    -- Wi-Fi and Bluetooth glyphs (measured ink centre 40.5 against 39.5).
+    y_offset = 0.5,
   },
   label = { drawing = false },
   background = { drawing = false, glass = false, sheen = false },
@@ -51,8 +55,8 @@ local battery_bracket = sbar.add("bracket", "widgets.battery.bracket", {
 }, {
   background = {
     color = colors.bg1,
-    height = 28,
-    corner_radius = 14,
+    height = settings.pill_height,
+    corner_radius = settings.pill_height / 2,
   },
   popup = {
     align = "center",
@@ -84,7 +88,7 @@ local header = sbar.add("item", {
     width = popup_width / 2,
     padding_right = inset,
   },
-  background = { height = 2, color = colors.grey, y_offset = -15 },
+  background = rule.background({ y_offset = -15 }),
 })
 
 local function add_detail(title)
@@ -94,15 +98,18 @@ local function add_detail(title)
     icon = {
       align = "left",
       string = title,
-      color = colors.grey,
+      -- Secondary text on this popup has to be a dimmed white, not the mid
+      -- grey the dark themes use: the glass here is light enough that
+      -- 0xff8e8e8e sits almost exactly on the backdrop.
+      color = colors.with_alpha(colors.white, 0.72),
       font = { size = 12.0 },
       width = popup_width / 2,
-      padding_left = inset + 6,
+      padding_left = inset,
     },
     label = {
       align = "right",
       string = "—",
-      color = colors.grey,
+      color = colors.white,
       font = { size = 12.0, style = settings.font.style_map["Regular"] },
       width = popup_width / 2,
       padding_right = inset,
@@ -119,7 +126,7 @@ sbar.add("item", {
   width = popup_width,
   icon = { drawing = false },
   label = { drawing = false },
-  background = { height = 2, color = colors.with_alpha(colors.white, 0.12) },
+  background = rule.background(),
 })
 
 -- Segmented control: two equal tabs on one wrap line (track + blue active).
@@ -186,7 +193,7 @@ local last_when = sbar.add("item", {
   icon = {
     align = "left",
     string = "—",
-    color = colors.with_alpha(colors.white, 0.55),
+    color = colors.with_alpha(colors.white, 0.72),
     font = { size = 12 },
     width = popup_width,
     padding_left = inset,
@@ -216,9 +223,9 @@ local chart_detail = sbar.add("item", "widgets.battery.chart_detail", {
   icon = {
     align = "left",
     string = " ",
-    color = colors.with_alpha(colors.white, 0.7),
+    color = colors.with_alpha(colors.white, 0.85),
     font = { size = 12, style = settings.font.style_map["Regular"] },
-    width = popup_width - inset,
+    width = popup_width,
     padding_left = inset,
   },
   label = { drawing = false },
@@ -268,7 +275,7 @@ for i = 1, 10 do
     drawing = i <= 8,
     icon = {
       string = x_labels_24h[i] or "",
-      color = colors.with_alpha(colors.white, 0.55),
+      color = colors.with_alpha(colors.white, 0.75),
       font = { size = 10 },
     },
     label = { drawing = false },
@@ -281,7 +288,7 @@ for i = 1, 10 do
     drawing = false,
     icon = {
       string = "",
-      color = colors.with_alpha(colors.white, 0.4),
+      color = colors.with_alpha(colors.white, 0.65),
       font = { size = 10 },
       padding_left = 1,
     },

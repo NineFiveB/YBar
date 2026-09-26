@@ -2,6 +2,7 @@ local colors = require("colors")
 local icons = require("icons")
 local settings = require("settings")
 local hover = require("helpers.hover")
+local rule = require("helpers.separator")
 
 -- YBAR PORT: Bartender-style collapsible menu for background apps'
 -- native menu bar items (Proton, OneDrive, Creative Cloud, …). The
@@ -46,7 +47,6 @@ local chevron = sbar.add("item", "widgets.menubar", {
     color = colors.white,
     padding_left = 8,
     padding_right = 8,
-    y_offset = 1,
   },
   label = { drawing = false },
   padding_left = 2,
@@ -79,7 +79,7 @@ local header = sbar.add("item", {
   -- No label slot: the refresh spinner (image, align=r) trails the title.
   label = { drawing = false },
   align = "left",
-  background = { height = 2, color = colors.grey, y_offset = -15 },
+  background = rule.background({ y_offset = -15 }),
 })
 
 -- Shown only when Accessibility permission is missing.
@@ -136,10 +136,12 @@ sbar.add("item", {
   width = popup_width,
   icon = { drawing = false },
   label = { drawing = false },
-  background = { height = 2, color = colors.with_alpha(colors.grey, 0.3) },
+  background = rule.background(),
 })
 
-local hint_row = sbar.add("item", {
+-- Named so a recording or a test can pin what the footer says instead of
+-- inheriting whichever view set it last.
+local hint_row = sbar.add("item", "widgets.menubar.hint", {
   position = popup_pos,
   width = popup_width,
   align = "center",

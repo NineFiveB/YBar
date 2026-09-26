@@ -1,6 +1,7 @@
 local colors = require("colors")
 local settings = require("settings")
 local shell = require("helpers.shell")
+local rule = require("helpers.separator")
 
 -- Liquid Glass Bluetooth popup: device name, then a scan section with Pair.
 -- Paired devices show a gray Connect capsule only while the pointer is on
@@ -183,7 +184,7 @@ local scan_label = sbar.add("item", "widgets.bluetooth.scan", {
     padding_left = inset,
   },
   label = { drawing = false },
-  background = { height = 2, color = colors.with_alpha(colors.white, 0.12), y_offset = 12 },
+  background = rule.background({ y_offset = 12 }),
 })
 
 local spinner = require("helpers.spinner").attach(scan_label, {

@@ -1,6 +1,7 @@
 local icons = require("icons")
 local colors = require("colors")
 local settings = require("settings")
+local rule = require("helpers.separator")
 
 -- Liquid Glass Wi-Fi popup. The header keeps the green Connected status.
 -- Each network is one wrapped line: name on the left, then an optional
@@ -143,7 +144,7 @@ local scan_label = sbar.add("item", "widgets.wifi.scan", {
     padding_left = 12,
   },
   label = { drawing = false },
-  background = { height = 2, color = colors.with_alpha(colors.white, 0.12), y_offset = 12 },
+  background = rule.background({ y_offset = 12 }),
 })
 
 local spinner = require("helpers.spinner").attach(scan_label, {

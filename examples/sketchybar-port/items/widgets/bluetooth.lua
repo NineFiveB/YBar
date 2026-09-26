@@ -3,6 +3,7 @@ local icons = require("icons")
 local settings = require("settings")
 local shell = require("helpers.shell")
 local hover = require("helpers.hover")
+local rule = require("helpers.separator")
 
 -- YBAR PORT: Bluetooth popup mimicking macOS Settings > Bluetooth:
 -- header with a working power toggle, My Devices as two-line cells
@@ -88,7 +89,7 @@ local header = sbar.add("item", "widgets.bluetooth.popup.header", {
     width = popup_width / 2,
     padding_right = inset,
   },
-  background = { height = 2, color = colors.grey, y_offset = -15 },
+  background = rule.background({ y_offset = -15 }),
 })
 
 -- Shown only when blueutil is TCC-denied.
@@ -242,7 +243,7 @@ sbar.add("item", "widgets.bluetooth.sep2", {
   width = popup_width,
   icon = { drawing = false },
   label = { drawing = false },
-  background = { height = 2, color = colors.with_alpha(colors.grey, 0.3) },
+  background = rule.background(),
 })
 
 local settings_row = sbar.add("item", "widgets.bluetooth.settings", {

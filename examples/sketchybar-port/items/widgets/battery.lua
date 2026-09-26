@@ -1,6 +1,7 @@
 local icons = require("icons")
 local colors = require("colors")
 local settings = require("settings")
+local rule = require("helpers.separator")
 
 -- YBAR PORT: battery popup in the macOS style used across the other
 -- widgets: "Battery" header with the percentage on the right, then
@@ -61,7 +62,7 @@ local header = sbar.add("item", {
     width = popup_width / 2,
     padding_right = inset,
   },
-  background = { height = 2, color = colors.grey, y_offset = -15 },
+  background = rule.background({ y_offset = -15 }),
 })
 
 local function add_detail(title)
@@ -74,7 +75,7 @@ local function add_detail(title)
       color = colors.grey,
       font = { size = 12.0 },
       width = popup_width / 2,
-      padding_left = inset + 6,
+      padding_left = inset,
     },
     label = {
       align = "right",
@@ -102,7 +103,7 @@ sbar.add("item", {
   width = popup_width,
   icon = { drawing = false },
   label = { drawing = false },
-  background = { height = 2, color = colors.with_alpha(colors.grey, 0.3) },
+  background = rule.background(),
 })
 
 sbar.add("item", {
@@ -161,7 +162,7 @@ sbar.add("item", {
   width = popup_width,
   icon = { drawing = false },
   label = { drawing = false },
-  background = { height = 2, color = colors.with_alpha(colors.grey, 0.3) },
+  background = rule.background(),
 })
 
 local settings_row = sbar.add("item", {
