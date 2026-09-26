@@ -325,8 +325,13 @@ update_calendar = function(events)
       else
         local date_str = string.format("%d-%02d-%02d", view.year, view.month, day)
         local is_today = date_str == today_date_str
-        local rest = is_today and (YSUITE_LIQUID and colors.selection
-          or colors.with_alpha(colors.grey, 0.55))
+        -- A theme with colors.today marks today with the NUMBER and nothing
+        -- else: a glass capsule under a red digit is two markers for one day,
+        -- and the capsule is the louder of them. Themes without an accent
+        -- keep the wash, or today would be indistinguishable.
+        local rest = (is_today and not colors.today)
+          and (YSUITE_LIQUID and colors.selection
+            or colors.with_alpha(colors.grey, 0.55))
           or colors.transparent
         cell_day[i], cell_date[i], cell_rest[i] = day, date_str, rest
         cell:set({
@@ -334,9 +339,6 @@ update_calendar = function(events)
           background = { color = rest },
           label = {
             string = tostring(day),
-            -- colors.today lets a theme give today's number a real accent; the
-            -- highlight underneath stays the plain selection wash, so the glass
-            -- is never tinted.
             color = is_today and (colors.today or colors.white) or colors.white,
             font = {
               style = settings.font.style_map[
@@ -454,21 +456,33 @@ end
 -- Wired once, over a grid that is repainted underneath: the handlers read the
 -- per-cell tables rather than closing over a day number, which would go stale
 -- the first time the month changed.
+-- Which cell the pointer is on. A fast sweep across the grid does not always
+-- deliver every mouse.exited, and a cell that misses its own stays lit — so
+-- entering one puts the last one back rather than trusting the pair to
+-- arrive.
+local hovered_cell = nil
+
+local function unhover(index)
+  local cell = index and cells[index]
+  if not cell then return end
+  hover.fade(cell, cell_rest[index] or colors.transparent, hover.EXIT_FRAMES)
+end
+
 for i = 1, max_cells do
   local cell = cells[i]
   cell:subscribe("mouse.entered", function()
     if not cell_day[i] then return end
+    if hovered_cell and hovered_cell ~= i then unhover(hovered_cell) end
+    hovered_cell = i
     dayline:set({ label = { string = day_summary(i) } })
-    -- Today already carries a fill; lifting it would fight the accent.
     if cell_rest[i] == colors.transparent then
       hover.fade(cell, cell_hover, hover.ENTER_FRAMES)
     end
   end)
   cell:subscribe("mouse.exited", function()
+    if hovered_cell == i then hovered_cell = nil end
     dayline:set({ label = { string = today_line } })
-    if cell_rest[i] == colors.transparent then
-      hover.fade(cell, colors.transparent, hover.EXIT_FRAMES)
-    end
+    unhover(i)
   end)
   cell:subscribe("mouse.scrolled", page_scroll)
 end
