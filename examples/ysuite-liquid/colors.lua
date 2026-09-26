@@ -11,11 +11,25 @@ return {
   magenta = 0xffd8d8d8,
   grey = 0xff8e8e8e,
   connected = 0xff30d158,
+  -- The palette above is monochrome by design — red, green and blue are all
+  -- shades of white. Today's date is the one place that has to read as an
+  -- accent, so its number gets a real red rather than the brightest grey.
+  -- Opaque: it is ink on the selection wash, not a fill.
+  today = 0xffff453a,
   transparent = 0x00000000,
   -- Selection plates and gray capsules. Black wash and a low white, so they
   -- sit darker than a bright frost on the glass popup.
   selection = 0x50000000,
   button = 0x2cffffff,
+  -- The focused workspace pill. A WASH, not a plate: it is laid over the
+  -- pill's own glass so the material keeps refracting and the rim stays lit,
+  -- and the selection reads as that capsule lifting rather than turning grey.
+  -- Light rather than dark, because the strip sits over the wallpaper and a
+  -- darker capsule reads as recessed; a theme over a near-black bar would
+  -- take the other direction. Keep the alpha low enough that the material
+  -- still shows through — an opaque value here is the flat plate again.
+  -- Leaving the key out keeps the old painted highlight.
+  space_selected = 0x26ffffff,
 
   bar = {
     -- Unused by ysuite-liquid's bar.lua (the strip is fully clear). Kept so

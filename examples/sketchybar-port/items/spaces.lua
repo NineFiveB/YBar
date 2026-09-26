@@ -36,6 +36,19 @@ end
 local MAX_SLOTS = YSUITE_LIQUID and 7 or 36
 local ICON_HIDE_SECONDS = tonumber(settings.workspace_icon_hide) or 10
 
+-- The icon column is pinned to the widest mark instead of measured per
+-- glyph: the numbers face is proportional, so a "1" pill came out narrower
+-- than its neighbours and the row of pills read uneven. A text part's width
+-- REPLACES its advance, paddings included, so each call site adds its own.
+-- Marks longer than one character keep their natural width — a workspace
+-- named for a word must never be clipped to fit a digit's box.
+local MARK_INK = tonumber(settings.workspace_mark_width) or 0
+
+local function mark_box(mark, pad_left, pad_right)
+  if MARK_INK <= 0 or type(mark) ~= "string" or #mark ~= 1 then return "dynamic" end
+  return MARK_INK + pad_left + pad_right
+end
+
 local spaces = {}    -- slot -> space item
 local brackets = {}  -- slot -> bracket item
 local names = {}     -- slot -> bound workspace name (nil = unbound)
@@ -69,7 +82,7 @@ for i = 1, MAX_SLOTS do
     background = {
       color = colors.bg1,
       border_width = 0,
-      height = 26,
+      height = settings.pill_height - 2,
     },
     popup = { background = { border_width = 5, border_color = colors.black } },
     -- Left click focuses the workspace via AeroSpace; the command is set
@@ -98,7 +111,7 @@ for i = 1, MAX_SLOTS do
     background = {
       color = colors.transparent,
       border_color = colors.bg2,
-      height = 28,
+      height = settings.pill_height,
       -- 0, not 2: the ring belongs to the focused pill and apply_focus sets
       -- it there. Starting at 0 avoids a one-frame ring on a pill revealed
       -- before focus has been applied to it.
@@ -158,7 +171,11 @@ local function bind_names(list)
       empty[i] = nil
       icon_lines[i] = nil
       spaces[i]:set({
-        icon = { string = workspace_mark(name), drawing = true },
+        icon = {
+          string = workspace_mark(name),
+          width = mark_box(workspace_mark(name), 8, 4),
+          drawing = true,
+        },
         click_script = (name and not YSUITE_LIQUID)
           and (AEROSPACE .. " workspace " .. shell.quote(name)) or "",
       })
@@ -385,6 +402,10 @@ function paint_liquid(slot)
       label = {
         drawing = true,
         string = front_app_name ~= "" and front_app_name or workspace_mark(name),
+        -- The focused pill shows the mark here when there is no app name to
+        -- show, so it needs the same pinned column the icon slot uses.
+        width = front_app_name ~= "" and "dynamic"
+          or mark_box(workspace_mark(name), 12, 12),
         font = {
           family = settings.font.text,
           style = settings.font.style_map["Regular"],
@@ -403,6 +424,7 @@ function paint_liquid(slot)
       icon = {
         drawing = true,
         string = workspace_mark(name),
+        width = mark_box(workspace_mark(name), 12, 12),
         font = { family = settings.font.numbers },
         padding_left = 12,
         padding_right = 12,
@@ -414,6 +436,7 @@ function paint_liquid(slot)
       icon = {
         drawing = true,
         string = workspace_mark(name),
+        width = mark_box(workspace_mark(name), 8, 4),
         font = { family = settings.font.numbers },
         padding_left = 8,
         padding_right = 4,
@@ -574,7 +597,8 @@ local function restore_pill(slot)
     padding_right = 1,
     y_offset = 0,
     icon = {
-      width = "dynamic",
+      width = is_empty and mark_box(workspace_mark(names[slot]), 12, 12)
+        or mark_box(workspace_mark(names[slot]), 8, 4),
       padding_left = is_empty and 12 or 8,
       padding_right = is_empty and 12 or 4,
       color = { alpha = 1.0 },
@@ -661,6 +685,15 @@ end
 -- cross-fade and the focused pill's reveal must not wait for the
 -- aerospace query round-trip. A name with no slot yet (a workspace seen for
 -- the first time) waits for the reconcile that binds it.
+-- How the focused pill is marked. With colors.space_selected the selection is
+-- a wash over the pill's own material: the glass keeps refracting, the rim and
+-- the ring stay lit, and the capsule reads as dimmed rather than repainted.
+-- Without it the old behaviour stands — a half-opaque grey plate, which is
+-- opaque enough to hide the material, so the glass pass goes off with it
+-- (left on, the painted pass would model a body and add a bottom shade).
+local SELECTED_WASH = colors.space_selected
+local SELECTED_FILL = SELECTED_WASH or colors.with_alpha(colors.grey, 0.5)
+
 function apply_focus(focused)
   -- Instant, no animation: switching must feel immediate.
   for slot, space in pairs(spaces) do
@@ -670,13 +703,9 @@ function apply_focus(focused)
         icon = { color = colors.white },
         label = { color = selected and colors.white or colors.grey },
         background = {
-          color = selected and colors.with_alpha(colors.grey, 0.5) or colors.bg1,
-          -- The selection is a plain highlight: its fill is opaque enough to
-          -- hide the material anyway, and lighting a half-opaque plate reads
-          -- as paint. Both off together — with glass off the painted pass
-          -- would fall back to modelling a body, bottom shade included.
-          glass = not selected,
-          sheen = not selected,
+          color = selected and SELECTED_FILL or colors.bg1,
+          glass = SELECTED_WASH ~= nil or not selected,
+          sheen = SELECTED_WASH ~= nil or not selected,
         },
       })
       brackets[slot]:set({

@@ -1,6 +1,7 @@
 local colors = require("colors")
 local icons = require("icons")
 local settings = require("settings")
+local rule = require("helpers.separator")
 
 local config_dir = SKETCHYBAR_CONFIG  -- YBAR PORT: helpers live in the original tree
 local menus_bin = config_dir .. "/helpers/menus/bin/menus"
@@ -15,6 +16,14 @@ local menus_bin = config_dir .. "/helpers/menus/bin/menus"
 local popup_width = 240
 local inset = 12
 
+-- The apple pill sits at the head of the workspace strip, so it takes the
+-- same pinned icon column they do — measured 32pt against their 34pt, which
+-- read as one tighter circle in a row of equal ones. A text part's width
+-- REPLACES its advance, paddings included, so the workspace pills' 12/12 is
+-- added here rather than left on the part.
+local mark_column = (tonumber(settings.workspace_mark_width) or 0) + 12 + 12
+if mark_column <= 24 then mark_column = "dynamic" end
+
 -- Padding item required because of bracket
 sbar.add("item", { width = 5 })
 
@@ -22,6 +31,7 @@ local apple = sbar.add("item", {
   icon = {
     font = { size = 16.0 },
     string = icons.apple,
+    width = mark_column,
     padding_right = 8,
     padding_left = 8,
   },
@@ -69,7 +79,7 @@ local function add_separator()
     width = popup_width,
     icon = { drawing = false },
     label = { drawing = false },
-    background = { height = 2, color = colors.with_alpha(colors.grey, 0.3) },
+    background = rule.background(),
   })
 end
 

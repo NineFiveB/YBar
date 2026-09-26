@@ -33,6 +33,23 @@ sbar.add("event", "yabai_window_change")
 local MAX_SPACES = YSUITE_LIQUID and 7 or 10
 local ICON_HIDE_SECONDS = tonumber(settings.workspace_icon_hide) or 10
 
+-- The icon column is pinned to the widest mark instead of measured per
+-- glyph: the numbers face is proportional, so a "1" pill came out narrower
+-- than its neighbours and the row of pills read uneven. A text part's width
+-- REPLACES its advance, paddings included, so each call site adds its own.
+-- Marks longer than one character keep their natural width — a workspace
+-- named for a word must never be clipped to fit a digit's box.
+local MARK_INK = tonumber(settings.workspace_mark_width) or 0
+
+-- The focused pill's fill. See the AeroSpace adapter for the reasoning: a
+-- wash keeps the glass lit, and a theme without the key keeps the old plate.
+local SELECTED_FILL = colors.space_selected or colors.with_alpha(colors.grey, 0.5)
+
+local function mark_box(mark, pad_left, pad_right)
+  if MARK_INK <= 0 or type(mark) ~= "string" or #mark ~= 1 then return "dynamic" end
+  return MARK_INK + pad_left + pad_right
+end
+
 local spaces = {}    -- sid -> space item
 local brackets = {}  -- sid -> bracket item
 -- Liquid slots are visual positions. names[slot] is the real space index
@@ -65,7 +82,7 @@ for sid = 1, MAX_SPACES do
     background = {
       color = colors.bg1,
       border_width = 0,
-      height = 26,
+      height = settings.pill_height - 2,
     },
     popup = { background = { border_width = 5, border_color = colors.black } },
     -- Left click focuses the space (needs yabai's scripting addition on
@@ -93,7 +110,7 @@ for sid = 1, MAX_SPACES do
     background = {
       color = colors.transparent,
       border_color = colors.bg2,
-      height = 28,
+      height = settings.pill_height,
       -- 0, not 2: bracket_border() sets 2 the moment a space is confirmed
       -- non-empty, but a space that hasn't appeared in a query yet (a
       -- brand-new workspace) never runs that path before its first reveal —
@@ -158,6 +175,10 @@ local function paint_liquid(slot)
       label = {
         drawing = true,
         string = front_app_name ~= "" and front_app_name or workspace_mark(index),
+        -- The focused pill shows the mark here when there is no app name to
+        -- show, so it needs the same pinned column the icon slot uses.
+        width = front_app_name ~= "" and "dynamic"
+          or mark_box(workspace_mark(index), 12, 12),
         font = {
           family = settings.font.text,
           style = settings.font.style_map["Regular"],
@@ -176,6 +197,7 @@ local function paint_liquid(slot)
       icon = {
         drawing = true,
         string = workspace_mark(index),
+        width = mark_box(workspace_mark(index), 12, 12),
         font = { family = settings.font.numbers },
         padding_left = 12,
         padding_right = 12,
@@ -187,6 +209,7 @@ local function paint_liquid(slot)
       icon = {
         drawing = true,
         string = workspace_mark(index),
+        width = mark_box(workspace_mark(index), 8, 4),
         font = { family = settings.font.numbers },
         padding_left = 8,
         padding_right = 4,
@@ -314,15 +337,16 @@ local function update_windows(sid)
         paint_liquid(sid)
         return
       end
+      local mark = workspace_mark(names[sid])
       if icon_line == "" then
         space:set({
           label = { drawing = false },
-          icon = { padding_left = 12, padding_right = 12 },
+          icon = { width = mark_box(mark, 12, 12), padding_left = 12, padding_right = 12 },
         })
       else
         space:set({
           label = { drawing = true, string = icon_line, padding_right = 8, padding_left = 4 },
-          icon = { padding_left = 8, padding_right = 4 },
+          icon = { width = mark_box(mark, 8, 4), padding_left = 8, padding_right = 4 },
         })
       end
       brackets[sid]:set({ background = { border_width = bracket_border(sid) } })
@@ -371,7 +395,11 @@ local function reveal_pill(sid)
     -- (items are created 8/4, so the first-ever reveal pops without this).
     spaces[sid]:set({
       label = { drawing = false },
-      icon = { padding_left = 12, padding_right = 12 },
+      icon = {
+        width = mark_box(workspace_mark(names[sid]), 12, 12),
+        padding_left = 12,
+        padding_right = 12,
+      },
     })
   end
   shown[sid] = true
@@ -436,7 +464,9 @@ local function apply_focus(focused)
       icon = { color = colors.white },
       label = { color = selected and colors.white or colors.grey },
       background = {
-        color = selected and colors.with_alpha(colors.grey, 0.5) or colors.bg1,
+        -- Matches the AeroSpace adapter: with colors.space_selected the focus
+        -- is a wash over the pill's own material rather than a grey plate.
+        color = selected and SELECTED_FILL or colors.bg1,
       },
     })
     brackets[sid]:set({

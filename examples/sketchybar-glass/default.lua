@@ -27,7 +27,7 @@ sbar.default({
     padding_right = settings.paddings,
   },
   background = {
-    height = 28,
+    height = settings.pill_height,
     corner_radius = 9,
     border_width = 0,
     glass = true,
