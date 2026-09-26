@@ -80,6 +80,21 @@ local menu_padding = sbar.add("item", "menu.padding", {
 local menus_shown = false
 local menu_hide_seq = 0
 
+-- Per-workspace menu state -------------------------------------------------
+-- The bar shows either the workspace pills or the front app's menus, and
+-- which one is showing is a property of the WORKSPACE, not of the bar. Opening
+-- the menus and switching away hands the pills back — the menus belonged to
+-- the app you just left — and switching home brings them back up.
+--
+-- Keyed on the AeroSpace workspace name, which is the only identifier its
+-- event carries. The builtin space_change (native Spaces, the yabai adapter)
+-- carries no name at all, so that path gets the hand-back half and no
+-- restore: better than today, where a switch left the menus up over pills
+-- that had gone stale behind them.
+local menu_open_on = {}     -- workspace name -> true while its menus are up
+local current_workspace     -- nil until the first workspace event lands
+local restore_seq = 0
+
 local function park_menu_item(i)
   menu_items[i]:set({
     padding_left = settings.paddings,
@@ -119,52 +134,123 @@ end
 
 menu_watcher:subscribe("front_app_switched", update_menus)
 
-space_menu_swap:subscribe("swap_menus_and_spaces", function(env)
-  if menus_shown then
-    menus_shown = false
-    MENUS_VISIBLE = false
-    menu_watcher:set( { updates = false })
-    menu_hide_seq = menu_hide_seq + 1
-    local seq = menu_hide_seq
-    sbar.animate("tanh", 17, function()
-      for i = 1, max_items do
-        menu_items[i]:set({
-          padding_left = 0,
-          padding_right = 0,
-          y_offset = -4,
-          label = { width = 0, padding_left = 0, padding_right = 0,
-                    color = { alpha = 0.0 } },
-        })
-      end
-    end)
-    sbar.delay(0.28, function()   -- collapse first, then hand back the bar
-      if menu_hide_seq ~= seq then return end
-      sbar.set("/menu\\..*/", { drawing = false })
-      menu_padding:set({ drawing = false })
-      for i = 1, max_items do park_menu_item(i) end
-      if not YSUITE_LIQUID then sbar.set("front_app", { drawing = true }) end
-      -- YBAR PORT: a blanket show resurrects every configured workspace
-      -- (6..9, A..Z). Restore through the spaces refresh instead, which only
-      -- shows non-empty or focused workspaces and re-applies highlights.
-      sbar.exec("aerospace list-workspaces --focused 2>/dev/null", function(focused)
-        sbar.trigger("aerospace_workspace_change",
-          { FOCUSED_WORKSPACE = focused:gsub("%s+", "") })
-      end)
-    end)
-  else
-    menus_shown = true
-    MENUS_VISIBLE = true
-    menu_hide_seq = menu_hide_seq + 1   -- cancel a pending collapse cleanup
-    menu_watcher:set( { updates = true })
-    sbar.set("/space\\..*/", { drawing = false })
-    -- The active pill is the menu toggle, so it stays while the others hide.
-    if ACTIVE_SPACE_NAME then
-      sbar.set(ACTIVE_SPACE_NAME, { drawing = true })
-      local slot = ACTIVE_SPACE_NAME:match("^space%.(%d+)$")
-      if slot then sbar.set("space.padding." .. slot, { drawing = true }) end
+-- `remember` is false when the switch handler drives these: a workspace change
+-- records the OUTGOING workspace's state itself, before it reassigns
+-- current_workspace, and must not have the close overwrite the incoming one.
+local function close_menus(remember)
+  if remember ~= false and current_workspace then
+    menu_open_on[current_workspace] = false
+  end
+  menus_shown = false
+  MENUS_VISIBLE = false
+  menu_watcher:set( { updates = false })
+  menu_hide_seq = menu_hide_seq + 1
+  local seq = menu_hide_seq
+  sbar.animate("tanh", 17, function()
+    for i = 1, max_items do
+      menu_items[i]:set({
+        padding_left = 0,
+        padding_right = 0,
+        y_offset = -4,
+        label = { width = 0, padding_left = 0, padding_right = 0,
+                  color = { alpha = 0.0 } },
+      })
     end
-    if not YSUITE_LIQUID then sbar.set("front_app", { drawing = false }) end
+  end)
+  sbar.delay(0.28, function()   -- collapse first, then hand back the bar
+    if menu_hide_seq ~= seq then return end
+    sbar.set("/menu\\..*/", { drawing = false })
+    menu_padding:set({ drawing = false })
+    for i = 1, max_items do park_menu_item(i) end
+    if not YSUITE_LIQUID then sbar.set("front_app", { drawing = true }) end
+    -- YBAR PORT: a blanket show resurrects every configured workspace
+    -- (6..9, A..Z). Restore through the spaces refresh instead, which only
+    -- shows non-empty or focused workspaces and re-applies highlights.
+    sbar.exec("aerospace list-workspaces --focused 2>/dev/null", function(focused)
+      sbar.trigger("aerospace_workspace_change",
+        { FOCUSED_WORKSPACE = focused:gsub("%s+", "") })
+    end)
+  end)
+end
+
+local function open_menus(remember)
+  if remember ~= false and current_workspace then
+    menu_open_on[current_workspace] = true
+  end
+  menus_shown = true
+  MENUS_VISIBLE = true
+  menu_hide_seq = menu_hide_seq + 1   -- cancel a pending collapse cleanup
+  menu_watcher:set( { updates = true })
+  sbar.set("/space\\..*/", { drawing = false })
+  -- The active pill is the menu toggle, so it stays while the others hide.
+  if ACTIVE_SPACE_NAME then
+    sbar.set(ACTIVE_SPACE_NAME, { drawing = true })
+    local slot = ACTIVE_SPACE_NAME:match("^space%.(%d+)$")
+    if slot then sbar.set("space.padding." .. slot, { drawing = true }) end
+  end
+  if not YSUITE_LIQUID then sbar.set("front_app", { drawing = false }) end
+  update_menus()
+end
+
+space_menu_swap:subscribe("swap_menus_and_spaces", function(env)
+  if menus_shown then close_menus() else open_menus() end
+end)
+
+-- A real workspace switch. The event is registered by whichever spaces
+-- adapter loads AFTER this file, so register it here too — addEvent is a
+-- no-op for a name that already exists, which is the same thing the yabai
+-- adapter relies on.
+sbar.add("event", "aerospace_workspace_change")
+
+local function workspace_changed(incoming)
+  incoming = (incoming or ""):gsub("%s+", "")
+  -- The close path re-triggers this with the workspace we are already on
+  -- (that is how it hands the pills back), so only a real move counts.
+  if incoming == "" or incoming == current_workspace then return end
+  local previous = current_workspace
+  if previous then menu_open_on[previous] = menus_shown end
+  current_workspace = incoming
+
+  restore_seq = restore_seq + 1
+  local seq = restore_seq
+  local want = menu_open_on[incoming] == true
+
+  if want and menus_shown then
+    -- Both sides want the menus. Closing and reopening would read as a blink
+    -- for no reason; the entries just need to become the new app's.
     update_menus()
+  elseif want then
+    -- The pills repaint on this same event and set ACTIVE_SPACE_NAME, which
+    -- the open path needs. Subscriber order between the two files is not
+    -- guaranteed, so let that land first.
+    sbar.delay(0.12, function()
+      if seq ~= restore_seq or menus_shown then return end
+      open_menus()
+    end)
+  elseif menus_shown then
+    close_menus(false)
+  end
+end
+
+space_menu_swap:subscribe("aerospace_workspace_change", function(env)
+  workspace_changed(env.FOCUSED_WORKSPACE)
+end)
+
+-- Native Spaces carry no workspace name, so this can only do the hand-back
+-- half: whatever was open belonged to the Space being left.
+-- Seed the workspace before anything can toggle, so a swap made at login —
+-- before the first switch fires an event — is remembered against the
+-- workspace it actually happened on rather than against nil.
+sbar.exec("aerospace list-workspaces --focused 2>/dev/null", function(focused)
+  focused = (focused or ""):gsub("%s+", "")
+  -- A real switch may have landed first; it wins.
+  if focused ~= "" and not current_workspace then current_workspace = focused end
+end)
+
+space_menu_swap:subscribe("space_change", function()
+  if menus_shown then
+    if current_workspace then menu_open_on[current_workspace] = true end
+    close_menus(false)
   end
 end)
 
