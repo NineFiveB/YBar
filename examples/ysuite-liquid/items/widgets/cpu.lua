@@ -1,5 +1,6 @@
 local colors = require("colors")
 local settings = require("settings")
+local hover = require("helpers.hover")
 
 -- Liquid Glass system monitor: sparkline pill (no glyph) and a card popup
 -- matching the webpage — Memory / CPU / GPU rows plus the Disk footer.
@@ -35,7 +36,7 @@ local cpu_bracket = sbar.add("bracket", "widgets.cpu.bracket", { cpu.name }, {
   popup = { align = "center" },
 })
 
-require("helpers.hover").pill(cpu_bracket, cpu)
+hover.pill(cpu_bracket, cpu)
 
 local popup_pos = "popup." .. cpu_bracket.name
 
@@ -100,6 +101,108 @@ local mem_card = add_card("Memory", "Free Up")
 local cpu_card = add_card("CPU", "")
 local gpu_card = add_card("GPU", "")
 gpu_card:set({ drawing = false })
+
+-- Every card opens Activity Monitor, and until now none of them looked like
+-- it would: a card is the only clickable surface in this popup and it rested
+-- at the same tone whether the pointer was on it or not.
+local card_hover = colors.with_alpha(colors.white, 0.11)
+for _, item in ipairs({ mem_card, cpu_card, gpu_card }) do
+  hover.attachColor(item, { item }, card, card_hover)
+end
+
+-- ── Load history ───────────────────────────────────────────────────────────
+-- The pill's sparkline is 42 samples with no scale and no readout: it says
+-- "busy" and nothing else. The popup gets the same stream as a scrubbable
+-- bar chart, the way the battery popup plots its charge. Bars, not a line,
+-- because the engine only hit-tests bars graphs for graph.hovered.
+local history_buckets = 64
+local plot_width = popup_width - 2 * inset - 36   -- room for the y-axis strip
+local load_history = {}
+local load_times = {}
+for i = 1, history_buckets do
+  load_history[i] = false
+  load_times[i] = false
+end
+
+local chart_title = sbar.add("item", "widgets.cpu.chart_title", {
+  position = popup_pos,
+  width = popup_width,
+  icon = {
+    string = "CPU Load",
+    align = "left",
+    font = { size = 13, style = settings.font.style_map["Regular"] },
+    color = colors.white,
+    width = popup_width,
+    padding_left = inset,
+  },
+  label = { drawing = false },
+})
+
+-- A single space at rest so the chart does not jump up when the readout
+-- appears under the pointer.
+local chart_detail = sbar.add("item", "widgets.cpu.chart_detail", {
+  position = popup_pos,
+  width = popup_width,
+  icon = {
+    string = " ",
+    align = "left",
+    font = { size = 12, style = settings.font.style_map["Regular"] },
+    color = colors.with_alpha(colors.white, 0.85),
+    width = popup_width,
+    padding_left = inset,
+  },
+  label = { drawing = false },
+})
+
+local history = sbar.add("graph", "widgets.cpu.history", history_buckets, {
+  position = popup_pos,
+  graph = {
+    color = colors.with_alpha(colors.white, 0.7),
+    style = "bars",
+    plot_width = plot_width,
+    tick = "off",
+  },
+  background = {
+    height = 72,
+    color = { alpha = 0 },
+    border_color = { alpha = 0 },
+    drawing = true,
+  },
+  icon = { drawing = false },
+  label = { drawing = false },
+  padding_left = inset,
+  padding_right = 0,
+})
+
+local function ago(seconds)
+  if seconds < 10 then return "now" end
+  if seconds < 90 then return string.format("%ds ago", seconds) end
+  return string.format("%dm ago", math.floor(seconds / 60 + 0.5))
+end
+
+local function record_load(load)
+  table.move(load_history, 2, history_buckets, 1)
+  table.move(load_times, 2, history_buckets, 1)
+  load_history[history_buckets] = load
+  load_times[history_buckets] = os.time()
+  history:push({ math.max(0, math.min(1, load / 100)) })
+end
+
+history:subscribe("graph.hovered", function(env)
+  local index = tonumber(env.INFO)
+  local load = index and load_history[index + 1]
+  if not load then
+    chart_detail:set({ icon = { string = " " } })
+    return
+  end
+  local when = load_times[index + 1]
+  chart_detail:set({
+    icon = {
+      string = string.format("%s  ·  %d%%",
+        ago(os.time() - (when or os.time())), load),
+    },
+  })
+end)
 
 local footer = sbar.add("item", "widgets.cpu.footer", {
   position = popup_pos,
@@ -231,6 +334,7 @@ end
 cpu:subscribe("system_stats", function(env)
   local load = tonumber(env.CPU_USAGE) or 0
   cpu:push({ waveform(load) })
+  record_load(load)
   cpu_card:set({
     icon = { string = string.format("CPU    Load: %d%%", load) },
   })
@@ -249,14 +353,15 @@ cpu:subscribe("system_stats", function(env)
   end
 end)
 
-mem_card:subscribe("mouse.clicked", function()
+local function open_activity_monitor()
   sbar.exec("open -a 'Activity Monitor'")
   hide_popup()
-end)
-header:subscribe("mouse.clicked", function()
-  sbar.exec("open -a 'Activity Monitor'")
-  hide_popup()
-end)
+end
+
+for _, item in ipairs({ header, mem_card, cpu_card, gpu_card }) do
+  item:subscribe("mouse.clicked", open_activity_monitor)
+end
+hover.row(header, { height = 22, radius = 6, flat = true })
 
 cpu:subscribe("mouse.clicked", toggle_popup)
 cpu:subscribe("mouse.exited.global", hide_popup)
