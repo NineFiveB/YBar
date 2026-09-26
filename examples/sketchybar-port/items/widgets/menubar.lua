@@ -1,44 +1,33 @@
 local colors = require("colors")
-local icons = require("icons")
 local settings = require("settings")
 local hover = require("helpers.hover")
-local rule = require("helpers.separator")
 
--- YBAR PORT: Bartender-style collapsible menu for background apps'
--- native menu bar items (Proton, OneDrive, Creative Cloud, …). The
--- statusitems helper enumerates them via the Accessibility API and can
--- press one to open its real menu even while the native menu bar is
--- auto-hidden. Left-click a row opens the item's menu; right-click
--- hides/restores it (persisted); "Show Hidden" reveals the hidden set.
+-- YBAR PORT: the tray for background apps' native menu bar items (Proton,
+-- OneDrive, Creative Cloud, …). The statusitems helper enumerates them
+-- through the Accessibility API and can press one even while the native menu
+-- bar is hidden.
+--
+-- It expands IN THE BAR rather than dropping a popup: the chevron opens the
+-- capsule leftwards and the items slide out as their real app icons, the
+-- same reveal the workspace pills use. Clicking one presses the real status
+-- item, so macOS draws that app's own menu — which is why there is no menu
+-- rendering here at all any more, no drill-down, and no 48-row pool to
+-- compact onto a short display.
+--
+-- Left-click an icon opens its menu; right-click hides it (persisted); ⌥
+-- while open reveals the hidden ones.
 
-local popup_width = 280
-local inset = 12
--- Enough rows for a real app menu, not just the item list: Raycast's has 13
--- entries and AeroSpace's 43, and one row is spent on the back link. Unused
--- rows are hidden, so the only cost of a generous cap is that many item
--- objects.
-local max_rows = 48
-
--- A popup is clamped to the screen horizontally but NOT vertically
--- (PopupSurface), so a menu taller than the display runs off the bottom and
--- the rest is unreachable with no hint that it is there. Long menus compact
--- their rows instead: AeroSpace's 43 entries do not fit at 30pt, they do at
--- 20pt. The item list always uses the roomy height.
-local ROW_H, COMPACT_ROW_H = 30, 20
-
-local function row_budget()
-  local displays = sbar.query("displays")
-  local frame = displays and displays[1] and displays[1].frame
-  local height = (frame and frame.h) or 982
-  -- bar, popup inset, and the hint row the list always ends with
-  return height - 40 - 16
-end
+-- Twelve is about two hands of background apps, and each one costs the bar
+-- its icon width while open. Anything past this stays hidden behind ⌥.
+local MAX_SLOTS = 12
+local slot_w = 22
+local slot_gap = 4
 
 local helper = (PORT_DIR or (os.getenv("HOME") .. "/.config/ybar"))
   .. "/helpers/bin/statusitems"
 local hidden_file = os.getenv("HOME") .. "/.config/ybar-hidden-items"
 
--- ── Bar pill: the Bartender chevron ────────────────────────────────────────
+-- ── Bar pill: the toggle ───────────────────────────────────────────────────
 local chevron = sbar.add("item", "widgets.menubar", {
   position = "right",
   icon = {
@@ -51,121 +40,57 @@ local chevron = sbar.add("item", "widgets.menubar", {
   label = { drawing = false },
   padding_left = 2,
   padding_right = 2,
+  -- Carries the routine tick the refresh rides on.
+  update_freq = 10,
 })
 
-local bracket = sbar.add("bracket", "widgets.menubar.bracket", { chevron.name }, {
+-- Created after the chevron, so the strip grows to its LEFT: right-positioned
+-- items are laid out from the right edge in creation order.
+local slots = {}
+for i = 1, MAX_SLOTS do
+  slots[i] = sbar.add("item", "widgets.menubar.slot." .. i, {
+    position = "right",
+    drawing = false,
+    width = 0,
+    padding_left = 0,
+    padding_right = 0,
+    background = { drawing = false },
+    icon = { drawing = false },
+    label = { drawing = false },
+    image = {
+      string = "",
+      size = slot_w - 4,
+      padding_left = 0,
+      padding_right = 0,
+    },
+  })
+end
+
+-- One capsule around the toggle and the whole strip, so expanding reads as
+-- the tray opening rather than a row of loose icons appearing beside it.
+local members = { chevron.name }
+for i = 1, MAX_SLOTS do members[#members + 1] = slots[i].name end
+local bracket = sbar.add("bracket", "widgets.menubar.bracket", members, {
   background = { color = colors.bg1 },
-  popup = { align = "center", height = 30 },
 })
-
-hover.pill(bracket, chevron)
 
 sbar.add("item", "widgets.menubar.padding", {
   position = "right",
   width = settings.group_paddings,
 })
 
-local popup_pos = "popup." .. bracket.name
-
-local header = sbar.add("item", {
-  position = popup_pos,
-  width = popup_width,
-  icon = {
-    align = "left",
-    string = "Background",
-    font = { size = 14, style = settings.font.style_map["Bold"] },
-    padding_left = inset,
-  },
-  -- No label slot: the refresh spinner (image, align=r) trails the title.
-  label = { drawing = false },
-  align = "left",
-  background = rule.background({ y_offset = -15 }),
-})
-
--- Shown only when Accessibility permission is missing.
-local access_row = sbar.add("item", {
-  position = popup_pos,
-  drawing = false,
-  width = popup_width,
-  icon = {
-    string = "Accessibility access needed",
-    align = "left",
-    color = colors.grey,
-    font = { size = 12.0 },
-    width = popup_width / 2,
-    padding_left = inset,
-  },
-  label = {
-    string = "Open Privacy",
-    align = "right",
-    color = colors.white,
-    font = { size = 12.0, style = settings.font.style_map["Semibold"] },
-    width = popup_width / 2,
-    padding_right = inset,
-  },
-})
-hover.row(access_row, { flat = true })
-
-local rows = {}
-for i = 1, max_rows do
-  rows[i] = sbar.add("item", "widgets.menubar.row." .. i, {
-    position = popup_pos,
-    drawing = false,
-    width = popup_width,
-    icon = { drawing = false },
-    -- Real app icons via the engine's image component ("app.<Name>").
-    image = {
-      string = "",
-      size = 18,
-      padding_left = inset + 4,
-      padding_right = 8,
-    },
-    label = {
-      string = "",
-      color = colors.white,
-      font = { size = 12.0 },
-      width = popup_width - 18 - inset - 12,
-      align = "left",
-    },
-  })
-  hover.row(rows[i], { flat = true })
-end
-
-sbar.add("item", {
-  position = popup_pos,
-  width = popup_width,
-  icon = { drawing = false },
-  label = { drawing = false },
-  background = rule.background(),
-})
-
--- Named so a recording or a test can pin what the footer says instead of
--- inheriting whichever view set it last.
-local hint_row = sbar.add("item", "widgets.menubar.hint", {
-  position = popup_pos,
-  width = popup_width,
-  align = "center",
-  icon = {
-    string = "click opens · right-click hides",
-    color = colors.with_alpha(colors.grey, 0.7),
-    font = { size = 10.0 },
-  },
-  label = { drawing = false },
-})
+local watchers = { bracket, chevron }
+for i = 1, MAX_SLOTS do watchers[#watchers + 1] = slots[i] end
+hover.attach(bracket, watchers, colors.bg1, colors.bg2)
 
 -- ── State ──────────────────────────────────────────────────────────────────
 local items_cache = {}    -- { pid, name, index, count, hidden }
-local visible_map = {}    -- row i -> items_cache entry
+local shown = {}          -- slot i -> items_cache entry
 local hidden_set = {}
 local show_hidden = false
 local no_access = false
--- Drill-down: nil at the item list, else the app whose menu is on screen.
--- `path` is the helper's dot-separated index chain, so a submenu is one
--- level deeper and "back" is a single pop.
-local menu_view = nil     -- { entry = <items_cache entry>, path = {…}, rows = {…} }
-local refreshing = false
-
-local spinner = require("helpers.spinner").attach(header)
+local expanded = false
+local collapse_seq = 0
 
 local function load_hidden()
   hidden_set = {}
@@ -200,131 +125,84 @@ end
 
 local shell_quote = function(v) return "'" .. tostring(v):gsub("'", "'\\''") .. "'" end
 
--- Render the drilled-into menu: one row per entry, a back row on top.
--- Separators (blank, disabled) are dropped — they carry no text, and a row
--- that cannot be clicked is noise in a list this short.
-local function populate_menu()
-  access_row:set({ drawing = false })
-  local view = menu_view
-  local shown = {}
-  for _, e in ipairs(view.rows) do
-    if e.title ~= "" then shown[#shown + 1] = e end
+-- ── The strip ──────────────────────────────────────────────────────────────
+-- Which entries the strip would show. Hidden ones are held back unless ⌥ is
+-- down, and the cap is the slot pool.
+local function visible_entries()
+  local out = {}
+  for _, entry in ipairs(items_cache) do
+    entry.hidden = hidden_set[display_name(entry)] == true
+    if (not entry.hidden or show_hidden) and #out < MAX_SLOTS then
+      out[#out + 1] = entry
+    end
   end
-  view.shown = shown
+  return out
+end
 
-  -- The list is laid in at zero alpha and faded up, so drilling in or back
-  -- reads as a transition instead of the rows snapping to new text. Colour is
-  -- the only thing animated: a row's geometry drives the popup's own size, and
-  -- animating that would make the panel breathe on every hop.
-  local final = {}
-  local clear = function(c) return colors.with_alpha(c, 0) end
-  -- Pick the row height before laying anything out: everything below counts
-  -- rows against it.
-  local budget = row_budget()
-  local row_h = ROW_H
-  if (#shown + 2) * ROW_H > budget then row_h = COMPACT_ROW_H end
-  bracket:set({ popup = { height = row_h } })
-  local fits = math.max(1, math.floor(budget / row_h) - 1)   -- less the hint
-  local capacity = math.min(#rows, fits) - 1                 -- less the back row
-
-  for i, row in ipairs(rows) do
-    if i > capacity + 1 then
-      row:set({ drawing = false })
-    elseif i == 1 then
-      final[i] = { icon = colors.grey, label = colors.grey }
-      row:set({
-        drawing = true,
-        image = { drawing = false },
-        icon = { drawing = true, string = "‹", align = "left",
-                 color = clear(colors.grey), padding_left = inset + 4,
-                 font = { size = 14, style = settings.font.style_map["Bold"] } },
-        label = { string = display_name(view.entry), color = clear(colors.grey) },
-      })
-    else
-      local e = shown[i - 1]
-      if e then
-        local label_color = e.enabled and colors.white or colors.grey
-        final[i] = { icon = colors.grey, label = label_color }
-        row:set({
+-- Fills the slots without animating: used while already open, when the set
+-- changes under us (an app quits, an item is hidden).
+local function paint(animated)
+  shown = no_access and {} or visible_entries()
+  local function apply()
+    for i, slot in ipairs(slots) do
+      local entry = expanded and shown[i] or nil
+      if entry then
+        slot:set({
           drawing = true,
-          image = { drawing = false },
-          icon = { drawing = true, string = e.submenu and "›" or " ", align = "right",
-                   color = clear(colors.grey), padding_left = 0,
-                   padding_right = inset, font = { size = 12 } },
-          label = {
-            string = e.title,
-            color = clear(label_color),
-            padding_left = inset + 4,
+          width = slot_w,
+          padding_left = slot_gap / 2,
+          padding_right = slot_gap / 2,
+          image = {
+            drawing = true,
+            string = "app." .. entry.name,
+            -- A hidden item revealed by ⌥ reads as provisional rather than as
+            -- one you kept. The image part has no alpha, and desaturate says
+            -- "set aside" more plainly than a fade would anyway.
+            desaturate = entry.hidden,
           },
         })
       else
-        row:set({ drawing = false })
+        -- Width alone carries the collapse: the slot slides shut and
+        -- retire_empty_slots stops drawing it once it has.
+        slot:set({ width = 0, padding_left = 0, padding_right = 0 })
       end
     end
   end
-  sbar.animate("sin", 9, function()
-    for i, c in pairs(final) do
-      rows[i]:set({ icon = { color = c.icon }, label = { color = c.label } })
-    end
-  end)
-  local hint = "click runs · ‹ back"
-  if #shown > capacity then
-    hint = hint .. " · " .. (#shown - capacity) .. " more not shown"
+  if animated then
+    sbar.animate("tanh", 13, apply)
+  else
+    apply()
   end
-  hint_row:set({ drawing = true, icon = { string = hint } })
 end
 
-local function populate()
-  if menu_view then return populate_menu() end
-  -- Back to the item list: it is short, so it always gets the roomy height a
-  -- drilled-into menu may have compacted away.
-  bracket:set({ popup = { height = ROW_H } })
-  access_row:set({ drawing = no_access })
+-- A collapsed slot keeps its item alive at zero width; drawing=false only
+-- after the animation, or it would vanish instead of sliding shut.
+local function retire_empty_slots()
+  collapse_seq = collapse_seq + 1
+  local seq = collapse_seq
+  sbar.delay(0.24, function()
+    if seq ~= collapse_seq then return end
+    for i, slot in ipairs(slots) do
+      if not (expanded and shown[i]) then slot:set({ drawing = false }) end
+    end
+  end)
+end
 
-  local hidden_count = 0
-  for _, entry in ipairs(items_cache) do
-    entry.hidden = hidden_set[display_name(entry)] == true
-    if entry.hidden then hidden_count = hidden_count + 1 end
-  end
-
-  visible_map = {}
-  for _, entry in ipairs(items_cache) do
-    if (not entry.hidden or show_hidden) and #visible_map < max_rows then
-      visible_map[#visible_map + 1] = entry
+local function set_expanded(open)
+  expanded = open
+  chevron:set({ icon = { string = open and "›" or "‹" } })
+  if open then
+    collapse_seq = collapse_seq + 1   -- cancel a pending retire
+    for i, slot in ipairs(slots) do
+      if shown[i] or no_access then slot:set({ drawing = true }) end
     end
   end
-
-  for i, row in ipairs(rows) do
-    local entry = not no_access and visible_map[i] or nil
-    if entry then
-      row:set({
-        drawing = true,
-        image = { drawing = true, string = "app." .. entry.name },
-        icon = { drawing = false },
-        label = {
-          string = display_name(entry) .. (entry.hidden and "  ·  hidden" or ""),
-          color = entry.hidden and colors.grey or colors.white,
-          padding_left = 0,
-        },
-      })
-    else
-      row:set({ drawing = false })
-    end
-  end
-
-  local hint = "click opens · right-click hides"
-  if hidden_count > 0 and not show_hidden then
-    hint = hint .. " · hold ⌥ for " .. hidden_count .. " hidden"
-  end
-  hint_row:set({ drawing = not no_access, icon = { string = hint } })
+  paint(true)
+  if not open then retire_empty_slots() end
 end
 
 local function refresh()
-  refreshing = true
-  spinner.start()
   sbar.exec("'" .. helper:gsub("'", "'\\''") .. "' list 2>/dev/null", function(out)
-    refreshing = false
-    spinner.stop()
     no_access = out:match("NOAX") ~= nil
     if not no_access then
       items_cache = {}
@@ -343,125 +221,79 @@ local function refresh()
         return pretty_name(a.name):lower() < pretty_name(b.name):lower()
       end)
     end
-    populate()
+    -- Only repaint while open: a refresh behind a closed tray has nothing to
+    -- show and would animate slots nobody can see.
+    if expanded then
+      for i, slot in ipairs(slots) do
+        if visible_entries()[i] then slot:set({ drawing = true }) end
+      end
+      paint(true)
+      retire_empty_slots()
+    end
   end)
 end
 
 -- ── Interactions ───────────────────────────────────────────────────────────
-local function hide_popup()
-  -- Always leave at the item list: an auto-close (pointer leaving the bar)
-  -- runs no Lua, so a popup reopened later would otherwise still be showing
-  -- some app's menu with no memory of why.
-  menu_view = nil
-  bracket:set({ popup = { drawing = false } })
+local function collapse()
+  if not expanded then return end
+  set_expanded(false)
 end
 
--- Load an app's menu (or a submenu) into the popup. Async: the helper reads
--- the AX tree of another process, which is not instant, and the popup must
--- not freeze the bar while it does.
-local function open_menu(entry, path)
-  local cmd = shell_quote(helper) .. " menu " .. entry.pid .. " " .. entry.index
-  if #path > 0 then cmd = cmd .. " " .. table.concat(path, ".") end
-  sbar.exec(cmd, function(out, code)
-    -- No menu (Creative Cloud's icon opens a panel instead): fall back to
-    -- pressing the item, which is what the widget always did.
-    if code ~= 0 or not out:match("%S") then
-      if #path == 0 then
-        hide_popup()
-        sbar.delay(0.2, function()
-          sbar.exec(shell_quote(helper) .. " press " .. entry.pid .. " " .. entry.index)
-        end)
-      end
-      return
-    end
-    local parsed = {}
-    for line in out:gmatch("[^\n]+") do
-      local idx, enabled, submenu, title = line:match("^(%d+)\t(%d)\t(%d)\t(.*)$")
-      if idx then
-        parsed[#parsed + 1] = {
-          index = tonumber(idx), enabled = enabled == "1",
-          submenu = submenu == "1", title = title,
-        }
-      end
-    end
-    menu_view = { entry = entry, path = path, rows = parsed }
-    populate()
-  end)
+-- Accessibility is what the helper needs to see the items at all. Without it
+-- the tray has nothing to open, so the toggle sends you to the pane instead.
+local function toggle(env)
+  if no_access then
+    sbar.exec("open 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'")
+    return
+  end
+  if expanded then return collapse() end
+  show_hidden = (env and env.MODIFIER == "alt") or false
+  set_expanded(true)
+  refresh()
 end
 
-for i, row in ipairs(rows) do
-  row:subscribe("mouse.clicked", function(env)
-    -- Inside an app's menu the rows mean something else entirely.
-    if menu_view then
-      if i == 1 then
-        -- Back: one level up, or out to the item list.
-        if #menu_view.path == 0 then
-          menu_view = nil
-        else
-          local up = {}
-          for n = 1, #menu_view.path - 1 do up[n] = menu_view.path[n] end
-          return open_menu(menu_view.entry, up)
-        end
-        return populate()
-      end
-      local e = menu_view.shown and menu_view.shown[i - 1]
-      if not e or not e.enabled then return end
-      local path = {}
-      for n = 1, #menu_view.path do path[n] = menu_view.path[n] end
-      path[#path + 1] = e.index
-      if e.submenu then return open_menu(menu_view.entry, path) end
-      local target = menu_view.entry
-      hide_popup()
-      sbar.exec(shell_quote(helper) .. " item " .. target.pid .. " " .. target.index
-        .. " " .. table.concat(path, "."))
-      return
-    end
+chevron:subscribe("mouse.clicked", toggle)
+chevron:subscribe("mouse.exited.global", collapse)
 
-    local entry = visible_map[i]
+for i, slot in ipairs(slots) do
+  slot:subscribe("mouse.clicked", function(env)
+    local entry = shown[i]
     if not entry then return end
     if env.BUTTON == "right" then
       local key = display_name(entry)
       hidden_set[key] = not hidden_set[key] or nil
       save_hidden()
-      populate()
+      paint(true)
+      retire_empty_slots()
       return
     end
-    open_menu(entry, {})
+    -- Press the real status item: macOS opens that app's own menu, anchored
+    -- to where the item would be. Collapse first so the strip is not left
+    -- standing open underneath it.
+    collapse()
+    sbar.delay(0.2, function()
+      sbar.exec(shell_quote(helper) .. " press " .. entry.pid .. " " .. entry.index)
+    end)
   end)
 end
 
-access_row:subscribe("mouse.clicked", function()
-  sbar.exec("open 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'")
-  hide_popup()
-end)
-
--- Option-click opens with the hidden set revealed (Bartender's idiom).
-local function toggle_popup(env)
-  local should_draw = bracket:query().popup.drawing == "off"
-  if should_draw then
-    menu_view = nil
-    show_hidden = (env and env.MODIFIER == "alt") or false
-    bracket:set({ popup = { drawing = true } })
-    populate()
-    refresh()
-  else
-    hide_popup()
-  end
-end
-
-chevron:subscribe("mouse.clicked", toggle_popup)
-chevron:subscribe("mouse.exited.global", hide_popup)
-
--- Live reveal: holding ⌥ while the popup is open shows the hidden set,
--- releasing hides it again (immune to click-routing quirks).
+-- Live reveal: holding ⌥ while the strip is open brings the hidden ones in,
+-- releasing takes them back out.
 chevron:subscribe("modifier_change", function(env)
-  if bracket:query().popup.drawing ~= "on" then return end
+  if not expanded then return end
   local want = env.MODIFIER == "alt"
-  if want ~= show_hidden then
-    show_hidden = want
-    populate()
+  if want == show_hidden then return end
+  show_hidden = want
+  for i in ipairs(slots) do
+    if visible_entries()[i] then slots[i]:set({ drawing = true }) end
   end
+  paint(true)
+  retire_empty_slots()
 end)
+
+-- The set changes without any click: apps launch, quit, add a second item.
+chevron:subscribe({ "routine", "app_launched", "app_terminated", "system_woke" },
+  function() refresh() end)
 
 load_hidden()
 refresh()
