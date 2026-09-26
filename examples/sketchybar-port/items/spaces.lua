@@ -734,6 +734,19 @@ function apply_focus(focused)
   last_focused = focused
 end
 
+-- menus.lua calls this when the workspace changes while the app menus are up.
+-- Every refresh path is gated on MENUS_VISIBLE so a resync cannot resurrect
+-- the pills behind the menus — but the ACTIVE pill is not hidden. It is the
+-- menu toggle, and it carries the FRONT APP's name, so with the gate closed
+-- it kept naming the app from the workspace you left.
+MENUS_REFOCUS = function(focused)
+  if not focused or focused == "" or focused == last_focused then return end
+  local slot = slot_of[focused]
+  if not slot then return end
+  apply_focus(focused)
+  paint_liquid(slot)
+end
+
 -- Reconcile generation: rapid switching debounces into one query burst,
 -- and late callbacks from superseded switches are dropped instead of
 -- repainting stale state out of order.

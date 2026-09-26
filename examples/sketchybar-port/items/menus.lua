@@ -137,6 +137,16 @@ menu_watcher:subscribe("front_app_switched", update_menus)
 -- `remember` is false when the switch handler drives these: a workspace change
 -- records the OUTGOING workspace's state itself, before it reassigns
 -- current_workspace, and must not have the close overwrite the incoming one.
+-- The active pill is the menu toggle, so it stays while the others hide.
+local function show_only_active_pill()
+  sbar.set("/space\\..*/", { drawing = false })
+  if ACTIVE_SPACE_NAME then
+    sbar.set(ACTIVE_SPACE_NAME, { drawing = true })
+    local slot = ACTIVE_SPACE_NAME:match("^space%.(%d+)$")
+    if slot then sbar.set("space.padding." .. slot, { drawing = true }) end
+  end
+end
+
 local function close_menus(remember)
   if remember ~= false and current_workspace then
     menu_open_on[current_workspace] = false
@@ -181,13 +191,7 @@ local function open_menus(remember)
   MENUS_VISIBLE = true
   menu_hide_seq = menu_hide_seq + 1   -- cancel a pending collapse cleanup
   menu_watcher:set( { updates = true })
-  sbar.set("/space\\..*/", { drawing = false })
-  -- The active pill is the menu toggle, so it stays while the others hide.
-  if ACTIVE_SPACE_NAME then
-    sbar.set(ACTIVE_SPACE_NAME, { drawing = true })
-    local slot = ACTIVE_SPACE_NAME:match("^space%.(%d+)$")
-    if slot then sbar.set("space.padding." .. slot, { drawing = true }) end
-  end
+  show_only_active_pill()
   if not YSUITE_LIQUID then sbar.set("front_app", { drawing = false }) end
   update_menus()
 end
@@ -216,8 +220,14 @@ local function workspace_changed(incoming)
   local want = menu_open_on[incoming] == true
 
   if want and menus_shown then
-    -- Both sides want the menus. Closing and reopening would read as a blink
-    -- for no reason; the entries just need to become the new app's.
+    -- Both sides want the menus, so they stay up — closing and reopening
+    -- would read as a blink for no reason. But the pill showing underneath
+    -- them is the menu toggle and it names the front app, and spaces.lua's
+    -- own refresh is gated off while the menus are visible, so the refocus
+    -- has to be asked for: without it the pill kept the name of the
+    -- workspace being left.
+    if MENUS_REFOCUS then MENUS_REFOCUS(incoming) end
+    show_only_active_pill()
     update_menus()
   elseif want then
     -- The pills repaint on this same event and set ACTIVE_SPACE_NAME, which
