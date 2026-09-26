@@ -22,14 +22,13 @@ local hover = require("helpers.hover")
 local MAX_SLOTS = 12
 local slot_w = 22
 local slot_gap = 4
--- The chevron's glyph sits 8pt off the capsule's right rim. Padding on the
--- leftmost slot cannot answer that: a bracket sizes to its members' content,
--- so the plate ignores it and the first icon still lands on the rim. The
--- PLATE takes the inset instead — background.padding_left grows it leftwards
--- — and only while the strip is open, or the collapsed pill goes lopsided.
--- The slot carries half a gap of its own, so the plate only owes the
--- difference.
-local tray_edge = 8 - slot_gap / 2
+-- The chevron's glyph sits 8pt off the capsule's right rim; the first icon
+-- sat 5.5pt off the left one. Neither padding answers that: a bracket sizes
+-- to its members' CONTENT, so padding on the leftmost slot moves the plate
+-- with the icon, and background.padding_left on the bracket does nothing at
+-- all (measured: the rim stays put at 0, 8 and 20). What the plate does
+-- follow is a member's width, so the strip ends in a blank spacer.
+local tray_edge = 2
 
 local helper = (PORT_DIR or (os.getenv("HOME") .. "/.config/ybar"))
   .. "/helpers/bin/statusitems"
@@ -74,10 +73,24 @@ for i = 1, MAX_SLOTS do
   })
 end
 
+-- Blank, and the leftmost member: its width is the only thing that moves the
+-- capsule's left rim away from the first icon.
+local lead = sbar.add("item", "widgets.menubar.lead", {
+  position = "right",
+  drawing = false,
+  width = 0,
+  padding_left = 0,
+  padding_right = 0,
+  background = { drawing = false },
+  icon = { drawing = false },
+  label = { drawing = false },
+})
+
 -- One capsule around the toggle and the whole strip, so expanding reads as
 -- the tray opening rather than a row of loose icons appearing beside it.
 local members = { chevron.name }
 for i = 1, MAX_SLOTS do members[#members + 1] = slots[i].name end
+members[#members + 1] = lead.name
 local bracket = sbar.add("bracket", "widgets.menubar.bracket", members, {
   background = { color = colors.bg1 },
 })
@@ -199,7 +212,7 @@ end
 local function set_expanded(open)
   expanded = open
   chevron:set({ icon = { string = open and "›" or "‹" } })
-  bracket:set({ background = { padding_left = open and tray_edge or 0 } })
+  lead:set({ drawing = open, width = open and tray_edge or 0 })
   if open then
     collapse_seq = collapse_seq + 1   -- cancel a pending retire
     for i, slot in ipairs(slots) do
