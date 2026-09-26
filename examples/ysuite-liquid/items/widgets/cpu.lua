@@ -1,6 +1,7 @@
 local colors = require("colors")
 local settings = require("settings")
 local hover = require("helpers.hover")
+local rule = require("helpers.separator")
 
 -- Liquid Glass system monitor: sparkline pill (no glyph) and a card popup
 -- matching the webpage — Memory / CPU / GPU rows plus the Disk footer.
@@ -179,6 +180,19 @@ local function add_tab(key, text, pad_left, pad_right)
   })
   return tab
 end
+
+-- Divides the cards from the chart the switch drives, the way the battery
+-- popup rules off its detail rows. Its own full-width line, so the flow
+-- layout cannot pull a tab up beside it.
+sbar.add("item", "widgets.cpu.rule", {
+  position = popup_pos,
+  width = popup_width,
+  padding_left = 0,
+  padding_right = 0,
+  icon = { drawing = false },
+  label = { drawing = false },
+  background = rule.background(),
+})
 
 local tabs = {
   cpu = add_tab("cpu", "CPU", inset, 0),
