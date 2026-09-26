@@ -357,7 +357,11 @@ local function paint_network(row, net)
     drawing = true,
     width = lock_w,
     padding_left = button_on and gap or 0,
-    padding_right = has_fan and 0 or edge,
+    -- The fan's slot is always there now and carries the trailing edge, so
+    -- adding one here too pushed a fanless row 6pt over the line and wrapped
+    -- the fan onto its own row — which then centred the short line that was
+    -- left, indenting the connected plate.
+    padding_right = 0,
     background = { drawing = false },
     icon = {
       drawing = true,
