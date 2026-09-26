@@ -32,6 +32,10 @@ require("items")
 
 sbar.set("/.*/", { background = { border_width = 0 } })
 sbar.set("/space\\..*/", { icon = { highlight_color = 0xffffffff } })
+-- The clock is the last pill on the right, and its own 1pt outer padding is
+-- the difference between the capsule sitting 9pt from the edge and 8 — which
+-- is where AeroSpace puts a tiled window's edge. bar.lua handles the rest.
+sbar.set("calendar", { padding_right = 0 })
 
 sbar.end_config()
 
