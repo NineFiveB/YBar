@@ -1,7 +1,6 @@
 local icons = require("icons")
 local colors = require("colors")
 local settings = require("settings")
-local rule = require("helpers.separator")
 
 -- Liquid Glass Wi-Fi popup. The header keeps the green Connected status.
 -- Each network is one wrapped line: name on the left, then an optional
@@ -19,6 +18,13 @@ local button_w = 96
 local gap = 12
 local max_rows = 6
 local max_hotspots = 3
+-- Rows in a group share one rounded plate. There is no bracket inside a popup
+-- — buildPopup lays every member out as a row — so the "frame" is each row's
+-- own plate, drawn taller than the row pitch so consecutive ones overlap and
+-- only the group's outer corners are left showing.
+local frame_row = 34
+local frame_plate = frame_row + 4
+local frame_radius = 12
 local disconnect_red = 0xccff453a
 
 local wifi = sbar.add("item", "widgets.wifi", {
@@ -33,7 +39,10 @@ local wifi = sbar.add("item", "widgets.wifi", {
 
 local wifi_bracket = sbar.add("bracket", "widgets.wifi.bracket", { wifi.name }, {
   background = { color = colors.bg1 },
-  popup = { align = "center", wrap_width = line },
+  -- A fixed cell height is what makes the frames possible: the plates have to
+  -- overlap by a known amount, and without it each row is as tall as its own
+  -- content.
+  popup = { align = "center", wrap_width = line, height = frame_row },
 })
 
 require("helpers.hover").pill(wifi_bracket, wifi)
@@ -146,11 +155,13 @@ local scan_label = sbar.add("item", "widgets.wifi.scan", {
     padding_left = 12,
   },
   label = { drawing = false },
-  background = rule.background({ y_offset = 12 }),
 })
 
+-- Right-hand side, like the wheel beside "Other Networks" in Settings. The
+-- header keeps its own text: a spinner that REPLACES the heading leaves the
+-- list with nothing naming it while a scan runs.
 local spinner = require("helpers.spinner").attach(scan_label, {
-  size = 10, align = "l", padding_left = 12,
+  size = 11, align = "r", padding_left = 0, padding_right = 12,
 })
 
 -- Second line of the no-Location notice: the one-time opt-in that raises
@@ -261,6 +272,19 @@ local function wants_button(net)
   return hovered_name == net.name and can_join(net)
 end
 
+-- The plate belongs to the row's name item but has to cover the whole row,
+-- so it reaches right over the lock and fan columns. background.padding_right
+-- grows a plate rightwards the same way padding_left grows it left.
+local function frame_plate_for(tail_width)
+  return {
+    color = colors.selection,
+    height = frame_plate,
+    corner_radius = frame_radius,
+    drawing = true,
+    padding_right = tail_width,
+  }
+end
+
 local function paint_network(row, net)
   if not net then
     row.name:set({ drawing = false, width = 0, padding_left = 0 })
@@ -289,12 +313,7 @@ local function paint_network(row, net)
       width = name_w + button_w,
       padding_left = edge,
       padding_right = 0,
-      background = {
-        color = colors.selection,
-        height = 36,
-        corner_radius = 12,
-        drawing = true,
-      },
+      background = frame_plate_for(lock_w + tail),
       icon = {
         drawing = true,
         string = title,
@@ -320,7 +339,7 @@ local function paint_network(row, net)
       width = name_w,
       padding_left = edge,
       padding_right = 0,
-      background = { drawing = false },
+      background = frame_plate_for(lock_w + tail + (button_on and (button_w + gap) or 0)),
       icon = {
         drawing = true,
         string = title,
@@ -426,7 +445,7 @@ local function paint()
     paint_network(row, other_list[i])
   end
   if scan_running then
-    scan_label:set({ drawing = true, icon = { string = "Looking for networks…" } })
+    scan_label:set({ drawing = true, icon = { string = "Other networks" } })
   elseif scan_redacted then
     scan_label:set({ drawing = true, icon = { string = "Allow Location for YBar to list networks" } })
   elseif #other_list > 0 then
