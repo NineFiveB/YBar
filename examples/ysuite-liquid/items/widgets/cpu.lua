@@ -145,8 +145,15 @@ local shown_series = "cpu"
 -- Three tabs when the machine reports a GPU, two when it does not: the GPU
 -- card hides itself on the same signal, and a tab onto a chart that can never
 -- fill is worse than no tab.
-local tab_w3 = (inner - 8) / 3
-local tab_w2 = (inner - 4) / 2
+local tab_gap = 6
+-- 2pt of slack so the strip sits INSIDE wrap_width rather than exactly on it:
+-- a row that fills the line exactly wraps on the next tweak instead of
+-- crowding, which is how the Wi-Fi fan ended up on a line of its own.
+local function tab_width(count)
+  return math.floor((inner - (count - 1) * tab_gap - 2) / count)
+end
+local tab_w3 = tab_width(3)
+local tab_w2 = tab_width(2)
 
 local function add_tab(key, text, pad_left, pad_right)
   local tab = sbar.add("item", "widgets.cpu.tab." .. key, {
@@ -175,8 +182,8 @@ end
 
 local tabs = {
   cpu = add_tab("cpu", "CPU", inset, 0),
-  gpu = add_tab("gpu", "GPU", 0, 0),
-  ram = add_tab("ram", "RAM", 0, inset),
+  gpu = add_tab("gpu", "GPU", tab_gap, 0),
+  ram = add_tab("ram", "RAM", tab_gap, inset),
 }
 
 local chart_title = sbar.add("item", "widgets.cpu.chart_title", {
@@ -314,12 +321,14 @@ end
 local function fit_tabs(with_gpu)
   if with_gpu then
     tabs.cpu:set({ width = tab_w3 })
-    tabs.gpu:set({ drawing = true, width = tab_w3 })
-    tabs.ram:set({ width = tab_w3 })
+    tabs.gpu:set({ drawing = true, width = tab_w3, padding_left = tab_gap })
+    tabs.ram:set({ width = tab_w3, padding_left = tab_gap })
   else
+    -- A hidden tab gives up its padding too, or the gap it used to sit in
+    -- stays behind as dead space between the two that remain.
     tabs.cpu:set({ width = tab_w2 })
-    tabs.gpu:set({ drawing = false, width = 0 })
-    tabs.ram:set({ width = tab_w2 })
+    tabs.gpu:set({ drawing = false, width = 0, padding_left = 0 })
+    tabs.ram:set({ width = tab_w2, padding_left = tab_gap })
   end
 end
 fit_tabs(false)
