@@ -1,5 +1,7 @@
 local settings = require("settings")
 local colors = require("colors")
+local rule = require("helpers.separator")
+local hover = require("helpers.hover")
 
 -- YBAR PORT: calendar popup rebuilt as a real month grid. Each day is its
 -- own fixed-width cell item laid out by the popup flow layout
@@ -19,10 +21,13 @@ local cal = sbar.add("item", "calendar", {
   icon = {
     color = colors.white,
     padding_left = 8,
-    -- -1: the icon part is ink-centered, and including the "g" descender
-    -- in the centered box pushes the caps ABOVE the time's cap line
-    -- (measured: cap-tops 26 vs 30 device px at +1; equal at -1).
-    y_offset = -1,
+    -- The icon part is ink-centered, so the correction depends on whether
+    -- the string has a descender. "%a %b d" carries the "g" of "Aug", and
+    -- including it in the centered box pushes the caps ABOVE the time's cap
+    -- line (measured: cap-tops 26 vs 30 device px at +1; equal at -1).
+    -- The glass themes show the weekday alone — no descender, nothing to
+    -- correct, and the -1 just dropped "Fri" 2 device px below the clock.
+    y_offset = YSUITE_LIQUID and 0 or -1,
     font = {
       style = settings.font.style_map["Regular"],
       size = 13.0,   -- same size as the time label
@@ -61,9 +66,33 @@ local cal_bracket = sbar.add("bracket", "calendar.bracket", { cal.name }, {
 sbar.add("item", { position = "right", width = settings.group_paddings })
 
 -- ── Popup construction (fixed pools, flow layout) ──────────────────────────
+-- Header line: a back arrow, the month, a forward arrow. Three items rather
+-- than one because a flow line is the only way to put the arrows on the
+-- month's own baseline and still have them be their own hit targets — an
+-- item has exactly two text slots, and both are spoken for by the month.
+local function add_arrow(name, glyph)
+  local arrow = sbar.add("item", name, {
+    position = "popup." .. cal_bracket.name,
+    width = cell_w,
+    padding_left = 0,
+    padding_right = 0,
+    align = "center",
+    icon = { drawing = false },
+    label = {
+      string = glyph,
+      font = { size = 14, style = settings.font.style_map["Bold"] },
+      color = colors.with_alpha(colors.white, 0.7),
+    },
+  })
+  hover.row(arrow, { height = 22, radius = 6, flat = true })
+  return arrow
+end
+
+local prev_month = add_arrow("calendar.prev", "‹")
+
 local header = sbar.add("item", "calendar.header", {
   position = "popup." .. cal_bracket.name,
-  width = grid_width,
+  width = grid_width - 2 * cell_w,
   padding_left = 0,
   padding_right = 0,
   align = "center",
@@ -73,6 +102,9 @@ local header = sbar.add("item", "calendar.header", {
     color = colors.white,
   },
 })
+hover.row(header, { height = 22, radius = 6, flat = true })
+
+local next_month = add_arrow("calendar.next", "›")
 
 -- Day-name cells: one per column, centered over the date columns.
 local daynames = { "S", "M", "T", "W", "T", "F", "S" }
@@ -124,7 +156,24 @@ local separator = sbar.add("item", "calendar.separator", {
   padding_right = 0,
   icon = { drawing = false },
   label = { drawing = false },
-  background = { height = 2, color = colors.with_alpha(colors.grey, 0.3) },
+  background = rule.background(),
+})
+
+-- Reads out whichever day the pointer is on, and today's date when it is on
+-- none. The grid is 42 identical cells, so without this a hovered day says
+-- nothing about itself — the number is all the cell has room for.
+local dayline = sbar.add("item", "calendar.dayline", {
+  position = "popup." .. cal_bracket.name,
+  width = grid_width,
+  padding_left = 0,
+  padding_right = 0,
+  align = "center",
+  icon = { drawing = false },
+  label = {
+    string = " ",
+    font = { size = 11, style = settings.font.style_map["Regular"] },
+    color = colors.with_alpha(colors.white, 0.85),
+  },
 })
 
 local events_header = sbar.add("item", "calendar.events.header", {
@@ -199,6 +248,20 @@ end
 
 local update_calendar
 
+-- Months away from the current one. Paging keeps the last feed rather than
+-- refetching: the helper answers with upcoming events only, so a month in the
+-- past or far ahead would come back empty and blank the dots on the way back.
+local month_offset = 0
+local last_events = {}
+-- Per cell, what update_calendar left behind: the day it shows, its date key
+-- and the fill it rests at. The hover handlers are wired once at load and the
+-- grid is repainted under them, so they cannot close over a day number.
+local cell_day = {}
+local cell_date = {}
+local cell_rest = {}
+local events_on = {}
+local today_line = " "
+
 local function fetch_calendar_events()
   local config_dir = SKETCHYBAR_CONFIG or (os.getenv("HOME") .. "/.config/sketchybar")
   local script_path = config_dir .. "/helpers/calendar_events.sh"
@@ -214,23 +277,33 @@ end
 
 -- ── Rendering ──────────────────────────────────────────────────────────────
 update_calendar = function(events)
+  last_events = events
   local now = os.date("*t")
   local today_date_str = os.date("%Y-%m-%d")
+  -- os.time normalises a month of 0 or 13, so an offset needs no wrap logic.
+  local view = os.date("*t", os.time({
+    year = now.year, month = now.month + month_offset, day = 1, hour = 12 }))
 
   local events_by_date = {}
+  events_on = {}
   for _, event in ipairs(events) do
-    if event.date ~= "" then events_by_date[event.date] = true end
+    if event.date ~= "" then
+      events_by_date[event.date] = true
+      local day_list = events_on[event.date] or {}
+      day_list[#day_list + 1] = event
+      events_on[event.date] = day_list
+    end
   end
 
   local month_names = { "January", "February", "March", "April", "May", "June",
                         "July", "August", "September", "October", "November", "December" }
-  header:set({ label = { string = month_names[now.month] .. " " .. now.year } })
+  header:set({ label = { string = month_names[view.month] .. " " .. view.year } })
 
   local first_time = os.time({
-    year = now.year, month = now.month, day = 1, hour = 12, isdst = false })
+    year = view.year, month = view.month, day = 1, hour = 12, isdst = false })
   local first_day = os.date("*t", first_time).wday - 1   -- 0 = Sunday column
   local days_in_month = os.date("*t", os.time({
-    year = now.year, month = now.month + 1, day = 0, hour = 12 })).day
+    year = view.year, month = view.month + 1, day = 0, hour = 12 })).day
 
   -- Only as many full grid lines as the month needs.
   local used_cells = math.ceil((first_day + days_in_month) / 7) * 7
@@ -238,28 +311,33 @@ update_calendar = function(events)
   for i = 1, max_cells do
     local cell = cells[i]
     if i > used_cells then
+      cell_day[i], cell_date[i], cell_rest[i] = nil, nil, colors.transparent
       cell:set({ drawing = false })
     else
       local day = i - first_day
       if day < 1 or day > days_in_month then
+        cell_day[i], cell_date[i], cell_rest[i] = nil, nil, colors.transparent
         cell:set({
           drawing = true,
           background = { color = colors.transparent },
           label = { string = "" },
         })
       else
-        local date_str = string.format("%d-%02d-%02d", now.year, now.month, day)
-        local is_today = day == now.day
+        local date_str = string.format("%d-%02d-%02d", view.year, view.month, day)
+        local is_today = date_str == today_date_str
+        local rest = is_today and (YSUITE_LIQUID and colors.selection
+          or colors.with_alpha(colors.grey, 0.55))
+          or colors.transparent
+        cell_day[i], cell_date[i], cell_rest[i] = day, date_str, rest
         cell:set({
           drawing = true,
-          background = {
-            color = is_today and (YSUITE_LIQUID and colors.selection
-              or colors.with_alpha(colors.grey, 0.55))
-              or colors.transparent,
-          },
+          background = { color = rest },
           label = {
             string = tostring(day),
-            color = colors.white,
+            -- colors.today lets a theme give today's number a real accent; the
+            -- highlight underneath stays the plain selection wash, so the glass
+            -- is never tinted.
+            color = is_today and (colors.today or colors.white) or colors.white,
             font = {
               style = settings.font.style_map[
                 (is_today or events_by_date[date_str]) and "Bold" or "Regular"],
@@ -313,9 +391,88 @@ update_calendar = function(events)
     no_events:set({ drawing = true })
     for i = 1, max_events do event_rows[i]:set({ drawing = false }) end
   end
+
+  -- The readout rests on today no matter which month is on screen.
+  today_line = os.date("%A, %B ") .. now.day
+  local todays = events_on[today_date_str]
+  if todays then
+    today_line = today_line .. "  ·  " .. #todays
+      .. (#todays == 1 and " event" or " events")
+  end
+  dayline:set({ label = { string = today_line } })
 end
 
 -- ── Interactions ───────────────────────────────────────────────────────────
+local function show_month(offset)
+  month_offset = offset
+  update_calendar(last_events)
+end
+
+-- Scroll anywhere on the grid or the header pages the month. Up is back, the
+-- direction a scrolled list moves toward its start.
+local function page_scroll(env)
+  local delta = tonumber(env.SCROLL_DELTA) or 0
+  if delta == 0 then return end
+  show_month(month_offset + (delta > 0 and -1 or 1))
+end
+
+prev_month:subscribe("mouse.clicked", function() show_month(month_offset - 1) end)
+next_month:subscribe("mouse.clicked", function() show_month(month_offset + 1) end)
+-- The month name is the way back: paging away is cheap, finding today again
+-- should not mean counting clicks in the other direction.
+header:subscribe("mouse.clicked", function() show_month(0) end)
+for _, item in ipairs({ prev_month, header, next_month }) do
+  item:subscribe("mouse.scrolled", page_scroll)
+end
+
+-- The hover wash has to belong to the same family as today's marker, or the
+-- pointer reads louder than the date it is pointing at: the glass theme marks
+-- today by darkening the glass, so hovering darkens it less.
+local cell_hover = YSUITE_LIQUID
+  and colors.with_alpha(0xff000000, 0.16)
+  or colors.row_hover
+
+-- What a hovered cell says about itself: its full date, and the first event on
+-- it when the feed reaches that far.
+local function day_summary(index)
+  local date_str = cell_date[index]
+  if not date_str then return today_line end
+  local y, m, d = date_str:match("(%d+)-(%d+)-(%d+)")
+  local when = os.time({
+    year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 12 })
+  local text = os.date("%A, %B ", when) .. tonumber(d)
+  local list = events_on[date_str]
+  if list then
+    local first = list[1]
+    text = text .. "  ·  "
+      .. (first.time ~= "" and (first.time .. "  ") or "") .. first.title
+    if #list > 1 then text = text .. "  +" .. (#list - 1) end
+  end
+  return text
+end
+
+-- Wired once, over a grid that is repainted underneath: the handlers read the
+-- per-cell tables rather than closing over a day number, which would go stale
+-- the first time the month changed.
+for i = 1, max_cells do
+  local cell = cells[i]
+  cell:subscribe("mouse.entered", function()
+    if not cell_day[i] then return end
+    dayline:set({ label = { string = day_summary(i) } })
+    -- Today already carries a fill; lifting it would fight the accent.
+    if cell_rest[i] == colors.transparent then
+      hover.fade(cell, cell_hover, hover.ENTER_FRAMES)
+    end
+  end)
+  cell:subscribe("mouse.exited", function()
+    dayline:set({ label = { string = today_line } })
+    if cell_rest[i] == colors.transparent then
+      hover.fade(cell, colors.transparent, hover.EXIT_FRAMES)
+    end
+  end)
+  cell:subscribe("mouse.scrolled", page_scroll)
+end
+
 local function hide_calendar_popup()
   cal_bracket:set({ popup = { drawing = false } })
 end
@@ -327,7 +484,8 @@ local function toggle_calendar_popup(env)
   end
   local should_draw = cal_bracket:query().popup.drawing == "off"
   if should_draw then
-    update_calendar({})
+    month_offset = 0
+    update_calendar(last_events)
     cal_bracket:set({ popup = { drawing = true } })
     fetch_calendar_events()
   else
@@ -349,3 +507,9 @@ cal:subscribe({ "forced", "routine", "system_woke" }, function()
     label = (os.date("%I:%M %p"):gsub("^0", "", 1)),
   })
 end)
+
+-- Paint the grid once at load. The dates and today's marker need nothing but
+-- os.date, while only the event dots need the EventKit helper — and the grid
+-- used to be filled solely by toggle_calendar_popup, so a popup opened any
+-- other way (a script, a recording) showed an empty month.
+update_calendar({})
