@@ -20,6 +20,7 @@ public final class EventBus {
         "system_stats", "mouse.exited.global", "mouse.entered.global", "modifier_change",
         "app_launched", "app_terminated", "media_change",
         "graph.hovered",
+        "recording_change",
     ]
 
     public private(set) var definitions: [EventDefinition] = []

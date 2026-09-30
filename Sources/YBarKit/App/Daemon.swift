@@ -56,6 +56,7 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
     let audioProvider = AudioProvider()
     let networkProvider = NetworkProvider()
     let statsProvider = SystemStatsProvider()
+    let recordingProvider = RecordingIndicatorProvider()
 
     var routineTimer: Timer?
     var configURL: URL?
@@ -187,6 +188,10 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                 self.networkProvider.start()
             case "system_stats":
                 self.statsProvider.start()
+            case "recording_change":
+                // A window-list poll, armed only once a widget wants to know
+                // — and it gives an answer immediately, not on the first flip.
+                self.recordingProvider.start()
             case "media_change":
                 // Arming seeds via osascript, which is what raises the
                 // Automation (Music/Spotify) prompt — only for configs
@@ -245,6 +250,19 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         }
         DaemonHooks.shared.requestLocation = { [weak self] in
             self?.networkProvider.requestLocationAuthorization()
+        }
+
+        recordingProvider.onChange = { [weak self] frame in
+            var environment = ["RECORDING": frame == nil ? "off" : "on"]
+            if let frame {
+                environment["RECORDING_X"] = String(format: "%.0f", frame.minX)
+                environment["RECORDING_Y"] = String(format: "%.0f", frame.minY)
+                environment["RECORDING_WIDTH"] = String(format: "%.0f", frame.width)
+                environment["RECORDING_HEIGHT"] = String(format: "%.0f", frame.height)
+            }
+            self?.eventBus.trigger(name: "recording_change",
+                                   info: frame == nil ? "off" : "on",
+                                   extraEnvironment: environment)
         }
 
         statsProvider.onSample = { [weak self] cpu, memory, gpu in
