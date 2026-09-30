@@ -153,10 +153,16 @@ jobs:
       # Proof rather than a smoke test: Homebrew fetches the pinned url,
       # verifies the pinned hash, builds from source, and the formula's own
       # `test do` runs `ybar --version`.
+      # Homebrew no longer installs a formula from a bare path ("formulae
+      # must be in a tap"), so the pinned formula goes into a throwaway
+      # local tap first. That is also a truer rehearsal: it is exactly how
+      # the file will be consumed from NineFiveB/homebrew-ybar.
       - name: brew install --build-from-source + brew test
         run: |
-          brew install --formula --build-from-source "./$FORMULA" 2>&1 | tee brew-install.log
-          brew test --formula "./$FORMULA"
+          brew tap-new --no-git local/ybar
+          cp "./$FORMULA" "$(brew --repository local/ybar)/Formula/ybar.rb"
+          brew install --build-from-source local/ybar/ybar 2>&1 | tee brew-install.log
+          brew test local/ybar/ybar
           "$(brew --prefix)/bin/ybar" --version
 
       - name: Upload brew log
