@@ -532,12 +532,18 @@ end)
 local rest_label_pad = cal:query().label.padding_right or 8
 local rest_plate_pad = 0
 
+-- ~0.33s at 60Hz, both ways: the pill opening and closing is a motion, not
+-- a state change, and a snap back on stop read as a glitch.
+local DOT_FRAMES = 20
+
 local function fit_recording_dot(env)
   if env.RECORDING ~= "on" then
-    cal:set({
-      label = { padding_right = rest_label_pad },
-      background = { padding_right = rest_plate_pad },
-    })
+    sbar.animate("tanh", DOT_FRAMES, function()
+      cal:set({
+        label = { padding_right = rest_label_pad },
+        background = { padding_right = rest_plate_pad },
+      })
+    end)
     return
   end
   local dot_x = tonumber(env.RECORDING_X) or 0
@@ -545,12 +551,15 @@ local function fit_recording_dot(env)
   local rect = cal:query().bounding_rects
   rect = rect and (rect["display-1"] or next(rect) and select(2, next(rect)))
   local right = rect and (rect.origin[1] + rect.size[1]) or 0
-  -- 4pt of plate each side of the dot; the text stays a gap clear of it.
+  -- The indicator WINDOW is 28pt, but the purple circle inside it is about
+  -- 10, centred — so the text ends just short of the window's left edge,
+  -- which puts it a comfortable gap from the circle rather than 35pt away.
+  -- The plate closes 4pt past the window's right edge.
+  local hole = math.max(0, right - dot_x + 4)
   local reach = math.max(0, (dot_x + dot_w + 4) - right)
-  local hole = dot_w + 8
-  sbar.animate("tanh", 12, function()
+  sbar.animate("tanh", DOT_FRAMES, function()
     cal:set({
-      label = { padding_right = rest_label_pad + hole },
+      label = { padding_right = hole },
       background = { padding_right = rest_plate_pad + reach },
     })
   end)
