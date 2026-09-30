@@ -10,6 +10,73 @@ section and publishes the section as the GitHub Release notes.
 
 Nothing yet.
 
+## [0.3.0] — 2026-09-30
+
+### Added
+
+- `--bar refraction=off|auto|screen|wallpaper`: chromatic refraction of the
+  real backdrop at every glass rim. The renderer draws over the system
+  material and never reads it, so the backdrop comes from ScreenCaptureKit
+  (`screen`, the only value that can raise the Screen Recording prompt) or
+  the desktop picture (`wallpaper`, which steps aside while a window sits
+  under the strip); `auto` takes whichever is already available and never
+  asks. The shader adds the difference between the bent and straight
+  samples, so a flat backdrop contributes nothing and a stale one only its
+  local contrast. Idle frames are dropped before any texture work.
+  `--query bar` reports `refraction_source` and `refraction_active`.
+- `background.corner_radius` takes four values (`TL,TR,BR,BL`) as well as
+  one, so a run of popup rows can read as one card: square where rows meet,
+  round on the outside.
+- `recording_change`: a builtin event that says when a screen recording
+  starts and stops, and where macOS drew its indicator. Detected from the
+  window list without Screen Recording. The `ysuite-liquid` clock takes
+  the dot in while one runs.
+- The system monitor plots CPU, GPU and RAM history behind a switch, each
+  scrubbable, and keeps the history across restarts.
+- Calendar: month paging by arrow or scroll, a readout of the hovered day
+  and its first event, and a red today.
+- Per-workspace app-menu state: the menus hand the pills back on a switch
+  and come back with the workspace they were open on.
+- The workspace tray expands in the bar as the items' real app icons;
+  clicking one presses the real status item, so macOS draws that app's
+  own menu.
+- Every animation is placed at its true sub-pixel value while it moves,
+  so a 4pt slide gets a distinct picture on every 120Hz frame instead of
+  eight. `YBAR_BENCH=1` runs the motion bench.
+
+### Changed
+
+- **The `ninefiveb` theme is now `ysuite`** (`ybar theme use ysuite`).
+- The bar covering the menu bar sits one level above it, so a click on
+  the app-menu strip lands on the strip rather than the native Apple
+  title underneath; the strip mirrors the native bar slot for slot, Apple
+  menu included.
+- The left and right flows treat the notch as a dead zone, as the center
+  flows already did: an item that would cross it lands on the far side.
+- `ysuite-liquid`: pills are 32pt, every workspace pill is one width,
+  the Apple pill is gone, the strip sits flush with AeroSpace's outer gaps
+  (read from `~/.aerospace.toml`), and the focused workspace is a light
+  wash over its own glass rather than a grey plate.
+- Popup rules are flat grey hairlines rather than glassed plates; the
+  Wi-Fi popup groups the joined network with hotspots and the scan
+  results into two cards.
+- Overflowing text fades out instead of being cut.
+
+### Fixed
+
+- The painted glass rim and sheen are drawn on macOS 26 too; measured on a
+  plain wallpaper the system material alone is all but invisible at pill
+  size.
+- No pointer-following shine, no painted shadow under real glass, no lit
+  plate where there is no glass, and the focused workspace pill no longer
+  wears two capsules.
+- Battery, Wi-Fi and Bluetooth popup text that vanished into light glass.
+- Bluetooth and Wi-Fi: the Connect/Disconnect chips are glass like Pair,
+  their columns line up, and a hotspot row no longer pushes Connect out
+  of the Disconnect column.
+- The app menu's pill named the app from the workspace you left when two
+  workspaces both held the menus open.
+
 ## [0.2.1] — 2026-09-24
 
 ### Added

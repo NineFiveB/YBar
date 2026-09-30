@@ -4,7 +4,7 @@
 
 | Version | Supported |
 |---|---|
-| latest tagged macOS release (0.2.x) | ✅ |
+| latest tagged macOS release (0.3.x) | ✅ |
 | latest tagged Windows release (`win-v*`, off the `windows` branch) | ✅ |
 | tip of `main` (`--HEAD` installs) or of `windows` | ✅ |
 | anything older | ❌ — upgrade first |
