@@ -87,13 +87,30 @@ public enum Layout {
             result.contentBoxes[item.id] = box
         }
 
+        // The notch is a dead zone for the edge flows too, not only the
+        // center ones. A long left flow — the app menus, on a busy app — used
+        // to run straight under the housing, and whatever landed there was
+        // invisible and unclickable. An item that would cross into the zone
+        // is placed on the far side of it instead; nothing is drawn under the
+        // notch. notchHalf is 0 on an un-notched display, so this is a no-op
+        // there.
+        let deadLeft = width / 2 - notchHalf
+        let deadRight = width / 2 + notchHalf
+        func crossesNotch(_ minX: CGFloat, _ maxX: CGFloat) -> Bool {
+            notchHalf > 0 && maxX > deadLeft && minX < deadRight
+        }
+
         // Left: flows right from the bar's left padding.
         var cursor = CGFloat(settings.paddingLeft)
         for item in items where item.position == .left && item.isVisible && item.isInBarFlow {
             let measured = measure(item)
             cursor += CGFloat(item.paddingLeft)
+            let length = contentLength(item: item, measured: measured)
+            if crossesNotch(cursor, cursor + length) {
+                cursor = deadRight + CGFloat(item.paddingLeft)
+            }
             place(item, x: cursor, measured: measured)
-            cursor += contentLength(item: item, measured: measured) + CGFloat(item.paddingRight)
+            cursor += length + CGFloat(item.paddingRight)
         }
 
         // Right: flows left from the bar's right padding.
@@ -103,6 +120,9 @@ public enum Layout {
             cursor -= CGFloat(item.paddingRight)
             let length = contentLength(item: item, measured: measured)
             cursor -= length
+            if crossesNotch(cursor, cursor + length) {
+                cursor = deadLeft - CGFloat(item.paddingRight) - length
+            }
             place(item, x: cursor, measured: measured)
             cursor -= CGFloat(item.paddingLeft)
         }

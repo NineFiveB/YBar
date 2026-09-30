@@ -529,6 +529,52 @@ import Testing
         #expect(e.frame.minX == 600)
     }
 
+    /// The edge flows treat the notch as a dead zone too. Ten 50-wide left
+    /// items on a 1000 bar with a 200 notch would run to 500 — straight under
+    /// the housing at 400..600. The item that would cross lands on the far
+    /// side, and everything after follows it.
+    @Test func leftFlowSkipsTheNotch() {
+        let items = (1...10).map { makeItem("l\($0)", .left) }
+        var settings = BarSettings()
+        settings.notchWidth = 200
+        Layout.perform(items: items, barSize: CGSize(width: 1000, height: 30),
+                       settings: settings, measure: fixedMeasure)
+        // Eight fit before 400 (8 × 50). The ninth would span 400..450.
+        #expect(items[7].frame.maxX == 400)
+        #expect(items[8].frame.minX == 600)
+        #expect(items[9].frame.minX == 650)
+        for item in items {
+            #expect(item.frame.maxX <= 400 || item.frame.minX >= 600,
+                    "\(item.name) drawn under the notch: \(item.frame)")
+        }
+    }
+
+    @Test func rightFlowSkipsTheNotch() {
+        let items = (1...10).map { makeItem("r\($0)", .right) }
+        var settings = BarSettings()
+        settings.notchWidth = 200
+        Layout.perform(items: items, barSize: CGSize(width: 1000, height: 30),
+                       settings: settings, measure: fixedMeasure)
+        #expect(items[7].frame.minX == 600)
+        #expect(items[8].frame.maxX == 400)
+        for item in items {
+            #expect(item.frame.maxX <= 400 || item.frame.minX >= 600,
+                    "\(item.name) drawn under the notch: \(item.frame)")
+        }
+    }
+
+    /// An un-notched display passes 0 and the flow is untouched: no jump, no
+    /// gap, exactly the layout it always had.
+    @Test func edgeFlowsIgnoreAnAbsentNotch() {
+        let items = (1...10).map { makeItem("l\($0)", .left) }
+        var settings = BarSettings()
+        settings.notchWidth = 200
+        Layout.perform(items: items, barSize: CGSize(width: 1000, height: 30),
+                       settings: settings, notchWidth: 0, measure: fixedMeasure)
+        #expect(items[8].frame.minX == 400)
+        #expect(items[9].frame.maxX == 500)
+    }
+
     @Test func notchWidthOverrideBeatsSettings() {
         let q = makeItem("q", .centerLeft)
         let e = makeItem("e", .centerRight)
