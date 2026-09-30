@@ -38,6 +38,27 @@ end
 
 local max_items = 15
 local menu_items = {}
+
+-- The strip mirrors the native bar slot for slot, Apple menu included. macOS
+-- anchors a menu under its NATIVE title, so a strip that started at the app
+-- name dropped every menu one slot to the right of the item that was clicked
+-- — and the native Apple title, left uncovered, took the click instead. The
+-- glyph presses index 0, the real Apple menu.
+menu_items[0] = sbar.add("item", "menu.0", {
+  padding_left = settings.paddings,
+  padding_right = settings.paddings,
+  drawing = false,
+  background = YSUITE_LIQUID and { drawing = false, glass = false, sheen = false } or nil,
+  icon = { drawing = false },
+  label = {
+    string = icons.apple,
+    font = { size = 16 },
+    padding_left = 6,
+    padding_right = 6,
+  },
+  click_script = "'" .. menus_bin:gsub("'", "'\\''") .. "' -s 0",
+})
+
 for i = 1, max_items, 1 do
   local menu = sbar.add("item", "menu." .. i, {
     padding_left = settings.paddings,
@@ -110,6 +131,10 @@ local function update_menus(env)
     if not menus_shown then return end
     sbar.set('/menu\\..*/', { drawing = false })
     menu_padding:set({ drawing = true })
+    menu_items[0]:set({
+      drawing = true, padding_left = 0, padding_right = 0, y_offset = -4,
+      label = { width = 0, padding_left = 0, padding_right = 0, color = { alpha = 0.0 } },
+    })
     local id = 1
     for menu in string.gmatch(menus, '[^\r\n]+') do
       if id <= max_items then
@@ -127,7 +152,7 @@ local function update_menus(env)
     local count = id - 1
     -- ~0.28s at 60Hz: slide up 4pt while fading in (webpage menus/spaces swap).
     sbar.animate("tanh", 17, function()
-      for i = 1, count do park_menu_item(i) end
+      for i = 0, count do park_menu_item(i) end
     end)
   end)
 end
@@ -157,7 +182,7 @@ local function close_menus(remember)
   menu_hide_seq = menu_hide_seq + 1
   local seq = menu_hide_seq
   sbar.animate("tanh", 17, function()
-    for i = 1, max_items do
+    for i = 0, max_items do
       menu_items[i]:set({
         padding_left = 0,
         padding_right = 0,
@@ -171,7 +196,7 @@ local function close_menus(remember)
     if menu_hide_seq ~= seq then return end
     sbar.set("/menu\\..*/", { drawing = false })
     menu_padding:set({ drawing = false })
-    for i = 1, max_items do park_menu_item(i) end
+    for i = 0, max_items do park_menu_item(i) end
     if not YSUITE_LIQUID then sbar.set("front_app", { drawing = true }) end
     -- YBAR PORT: a blanket show resurrects every configured workspace
     -- (6..9, A..Z). Restore through the spaces refresh instead, which only

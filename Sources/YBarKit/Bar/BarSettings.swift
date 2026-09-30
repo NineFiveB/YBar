@@ -14,7 +14,11 @@ public enum BarLevel: String, Sendable {
         switch self {
         case .behindWindows: return NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.backstopMenu)))
         case .aboveWindows: return .floating
-        case .coverMenuBar: return .statusBar
+        // One above .statusBar, not at it: the native menu bar's own agent
+        // sits AT that level, and two windows on one level order by recency,
+        // so a click on the strip could land on the native Apple title
+        // underneath. Level is a public raw value, no private API involved.
+        case .coverMenuBar: return NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
         }
     }
 }
