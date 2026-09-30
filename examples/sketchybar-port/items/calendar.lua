@@ -526,11 +526,11 @@ end)
 -- While a recording runs, macOS draws its purple dot at the top right, above
 -- every window — over the clock, when the bar covers the menu bar. The
 -- engine's recording_change event says when and exactly where, so the pill
--- opens up to take the dot in rather than wear it: the time slides left of
--- it, and the plate reaches out past the bar's tiling inset to close around
--- it. Off again, everything goes back to the values below.
+-- opens up to take the dot in rather than wear it: the time slides left and
+-- the pill grows leftwards with it, pushing the row along. Its right edge
+-- stays put — the circle already sits inside it, and reaching further right
+-- ran the plate off the screen. Off again, back to the value below.
 local rest_label_pad = cal:query().label.padding_right or 8
-local rest_plate_pad = 0
 
 -- ~0.33s at 60Hz, both ways: the pill opening and closing is a motion, not
 -- a state change, and a snap back on stop read as a glitch.
@@ -539,29 +539,20 @@ local DOT_FRAMES = 20
 local function fit_recording_dot(env)
   if env.RECORDING ~= "on" then
     sbar.animate("tanh", DOT_FRAMES, function()
-      cal:set({
-        label = { padding_right = rest_label_pad },
-        background = { padding_right = rest_plate_pad },
-      })
+      cal:set({ label = { padding_right = rest_label_pad } })
     end)
     return
   end
   local dot_x = tonumber(env.RECORDING_X) or 0
-  local dot_w = tonumber(env.RECORDING_WIDTH) or 28
   local rect = cal:query().bounding_rects
   rect = rect and (rect["display-1"] or next(rect) and select(2, next(rect)))
   local right = rect and (rect.origin[1] + rect.size[1]) or 0
   -- The indicator WINDOW is 28pt, but the purple circle inside it is about
-  -- 10, centred — so the text ends just short of the window's left edge,
-  -- which puts it a comfortable gap from the circle rather than 35pt away.
-  -- The plate closes 4pt past the window's right edge.
-  local hole = math.max(0, right - dot_x + 4)
-  local reach = math.max(0, (dot_x + dot_w + 4) - right)
+  -- 10, centred, so its left edge sits ~9pt into the window. The text ends
+  -- 4pt short of the circle — 5pt into the window — rather than 35pt away.
+  local hole = math.max(rest_label_pad, right - dot_x - 5)
   sbar.animate("tanh", DOT_FRAMES, function()
-    cal:set({
-      label = { padding_right = hole },
-      background = { padding_right = rest_plate_pad + reach },
-    })
+    cal:set({ label = { padding_right = hole } })
   end)
 end
 
