@@ -386,28 +386,58 @@ import Testing
         var reloads: [String?] = []
         stack.handler.onReload = { reloads.append($0) }
         var resets = 0
-        stack.handler.onThemeReset = { resets += 1 }
+        stack.handler.onThemeReset = { resets += 1; return nil }
 
-        let listed = try JSONSerialization.jsonObject(
-            with: Data(stack.handler.handle(arguments: ["--query", "themes"]).utf8))
-        let rows = try #require(listed as? [[String: Any]])
+        func listed() throws -> [[String: Any]] {
+            let object = try JSONSerialization.jsonObject(
+                with: Data(stack.handler.handle(arguments: ["--query", "themes"]).utf8))
+            return try #require(object as? [[String: Any]])
+        }
+        // Nothing recorded, but alpha is what runs (the store's theme): a
+        // bar pinned with -c records nothing and must still show current.
+        let rows = try listed()
         #expect(rows.map { $0["name"] as? String } == ["alpha", "beta"])
-        #expect(rows.allSatisfy { $0["current"] as? Bool == false })
+        #expect(rows.map { $0["current"] as? Bool } == [true, false])
 
         #expect(stack.handler.handle(arguments: ["--theme", "use", "beta"]).isEmpty)
         let entry = stack.home.appendingPathComponent(".config/ybar/themes/beta/ybarrc.lua").path
         #expect(reloads == [entry])
         #expect(stack.store.themeSource.current() == "beta")
-        let after = try #require(try JSONSerialization.jsonObject(
-            with: Data(stack.handler.handle(arguments: ["--query", "themes"]).utf8)) as? [[String: Any]])
-        #expect(after[1]["current"] as? Bool == true)
+        // The daemon's reload begins the config under the new name.
+        stack.store.beginConfig(theme: "beta")
+        #expect(try listed().map { $0["current"] as? Bool } == [false, true])
+        // Running something outside the list falls back to the record.
+        stack.store.beginConfig(theme: "ybar")
+        #expect(try listed().map { $0["current"] as? Bool } == [false, true])
 
         #expect(stack.handler.handle(arguments: ["--theme", "use", "nope"]).contains("no theme named"))
         #expect(reloads.count == 1)
         #expect(stack.handler.handle(arguments: ["--theme", "reset"]).isEmpty)
         #expect(resets == 1)
         #expect(stack.store.themeSource.current() == nil)
+        // A hook with nothing to fall back to says so through the reply.
+        stack.handler.onThemeReset = { "[?] theme selection cleared; nothing else to load" }
+        #expect(stack.handler.handle(arguments: ["--theme", "reset"]).hasPrefix("[?]"))
         #expect(stack.handler.handle(arguments: ["--theme"]).contains("usage"))
+    }
+
+    /// `-c <root>/<theme>/ybarrc.lua` makes `<root>` a theme root; `-c
+    /// ~/.config/ybar/ybarrc.lua` is the user's own rc and makes none.
+    @Test func aPinnedConfigNamesItsSiblingRootUnlessItIsTheConfigHome() {
+        let home = URL(fileURLWithPath: "/Users/someone")
+        let configHome = home.appendingPathComponent(".config")
+        #expect(ThemeCatalog.siblingRoot(
+            forPinned: URL(fileURLWithPath: "/Users/someone/src/YBar/examples/ysuite-liquid/ybarrc.lua"),
+            configHome: configHome)?.path == "/Users/someone/src/YBar/examples")
+        #expect(ThemeCatalog.siblingRoot(
+            forPinned: URL(fileURLWithPath: "/Users/someone/.config/ybar/ybarrc.lua"),
+            configHome: configHome) == nil)
+        #expect(ThemeCatalog.siblingRoot(
+            forPinned: URL(fileURLWithPath: "/tmp/xdg/ybar/ybarrc.lua"),
+            configHome: URL(fileURLWithPath: "/tmp/xdg")) == nil)
+        #expect(ThemeCatalog.siblingRoot(
+            forPinned: URL(fileURLWithPath: "/Users/someone/.config/ybar/themes/nord/ybarrc.lua"),
+            configHome: configHome)?.path == "/Users/someone/.config/ybar/themes")
     }
 
     @Test func settingsChangeIsABuiltinEvent() {

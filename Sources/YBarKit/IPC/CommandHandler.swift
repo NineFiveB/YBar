@@ -34,7 +34,7 @@ public final class CommandHandler {
     public var settingsStore: SettingsStore?
     /// `--theme reset` cleared the recorded selection; the daemon re-runs
     /// config discovery, which a plain reload does not.
-    public var onThemeReset: (() -> Void)?
+    public var onThemeReset: (() -> String?)?
 
     /// What `--volume <token>` asks for. Absolute levels are the Windows port's
     /// grammar; the signed step form replaces the one thing themes still shelled
@@ -377,7 +377,7 @@ public final class CommandHandler {
                     onReload?(match.entry.path)
                 case "reset":
                     store.themeSource.clearSelection()
-                    onThemeReset?()
+                    emit(onThemeReset?())
                 default:
                     emit("[!] usage: --theme use <name> | reset")
                 }

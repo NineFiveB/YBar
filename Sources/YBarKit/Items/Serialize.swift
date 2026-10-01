@@ -31,7 +31,7 @@ public enum Serialize {
             // without a workspace.
             return settings?.queryDictionary()
         case "themes":
-            return settings.map { themesArray($0.themeSource) }
+            return settings.map { themesArray($0.themeSource, running: $0.theme) }
         case "bar":
             return barDictionary(manager: manager)
         case "defaults":
@@ -72,11 +72,14 @@ public enum Serialize {
             }
     }
 
-    /// Every theme the daemon could switch to, and which one is recorded.
-    /// `--theme use` takes the same names.
-    static func themesArray(_ source: ThemeSource) -> [[String: Any]] {
-        let current = source.current()
-        return source.themes().map { theme in
+    /// Every theme the daemon could switch to, and which one is current:
+    /// the one running when it is in the list (a bar pinned with `-c`
+    /// records nothing, and `--reload <path>` can leave the record behind),
+    /// else the recorded selection. `--theme use` takes the same names.
+    static func themesArray(_ source: ThemeSource, running: String) -> [[String: Any]] {
+        let themes = source.themes()
+        let current = themes.contains { $0.name == running } ? running : source.current()
+        return themes.map { theme in
             [
                 "name": theme.name,
                 "path": theme.entry.path,

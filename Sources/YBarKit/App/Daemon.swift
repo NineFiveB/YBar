@@ -119,12 +119,18 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         }
         commandHandler.settingsStore = settingsStore
         commandHandler.onThemeReset = { [weak self] in
-            guard let self else { return }
+            guard let self else { return nil }
             // Discovery again, not a plain reload: the recorded theme is
-            // gone, so the user's own rc (or nothing) is what loads now.
-            let resolution = ConfigLocator.resolve(
-                explicitPath: self.explicitConfigPath, instanceName: self.instanceName)
-            self.reload(explicitPath: resolution?.url.path)
+            // gone, so the user's own rc is what loads now. With no rc to
+            // fall back to there is nothing else to show, so the running
+            // config stays — said out loud, since the themes list no longer
+            // marks it as selected.
+            guard let resolution = ConfigLocator.resolve(
+                explicitPath: self.explicitConfigPath, instanceName: self.instanceName) else {
+                return "[?] theme selection cleared; no other config was found, so \(self.settingsTheme) stays loaded"
+            }
+            self.reload(explicitPath: resolution.url.path)
+            return nil
         }
         wireCommandHandler()
 
@@ -642,14 +648,13 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         settingsTheme = resolution.theme ?? directory.lastPathComponent
         settingsStore.beginConfig(theme: settingsTheme)
         // A pinned `-c <root>/<theme>/ybarrc.lua` says where themes live as
-        // surely as any root: a checkout's examples/, a folder of one's own.
-        // Without this a daemon launched that way lists nothing under
-        // `--query themes`, and a settings app has nothing to switch to.
-        if explicitConfigPath != nil {
-            let sibling = directory.deletingLastPathComponent()
-            if !settingsStore.themeSource.roots.contains(sibling) {
-                settingsStore.themeSource.roots.insert(sibling, at: 0)
-            }
+        // surely as any root. Without this a daemon launched that way lists
+        // nothing under `--query themes`, and a settings app has nothing to
+        // switch to. Appended, so a name in YBAR_THEME_ROOTS still wins.
+        if explicitConfigPath != nil,
+           let sibling = ThemeCatalog.siblingRoot(forPinned: url, configHome: ConfigLocator.configHome()),
+           !settingsStore.themeSource.roots.contains(sibling) {
+            settingsStore.themeSource.roots.append(sibling)
         }
         scriptRunner.configDirectory = directory
         scriptRunner.baseEnvironment = [
