@@ -95,6 +95,10 @@ public final class LuaRuntime {
         self.state = state
         luaL_openlibs(state)
         registerRawModule(state)
+        // The daemon's store begins each config run itself; the headless one
+        // has nobody else to do it, and a second run would otherwise declare
+        // every key twice.
+        if settingsStore == nil { headlessSettings.beginConfig(theme: "headless") }
         if let error = run(code: LuaRuntime.prelude, name: "=ybar-prelude") {
             return error
         }
@@ -882,14 +886,10 @@ public final class LuaRuntime {
     /// A store for a runtime no daemon wired (tests, the headless theme
     /// checks): declarations work and the defaults come back, but nothing is
     /// read from or written to disk.
-    private(set) lazy var headlessSettings: SettingsStore = {
-        let store = SettingsStore(
-            directory: FileManager.default.temporaryDirectory
-                .appendingPathComponent("ybar-headless-settings-\(ProcessInfo.processInfo.processIdentifier)"),
-            themeSource: ThemeSource(home: FileManager.default.temporaryDirectory, roots: []))
-        store.beginConfig(theme: "headless")
-        return store
-    }()
+    private(set) lazy var headlessSettings = SettingsStore(
+        directory: FileManager.default.temporaryDirectory
+            .appendingPathComponent("ybar-headless-settings-\(ProcessInfo.processInfo.processIdentifier)"),
+        themeSource: ThemeSource(home: FileManager.default.temporaryDirectory, roots: []))
 
     /// Read the Lua value at `index` into Foundation shapes: nil, Bool, Int,
     /// Double, String, [Any] (a sequence 1...n) or [String: Any]. Keys are
@@ -910,7 +910,10 @@ public final class LuaRuntime {
             let length = Int(lua_rawlen(L, index))
             var array: [Any] = []
             var dictionary: [String: Any] = [:]
-            var isArray = length > 0
+            // `{}` is a list: nothing here is keyed by a table, and a `list`
+            // setting's empty default (or `ybar.settings({})` to read values
+            // declared elsewhere) must not come back as a dictionary.
+            var isArray = true
             lua_pushnil(L)
             while lua_next(L, index) != 0 {
                 let keyType = lua_type(L, -2)
@@ -927,7 +930,7 @@ public final class LuaRuntime {
                 if let value { dictionary[key] = value }
                 pop(L, 1)
             }
-            if isArray {
+            if isArray, length > 0 {
                 for position in 1...length {
                     guard let element = dictionary[String(position)] else { isArray = false; break }
                     array.append(element)

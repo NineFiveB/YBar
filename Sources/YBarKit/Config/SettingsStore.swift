@@ -190,8 +190,14 @@ public enum SettingsValue: Equatable, Sendable {
             return value
         }
         if text.hasPrefix("0x") {
-            return UInt32(text.dropFirst(2), radix: 16)
+            // Eight digits or nothing: `0xff453a` is the CSS habit, and read
+            // as six hex digits it would be alpha 0 — an invisible accent
+            // with no error to explain it.
+            let digits = text.dropFirst(2)
+            guard digits.count == 8, digits.allSatisfy(\.isHexDigit) else { return nil }
+            return UInt32(digits, radix: 16)
         }
+        guard !text.isEmpty, text.allSatisfy(\.isNumber) else { return nil }
         return UInt32(text)
     }
 
@@ -201,22 +207,29 @@ public enum SettingsValue: Equatable, Sendable {
     /// anything stringable.
     public static func coerce(_ any: Any?, kind: SettingsEntry.Kind) -> SettingsValue? {
         guard let any else { return nil }
+        // A JSON `true` bridges to NSNumber(1), and `as? Double` would take
+        // it; a hand-edited `"pill_height": true` must be ignored like
+        // `"tall"` is, not become a height of 1.
+        let boolean = isBoolean(any)
         switch kind {
         case .number:
+            if boolean { return nil }
             if let value = any as? Double, value.isFinite { return .number(value) }
             if let value = any as? Int { return .number(Double(value)) }
             if let text = any as? String { return parse(token: text, kind: .number) }
             return nil
         case .string, .choice:
+            if boolean { return nil }
             if let text = any as? String { return .string(text) }
             if let value = any as? Int { return .string(String(value)) }
             if let value = any as? Double { return .string(SettingsValue.number(value).token) }
             return nil
         case .bool:
-            if let value = any as? Bool { return .bool(value) }
+            if boolean, let value = any as? Bool { return .bool(value) }
             if let text = any as? String { return parse(token: text, kind: .bool) }
             return nil
         case .color:
+            if boolean { return nil }
             if let text = any as? String { return parse(token: text, kind: .color) }
             if let value = any as? UInt32 { return .color(value) }
             if let value = any as? Int, value >= 0, value <= Int(UInt32.max) { return .color(UInt32(value)) }
@@ -236,6 +249,14 @@ public enum SettingsValue: Equatable, Sendable {
             if let text = any as? String { return parse(token: text, kind: .list) }
             return nil
         }
+    }
+
+    /// Whether a loosely typed value is a boolean — a native `Bool`, or the
+    /// CFBoolean that JSON `true`/`false` deserialize to. Both bridge to
+    /// NSNumber, which is why `as? Double` cannot tell them apart.
+    static func isBoolean(_ any: Any) -> Bool {
+        guard let number = any as? NSNumber else { return false }
+        return CFGetTypeID(number) == CFBooleanGetTypeID()
     }
 
     var kind: SettingsEntry.Kind {
@@ -277,21 +298,13 @@ public struct ThemeSource: Sendable {
         ThemeCatalog.currentName(home: home)
     }
 
-    /// Record a selection the way `ybar theme use` does. Returns an error line.
+    /// Record a selection, exactly as `ybar theme use` does. Returns an error line.
     public func select(_ name: String) -> String? {
-        let state = ThemeCatalog.stateFile(home: home)
-        do {
-            try FileManager.default.createDirectory(
-                at: state.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try (name + "\n").write(to: state, atomically: true, encoding: .utf8)
-        } catch {
-            return "[!] could not write \(state.path): \(error)"
-        }
-        return nil
+        ThemeCatalog.record(name, home: home)
     }
 
     public func clearSelection() {
-        try? FileManager.default.removeItem(at: ThemeCatalog.stateFile(home: home))
+        ThemeCatalog.clearSelection(home: home)
     }
 }
 
@@ -321,9 +334,24 @@ public final class SettingsStore {
     private var fileValues: [String: Any] = [:]
 
     public init(directory: URL? = nil, themeSource: ThemeSource? = nil) {
-        self.directory = directory ?? FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".config/ybar/settings")
+        self.directory = directory ?? SettingsStore.defaultDirectory()
         self.themeSource = themeSource ?? ThemeSource.live()
+    }
+
+    /// `$XDG_CONFIG_HOME/ybar/settings`, else `~/.config/ybar/settings` —
+    /// the same root config discovery reads, so the sidecar sits beside the
+    /// config it belongs to.
+    public static func defaultDirectory(
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL {
+        let root: URL
+        if let xdg = environment["XDG_CONFIG_HOME"], !xdg.isEmpty {
+            root = URL(fileURLWithPath: xdg)
+        } else {
+            root = home.appendingPathComponent(".config")
+        }
+        return root.appendingPathComponent("ybar/settings")
     }
 
     public var file: URL {
@@ -386,8 +414,10 @@ public final class SettingsStore {
         override(for: entry) ?? entry.defaultValue
     }
 
-    /// `--settings set key=token`.
-    public func set(key: String, token: String) -> Result<SettingsChange, SettingsFailure> {
+    /// `--settings set key=token`. Nil on success means nothing changed:
+    /// the value was already in effect, so there is nothing to apply and no
+    /// reason to re-run the config.
+    public func set(key: String, token: String) -> Result<SettingsChange?, SettingsFailure> {
         guard let entry = entry(for: key) else {
             return .failure(SettingsFailure("[!] settings: no setting named \"\(key)\""))
         }
@@ -397,12 +427,17 @@ public final class SettingsStore {
         if let error = validate(value, for: entry) {
             return .failure(SettingsFailure("[!] settings: \(key) \(error)"))
         }
+        if value == self.value(for: entry) { return .success(nil) }
+        var next = fileValues
         if value == entry.defaultValue {
-            fileValues.removeValue(forKey: key)
+            next.removeValue(forKey: key)
         } else {
-            fileValues[key] = value.json
+            next[key] = value.json
         }
-        if let error = save() { return .failure(SettingsFailure(error)) }
+        // The file first, memory second: a write that fails must not leave
+        // the query reporting a value that was never saved.
+        if let error = save(next) { return .failure(SettingsFailure(error)) }
+        fileValues = next
         return .success(SettingsChange(entry: entry, value: value))
     }
 
@@ -423,11 +458,14 @@ public final class SettingsStore {
             targets = found
         }
         var changes: [SettingsChange] = []
-        for entry in targets where fileValues[entry.key] != nil {
-            fileValues.removeValue(forKey: entry.key)
+        var next = fileValues
+        for entry in targets where next[entry.key] != nil {
+            next.removeValue(forKey: entry.key)
             changes.append(SettingsChange(entry: entry, value: entry.defaultValue))
         }
-        if !changes.isEmpty, let error = save() { return .failure(SettingsFailure(error)) }
+        if changes.isEmpty { return .success([]) }
+        if let error = save(next) { return .failure(SettingsFailure(error)) }
+        fileValues = next
         return .success(changes)
     }
 
@@ -516,9 +554,9 @@ public final class SettingsStore {
         return dictionary
     }
 
-    private func save() -> String? {
+    private func save(_ values: [String: Any]) -> String? {
         do {
-            if fileValues.isEmpty {
+            if values.isEmpty {
                 if FileManager.default.fileExists(atPath: file.path) {
                     try FileManager.default.removeItem(at: file)
                 }
@@ -526,7 +564,7 @@ public final class SettingsStore {
             }
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let data = try JSONSerialization.data(
-                withJSONObject: fileValues, options: [.prettyPrinted, .sortedKeys])
+                withJSONObject: values, options: [.prettyPrinted, .sortedKeys])
             try data.write(to: file, options: .atomic)
         } catch {
             return "[!] settings: could not write \(file.path): \(error)"

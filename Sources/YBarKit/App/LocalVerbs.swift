@@ -89,6 +89,24 @@ public enum ThemeCatalog {
         return name
     }
 
+    /// Record `name` as the selection. The one writer for the CLI verb and
+    /// the daemon's `--theme use`. Returns an error line.
+    public static func record(_ name: String, home: URL) -> String? {
+        let state = stateFile(home: home)
+        do {
+            try FileManager.default.createDirectory(
+                at: state.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try (name + "\n").write(to: state, atomically: true, encoding: .utf8)
+        } catch {
+            return "[!] could not write \(state.path): \(error)"
+        }
+        return nil
+    }
+
+    public static func clearSelection(home: URL) {
+        try? FileManager.default.removeItem(at: stateFile(home: home))
+    }
+
     /// The selected theme's entry file; nil when nothing is selected or the
     /// name went stale (theme deleted), so ordinary discovery applies.
     public static func currentEntry(home: URL, roots: [URL]) -> URL? {
@@ -109,7 +127,7 @@ enum ThemeVerbs {
             print(ThemeCatalog.currentName(home: home) ?? "no theme selected")
             return 0
         case "reset":
-            try? FileManager.default.removeItem(at: ThemeCatalog.stateFile(home: home))
+            ThemeCatalog.clearSelection(home: home)
             print("theme selection cleared; the default config discovery applies")
             return 0
         case "use":
@@ -158,14 +176,7 @@ enum ThemeVerbs {
         guard let match = ThemeCatalog.collect(roots: roots).first(where: { $0.name == name }) else {
             return fail("[!] no theme named \(name) (try `ybar theme list`)")
         }
-        let state = ThemeCatalog.stateFile(home: home)
-        do {
-            try FileManager.default.createDirectory(
-                at: state.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try (name + "\n").write(to: state, atomically: true, encoding: .utf8)
-        } catch {
-            return fail("[!] could not write \(state.path): \(error)")
-        }
+        if let error = ThemeCatalog.record(name, home: home) { return fail(error) }
 
         // A running daemon re-points at the entry file over the socket — the
         // reload path it already has — instead of being killed out from under

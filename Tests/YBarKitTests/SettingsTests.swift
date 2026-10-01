@@ -127,7 +127,13 @@ import Testing
         #expect(store.set(key: "colors.today", token: "#80ffffff").value == .color(0x80FF_FFFF))
         #expect(store.set(key: "colors.today", token: "0x26ffffff").value == .color(0x26FF_FFFF))
         #expect(store.set(key: "colors.today", token: "red").errorText?.contains("not a color") == true)
+        // Six digits after 0x would read as alpha 0 — refused, not guessed.
+        #expect(store.set(key: "colors.today", token: "0xff453a").errorText?.contains("not a color") == true)
+        #expect(store.set(key: "colors.today", token: "0x").errorText?.contains("not a color") == true)
 
+        // Already on: "yes" is a no-op, not an override.
+        #expect(store.set(key: "widgets.wifi", token: "yes").isNoop)
+        #expect(store.set(key: "widgets.wifi", token: "off").value == .bool(false))
         #expect(store.set(key: "widgets.wifi", token: "yes").value == .bool(true))
         #expect(store.set(key: "widgets.wifi", token: "off").value == .bool(false))
         #expect(store.set(key: "icons", token: "nerd").isSuccess)
@@ -143,6 +149,70 @@ import Testing
         #expect(store.set(key: "colors.today", token: "0xffff453a").isSuccess)
         #expect(try fileContents(store)?["colors.today"] == nil)
         #expect(store.override(for: try #require(store.entry(for: "colors.today"))) == nil)
+    }
+
+    /// Saving what is already in effect is not a change: no file write, no
+    /// event, no reload. The Raycast form submits unchanged text often.
+    @Test func settingTheValueInEffectIsANoop() throws {
+        let stack = try makeStack()
+        var reloads = 0
+        stack.handler.onReload = { _ in reloads += 1 }
+        #expect(stack.store.set(key: "pill_height", token: "32").isNoop)
+        #expect(try fileContents(stack.store) == nil)
+        #expect(stack.store.set(key: "pill_height", token: "30").value == .number(30))
+        #expect(stack.store.set(key: "pill_height", token: "30").isNoop)
+        #expect(stack.store.set(key: "pill_height", token: "30.0").isNoop)
+        #expect(stack.handler.handle(arguments: ["--settings", "set", "pill_height=30"]).isEmpty)
+        #expect(reloads == 0)
+        #expect(stack.handler.handle(arguments: ["--settings", "set", "pill_height=31"]).isEmpty)
+        #expect(reloads == 1)
+    }
+
+    /// A write that fails leaves nothing behind in memory either: the query
+    /// must not report a value the file never got.
+    @Test func aFailedWriteChangesNothing() throws {
+        let stack = try makeStack()
+        // A FILE where the settings directory should be: createDirectory fails.
+        try Data().write(to: stack.store.directory)
+        let failed = stack.store.set(key: "pill_height", token: "30")
+        #expect(failed.errorText?.contains("could not write") == true)
+        #expect(stack.store.value(for: try #require(stack.store.entry(for: "pill_height"))) == .number(32))
+        #expect(stack.store.override(for: try #require(stack.store.entry(for: "pill_height"))) == nil)
+    }
+
+    /// JSON booleans and numbers bridge to the same NSNumber; a hand-edited
+    /// file with the wrong type is ignored, like a wrong string is.
+    @Test func sidecarValuesOfTheWrongJSONTypeAreIgnored() throws {
+        let stack = try makeStack()
+        try FileManager.default.createDirectory(at: stack.store.directory, withIntermediateDirectories: true)
+        try Data(#"{"pill_height": true, "widgets.wifi": 0, "greeting": false, "colors.today": true}"#.utf8)
+            .write(to: stack.store.file)
+        stack.store.beginConfig(theme: "alpha")
+        #expect(stack.store.declare(Self.schema) == nil)
+        func effective(_ key: String) throws -> SettingsValue {
+            stack.store.value(for: try #require(stack.store.entry(for: key)))
+        }
+        #expect(try effective("pill_height") == .number(32))
+        #expect(try effective("widgets.wifi") == .bool(true))
+        #expect(try effective("greeting") == .string("hi"))
+        #expect(try effective("colors.today") == .color(0xFFFF_453A))
+        // The real types still land.
+        try Data(#"{"pill_height": 28, "widgets.wifi": false, "greeting": "yo"}"#.utf8).write(to: stack.store.file)
+        stack.store.beginConfig(theme: "alpha")
+        #expect(stack.store.declare(Self.schema) == nil)
+        #expect(try effective("pill_height") == .number(28))
+        #expect(try effective("widgets.wifi") == .bool(false))
+        #expect(try effective("greeting") == .string("yo"))
+    }
+
+    @Test func theSidecarFollowsXDGConfigHomeLikeTheConfigDoes() {
+        let home = URL(fileURLWithPath: "/Users/someone")
+        #expect(SettingsStore.defaultDirectory(home: home, environment: [:]).path
+            == "/Users/someone/.config/ybar/settings")
+        #expect(SettingsStore.defaultDirectory(home: home, environment: ["XDG_CONFIG_HOME": "/tmp/xdg"]).path
+            == "/tmp/xdg/ybar/settings")
+        #expect(SettingsStore.defaultDirectory(home: home, environment: ["XDG_CONFIG_HOME": ""]).path
+            == "/Users/someone/.config/ybar/settings")
     }
 
     @Test func overridesSurviveANewStoreAndUnknownKeysAreKept() throws {
@@ -346,24 +416,48 @@ import Testing
     }
 
     /// Headless: a theme declaring settings with no daemon wired (the shipped
-    /// theme checks, a REPL) gets its defaults and touches no file.
+    /// theme checks, a REPL) gets its defaults and touches no file — and a
+    /// second run on the same runtime starts a fresh schema.
     @Test func headlessDeclarationReturnsDefaults() throws {
         let barManager = try BarManager()
         let eventBus = EventBus()
         let scheduler = AnimationScheduler()
         let runtime = LuaRuntime(barManager: barManager, eventBus: eventBus, scheduler: scheduler)
         defer { runtime.shutdown() }
-        #expect(run("""
+        let config = """
         local S = ybar.settings({ { key = "pill_height", type = "number", default = 28 } })
         ybar.bar({ height = S.pill_height })
-        """, runtime) == nil)
+        """
+        #expect(run(config, runtime) == nil)
         #expect(barManager.settings.height == 28)
+        barManager.settings.height = 0
+        #expect(run(config, runtime) == nil)
+        #expect(barManager.settings.height == 28)
+    }
+
+    /// `{}` is a list: an empty default for a `list` key declares fine, and
+    /// a file calling `ybar.settings({})` only to read gets the merged
+    /// table, not an error.
+    @Test func anEmptyTableIsAnEmptyList() throws {
+        let stack = try makeStack(declare: false)
+        defer { stack.runtime.shutdown() }
+        #expect(run("""
+        local S = ybar.settings({
+          { key = "hidden", type = "list", default = {} },
+          { key = "pill_height", type = "number", default = 32 },
+        })
+        local R = ybar.settings({})
+        ybar.add("item", "n", "left", { label = #S.hidden .. " " .. R.pill_height })
+        """, stack.runtime) == nil)
+        #expect(stack.barManager.store.item(named: "n")?.label.string == "0 32")
+        #expect(stack.store.entry(for: "hidden")?.defaultValue == .list([]))
     }
 }
 
-private extension Result where Success == SettingsChange, Failure == SettingsFailure {
+private extension Result where Success == SettingsChange?, Failure == SettingsFailure {
     var isSuccess: Bool { if case .success = self { return true } else { return false } }
-    var value: SettingsValue? { if case .success(let change) = self { return change.value } else { return nil } }
+    var value: SettingsValue? { if case .success(let change) = self { return change?.value } else { return nil } }
+    var isNoop: Bool { if case .success(nil) = self { return true } else { return false } }
     var errorText: String? { if case .failure(let failure) = self { return failure.message } else { return nil } }
 }
 
