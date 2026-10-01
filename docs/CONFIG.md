@@ -154,7 +154,10 @@ running schema does not know are left untouched. `--query themes` lists what
 `--theme use <name>` can switch a running bar to (a bar pinned with `-c`
 also counts the config's sibling directories as a theme root); `--theme reset` forgets the
 selection and runs discovery again. These are the verbs a settings front end
-drives; they need no permissions of their own.
+drives; they need no permissions of their own. The first such front end is
+the Raycast extension in [`extensions/raycast`](../extensions/raycast):
+Settings, Themes, Widgets and Reload commands over the socket, with text
+fields for sizes and colors.
 
 ## Workspace adapters
 

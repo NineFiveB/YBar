@@ -22,7 +22,15 @@ section and publishes the section as the GitHub Release notes.
   for the theme to apply itself.
 - `--query themes` and `--theme use <name> | reset`: list and switch
   themes from a running bar over the socket, the same catalog and state
-  file `ybar theme` uses.
+  file `ybar theme` uses. A bar pinned with `-c` counts the config's
+  sibling directories as a theme root.
+- `ysuite-liquid` declares its knobs: layout, workspaces, fonts, colors,
+  bar height, glass rim, popup shape, widget order and switches, popup
+  widths. Loads unchanged on an older daemon.
+- A Raycast extension (`extensions/raycast`): YBar Settings, Themes,
+  Widgets and Reload commands that drive the running bar over its socket.
+  Sizes and colors are text fields; switches toggle in place; untouched
+  rows are marked as the theme's default.
 
 ## [0.3.0] — 2026-09-30
 
