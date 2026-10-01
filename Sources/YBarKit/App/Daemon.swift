@@ -641,6 +641,16 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         let directory = url.deletingLastPathComponent()
         settingsTheme = resolution.theme ?? directory.lastPathComponent
         settingsStore.beginConfig(theme: settingsTheme)
+        // A pinned `-c <root>/<theme>/ybarrc.lua` says where themes live as
+        // surely as any root: a checkout's examples/, a folder of one's own.
+        // Without this a daemon launched that way lists nothing under
+        // `--query themes`, and a settings app has nothing to switch to.
+        if explicitConfigPath != nil {
+            let sibling = directory.deletingLastPathComponent()
+            if !settingsStore.themeSource.roots.contains(sibling) {
+                settingsStore.themeSource.roots.insert(sibling, at: 0)
+            }
+        }
         scriptRunner.configDirectory = directory
         scriptRunner.baseEnvironment = [
             "CONFIG_DIR": directory.path,

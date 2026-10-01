@@ -151,7 +151,8 @@ schema and writes only the keys that differ from their defaults;
 `~/.config/ybar/settings/<theme>.json`, named after the selected theme or
 the config directory, re-read on every reload, and keys it carries that the
 running schema does not know are left untouched. `--query themes` lists what
-`--theme use <name>` can switch a running bar to; `--theme reset` forgets the
+`--theme use <name>` can switch a running bar to (a bar pinned with `-c`
+also counts the config's sibling directories as a theme root); `--theme reset` forgets the
 selection and runs discovery again. These are the verbs a settings front end
 drives; they need no permissions of their own.
 
