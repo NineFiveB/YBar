@@ -345,13 +345,8 @@ public final class SettingsStore {
         home: URL = FileManager.default.homeDirectoryForCurrentUser,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
-        let root: URL
-        if let xdg = environment["XDG_CONFIG_HOME"], !xdg.isEmpty {
-            root = URL(fileURLWithPath: xdg)
-        } else {
-            root = home.appendingPathComponent(".config")
-        }
-        return root.appendingPathComponent("ybar/settings")
+        ConfigLocator.configHome(home: home, environment: environment)
+            .appendingPathComponent("ybar/settings")
     }
 
     public var file: URL {

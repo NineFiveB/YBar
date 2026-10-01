@@ -45,6 +45,17 @@ public enum ThemeCatalog {
         return roots
     }
 
+    /// Where a pinned `-c <root>/<theme>/ybarrc.lua` says themes live: the
+    /// directory above the config's — a checkout's examples/, a folder of
+    /// one's own. Nil when that directory is the config home itself: `-c
+    /// ~/.config/ybar/ybarrc.lua` is the user's own rc, not a theme among
+    /// themes, and listing `~/.config/*` as switchable would be wrong.
+    public static func siblingRoot(forPinned config: URL, configHome: URL) -> URL? {
+        let sibling = config.deletingLastPathComponent().deletingLastPathComponent()
+        if sibling.standardizedFileURL.path == configHome.standardizedFileURL.path { return nil }
+        return sibling
+    }
+
     /// Every theme under the roots, sorted by name. First root wins for a
     /// duplicate name: a user copy shadows nothing, but a name must not list
     /// twice.
