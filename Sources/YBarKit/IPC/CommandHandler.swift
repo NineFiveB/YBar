@@ -29,6 +29,12 @@ public final class CommandHandler {
     /// test can never touch the real output device). Returns false when the
     /// device refused the write.
     public var onVolume: ((VolumeRequest) -> Bool)?
+    /// The theme's declared settings and the user's overrides (`--query
+    /// settings`, `--settings`, `--theme`). Nil headless.
+    public var settingsStore: SettingsStore?
+    /// `--theme reset` cleared the recorded selection; the daemon re-runs
+    /// config discovery, which a plain reload does not.
+    public var onThemeReset: (() -> String?)?
 
     /// What `--volume <token>` asks for. Absolute levels are the Windows port's
     /// grammar; the signed step form replaces the one thing themes still shelled
@@ -187,7 +193,8 @@ public final class CommandHandler {
                     emit("[!] --query needs a target")
                     continue
                 }
-                emit(Serialize.query(target: target, manager: barManager, eventBus: eventBus))
+                emit(Serialize.query(target: target, manager: barManager, eventBus: eventBus,
+                                     settings: settingsStore))
 
             case "push":
                 guard let name = batch.args.first,
@@ -309,6 +316,72 @@ public final class CommandHandler {
                 }
                 emit(AppControl.perform(batch.args[1], on: batch.args[0]))
 
+            case "settings":
+                // The write side of the settings layer. Every change lands in
+                // the sidecar first; then the theme hears `settings_change`
+                // for the keys it applies itself, or the config re-runs once
+                // for the keys that shape layout — never both, since a
+                // reload rebuilds every item the live handlers would touch.
+                guard let store = settingsStore else {
+                    emit("[!] settings are not available")
+                    continue
+                }
+                var changes: [SettingsChange] = []
+                switch batch.args.first {
+                case "set":
+                    guard batch.args.count >= 2 else {
+                        emit("[!] usage: --settings set <key>=<value>...")
+                        continue
+                    }
+                    for token in batch.args.dropFirst() {
+                        guard let (key, value) = CommandParser.keyValue(token) else {
+                            emit("[!] expected key=value, got: \(token)")
+                            continue
+                        }
+                        switch store.set(key: key, token: value) {
+                        case .success(let change): if let change { changes.append(change) }
+                        case .failure(let error): emit(error.message)
+                        }
+                    }
+                case "reset":
+                    switch store.reset(keys: Array(batch.args.dropFirst())) {
+                    case .success(let reset): changes += reset
+                    case .failure(let error): emit(error.message)
+                    }
+                default:
+                    emit("[!] usage: --settings set <key>=<value>... | reset [<key>...]")
+                    continue
+                }
+                settle(changes)
+
+            case "theme":
+                guard let store = settingsStore else {
+                    emit("[!] themes are not available")
+                    continue
+                }
+                switch batch.args.first {
+                case "use":
+                    guard batch.args.count == 2 else {
+                        emit("[!] usage: --theme use <name>")
+                        continue
+                    }
+                    let name = batch.args[1]
+                    guard let match = store.themeSource.themes().first(where: { $0.name == name }) else {
+                        emit("[!] no theme named \(name)")
+                        continue
+                    }
+                    if let error = store.themeSource.select(name) {
+                        emit(error)
+                        continue
+                    }
+                    onReload?(match.entry.path)
+                case "reset":
+                    store.themeSource.clearSelection()
+                    emit(onThemeReset?())
+                default:
+                    emit("[!] usage: --theme use <name> | reset")
+                }
+
             case "exit":
                 onExit?()
 
@@ -317,6 +390,23 @@ public final class CommandHandler {
             }
         }
         return output
+    }
+
+    /// Apply a batch of settings changes: one reload if any key needs it,
+    /// otherwise a `settings_change` per key for the theme's handlers.
+    private func settle(_ changes: [SettingsChange]) {
+        guard !changes.isEmpty else { return }
+        if changes.contains(where: { $0.entry.apply == .reload }) {
+            onReload?(nil)
+            return
+        }
+        for change in changes {
+            eventBus.trigger(name: "settings_change", info: change.entry.key, extraEnvironment: [
+                "KEY": change.entry.key,
+                "VALUE": change.value.token,
+                "TYPE": change.entry.kind.rawValue,
+            ])
+        }
     }
 
     private func handleAdd(args: [String]) -> String? {

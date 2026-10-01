@@ -1,0 +1,70 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "ybar",
+  "title": "YBar",
+  "description": "Change how your YBar status bar looks: the knobs the running theme declares, theme switching, widget order, all from Raycast.",
+  "icon": "icon.png",
+  "author": "aegiosot",
+  "categories": ["System", "Developer Tools"],
+  "license": "MIT",
+  "platforms": ["macOS"],
+  "commands": [
+    {
+      "name": "settings",
+      "title": "YBar Settings",
+      "subtitle": "YBar",
+      "description": "Edit the settings the running theme declares. Untouched rows follow the theme.",
+      "mode": "view"
+    },
+    {
+      "name": "themes",
+      "title": "YBar Themes",
+      "subtitle": "YBar",
+      "description": "List the themes YBar can switch to and pick one; the bar reloads in place.",
+      "mode": "view"
+    },
+    {
+      "name": "widgets",
+      "title": "YBar Widgets",
+      "subtitle": "YBar",
+      "description": "Turn the bar's widgets on or off and reorder them.",
+      "mode": "view"
+    },
+    {
+      "name": "reload",
+      "title": "Reload YBar",
+      "subtitle": "YBar",
+      "description": "Re-run the bar's config in place.",
+      "mode": "no-view"
+    }
+  ],
+  "preferences": [
+    {
+      "name": "socketPath",
+      "title": "Socket path",
+      "description": "Where the running bar listens. Leave empty for the default, /tmp/ybar_<user>.socket.",
+      "type": "textfield",
+      "required": false,
+      "placeholder": "/tmp/ybar_<user>.socket"
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "^1.100.0",
+    "@raycast/utils": "^2.0.0"
+  },
+  "devDependencies": {
+    "@raycast/eslint-config": "^2.0.0",
+    "@types/node": "^22.0.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.4.0"
+  },
+  "scripts": {
+    "build": "ray build -e dist",
+    "dev": "ray develop",
+    "lint": "ray lint",
+    "fix-lint": "ray lint --fix",
+    "typecheck": "tsc --noEmit",
+    "publish": "npx @raycast/api@latest publish"
+  }
+}

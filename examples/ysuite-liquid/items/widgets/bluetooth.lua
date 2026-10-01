@@ -8,7 +8,10 @@ local rule = require("helpers.separator")
 -- that row. A connected device always shows Disconnect, which turns red
 -- while it runs.
 
-local popup_width = 280
+local popup_width = require("helpers.tunable")({
+  { key = "bluetooth.popup_width", type = "number", default = 280, min = 200, max = 500,
+    label = "Bluetooth popup width", section = "Widgets" },
+}).bluetooth.popup_width
 local inset = 12
 local max_devices = 6
 local button_width = 108

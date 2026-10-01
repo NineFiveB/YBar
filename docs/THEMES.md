@@ -104,6 +104,19 @@ A few engine idioms the shipped themes lean on:
   fill while the pointer is over it, `hover.row(item)` lights a popup row
   from transparent.
 
+### Declaring settings
+
+If a knob is meant for users, declare it rather than burying it in a
+`settings.lua` they have to find: `ybar.settings` takes the list of
+tunables (key, type, default, and optionally label, section, range,
+options, `apply = "live"`) and returns the merged values, the user's
+overrides over your defaults. A settings app reads that same list through
+`--query settings` and writes through `--settings set`, so a declared theme
+is configurable from a GUI with no further work. Keep the declaration
+honest: a key the GUI can change but the theme never reads is a broken
+promise. [CONFIG.md](CONFIG.md#settings-a-gui-can-reach) has the schema
+and the apply rules.
+
 ## Sharing a theme
 
 Publish the theme directory as a git repo, then anyone can:

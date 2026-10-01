@@ -63,6 +63,10 @@ public final class LuaRuntime {
     /// path of their own (`ybar.volume` → `--volume`, the Windows port's
     /// handleTokens). Wired by the daemon; nil headless.
     public var handleCommand: (([String]) -> String)?
+    /// `ybar.settings` declares into it and reads the merged values back.
+    /// Wired by the daemon; nil headless, where the call still returns the
+    /// defaults so a theme runs unchanged under test.
+    public var settingsStore: SettingsStore?
     /// Registry refs are small integers scoped to ONE lua_State; a completion
     /// crossing a reload would index the NEW state's registry and invoke an
     /// unrelated callback. Bumped on every state teardown; async completions
@@ -91,6 +95,10 @@ public final class LuaRuntime {
         self.state = state
         luaL_openlibs(state)
         registerRawModule(state)
+        // The daemon's store begins each config run itself; the headless one
+        // has nobody else to do it, and a second run would otherwise declare
+        // every key twice.
+        if settingsStore == nil { headlessSettings.beginConfig(theme: "headless") }
         if let error = run(code: LuaRuntime.prelude, name: "=ybar-prelude") {
             return error
         }
@@ -461,7 +469,8 @@ public final class LuaRuntime {
                 let item = runtime.barManager.store.item(named: name)
                 if !(preferItem && item != nil),
                    let reserved = Serialize.reserved(
-                       target: name, manager: runtime.barManager, eventBus: runtime.eventBus) {
+                       target: name, manager: runtime.barManager, eventBus: runtime.eventBus,
+                       settings: runtime.settingsStore) {
                     LuaRuntime.push(reserved, to: L)
                     return 1
                 }
@@ -473,6 +482,44 @@ public final class LuaRuntime {
                     item, boundingRects: runtime.barManager.boundingRects(for: item))
                 LuaRuntime.push(dictionary, to: L)
                 return 1
+            }
+        }
+        // ybar.settings(list) → merged table, error. Each list entry is a
+        // table with key/type/default and optional label/section/apply/
+        // options/min/max. The table comes back nested by dotted key.
+        register("settings") { L in
+            MainActor.assumeIsolated {
+                guard let runtime = LuaRuntime.current else { return 0 }
+                guard lua_type(L, 1) == luaTypeTable, let list = LuaRuntime.read(L, 1) as? [Any] else {
+                    lua_createtable(L, 0, 0)
+                    lua_pushstring(L, "[!] settings(list) expects a list of entries")
+                    return 2
+                }
+                var entries: [SettingsEntry] = []
+                var error: String?
+                for (index, element) in list.enumerated() {
+                    guard let table = element as? [String: Any] else {
+                        error = "[!] settings: entry \(index + 1) is not a table"
+                        break
+                    }
+                    switch SettingsEntry.fromLua(table) {
+                    case .success(let entry): entries.append(entry)
+                    case .failure(let failure):
+                        error = failure.message
+                    }
+                    if error != nil { break }
+                }
+                let store = runtime.settingsStore ?? runtime.headlessSettings
+                if error == nil {
+                    error = store.declare(entries)
+                }
+                LuaRuntime.push(store.luaTable(), to: L)
+                if let error {
+                    lua_pushstring(L, error)
+                } else {
+                    lua_pushnil(L)
+                }
+                return 2
             }
         }
         register("add_event") { L in
@@ -496,7 +543,8 @@ public final class LuaRuntime {
                     return 1
                 }
                 lua_pushstring(L, Serialize.query(
-                    target: target, manager: runtime.barManager, eventBus: runtime.eventBus))
+                    target: target, manager: runtime.barManager, eventBus: runtime.eventBus,
+                    settings: runtime.settingsStore))
                 return 1
             }
         }
@@ -835,6 +883,65 @@ public final class LuaRuntime {
         }
     }
 
+    /// A store for a runtime no daemon wired (tests, the headless theme
+    /// checks): declarations work and the defaults come back, but nothing is
+    /// read from or written to disk.
+    private(set) lazy var headlessSettings = SettingsStore(
+        directory: FileManager.default.temporaryDirectory
+            .appendingPathComponent("ybar-headless-settings-\(ProcessInfo.processInfo.processIdentifier)"),
+        themeSource: ThemeSource(home: FileManager.default.temporaryDirectory, roots: []))
+
+    /// Read the Lua value at `index` into Foundation shapes: nil, Bool, Int,
+    /// Double, String, [Any] (a sequence 1...n) or [String: Any]. Keys are
+    /// copied before stringifying — converting a number key in place breaks
+    /// `lua_next` ("invalid key to 'next'").
+    static func read(_ L: OpaquePointer?, _ index: Int32, depth: Int = 0) -> Any? {
+        let index = lua_absindex(L, index)
+        switch lua_type(L, index) {
+        case 1: // LUA_TBOOLEAN
+            return lua_toboolean(L, index) != 0
+        case luaTypeNumber:
+            if lua_isinteger(L, index) != 0 { return Int(lua_tointegerx(L, index, nil)) }
+            return lua_tonumberx(L, index, nil)
+        case luaTypeString:
+            return toString(L, index)
+        case luaTypeTable:
+            guard depth < 8 else { return nil }
+            let length = Int(lua_rawlen(L, index))
+            var array: [Any] = []
+            var dictionary: [String: Any] = [:]
+            // `{}` is a list: nothing here is keyed by a table, and a `list`
+            // setting's empty default (or `ybar.settings({})` to read values
+            // declared elsewhere) must not come back as a dictionary.
+            var isArray = true
+            lua_pushnil(L)
+            while lua_next(L, index) != 0 {
+                let keyType = lua_type(L, -2)
+                var arrayIndex: Int?
+                if keyType == luaTypeNumber, lua_isinteger(L, -2) != 0 {
+                    let key = Int(lua_tointegerx(L, -2, nil))
+                    if key >= 1, key <= length { arrayIndex = key }
+                }
+                if arrayIndex == nil { isArray = false }
+                lua_pushvalue(L, -2)
+                let key = argString(L, -1) ?? ""
+                pop(L, 1)
+                let value = read(L, -1, depth: depth + 1)
+                if let value { dictionary[key] = value }
+                pop(L, 1)
+            }
+            if isArray, length > 0 {
+                for position in 1...length {
+                    guard let element = dictionary[String(position)] else { isArray = false; break }
+                    array.append(element)
+                }
+            }
+            return isArray ? array : dictionary
+        default:
+            return nil
+        }
+    }
+
     /// Recursively push a Serialize dictionary as a Lua table.
     static func push(_ value: Any, to L: OpaquePointer?) {
         switch value {
@@ -945,6 +1052,13 @@ public final class LuaRuntime {
     function ybar.wifi_prompt(ssid, fn) raw.wifi_prompt(ssid, fn) end
     function ybar.wifi_disconnect(fn) raw.wifi_disconnect(fn) end
     function ybar.remove(name) raw.remove(name) end
+    -- The theme's user-tunable knobs: declare them, get the merged values
+    -- back (the user's overrides over these defaults), nested by dotted key.
+    function ybar.settings(list)
+      local t, e = raw.settings(list or {})
+      if e then print(e) end
+      return t
+    end
 
     function ybar.animate(curve, frames, fn)
       raw.animate_begin(curve, frames)

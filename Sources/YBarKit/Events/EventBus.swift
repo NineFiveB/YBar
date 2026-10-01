@@ -21,6 +21,7 @@ public final class EventBus {
         "app_launched", "app_terminated", "media_change",
         "graph.hovered",
         "recording_change",
+        "settings_change",
     ]
 
     public private(set) var definitions: [EventDefinition] = []

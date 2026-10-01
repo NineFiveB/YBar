@@ -24,6 +24,18 @@ public enum ConfigLocator {
         public let shadowed: URL?
     }
 
+    /// `$XDG_CONFIG_HOME`, else `~/.config`: the root discovery reads
+    /// `<name>/` under, and the one the settings sidecar sits under too.
+    public static func configHome(
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL {
+        if let xdg = environment["XDG_CONFIG_HOME"], !xdg.isEmpty {
+            return URL(fileURLWithPath: xdg)
+        }
+        return home.appendingPathComponent(".config")
+    }
+
     public static func locate(
         explicitPath: String?, instanceName: String,
         environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -72,8 +84,9 @@ public enum ConfigLocator {
             candidates.append(directory.appendingPathComponent("\(instanceName).jsonc"))
         }
 
-        if let xdg = environment["XDG_CONFIG_HOME"], !xdg.isEmpty {
-            addDirectory(URL(fileURLWithPath: xdg).appendingPathComponent(instanceName))
+        let configHome = configHome(home: home, environment: environment)
+        if configHome != home.appendingPathComponent(".config") {
+            addDirectory(configHome.appendingPathComponent(instanceName))
         }
         addDirectory(home.appendingPathComponent(".config/\(instanceName)"))
         candidates.append(home.appendingPathComponent(".\(instanceName)rc.lua"))

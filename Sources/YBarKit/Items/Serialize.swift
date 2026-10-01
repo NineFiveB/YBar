@@ -5,8 +5,10 @@ import Foundation
 /// scripts in the wild pipe this straight into `jq`.
 @MainActor
 public enum Serialize {
-    public static func query(target: String, manager: BarManager, eventBus: EventBus) -> String {
-        if let reserved = reserved(target: target, manager: manager, eventBus: eventBus) {
+    public static func query(target: String, manager: BarManager, eventBus: EventBus,
+                             settings: SettingsStore? = nil) -> String {
+        if let reserved = reserved(target: target, manager: manager, eventBus: eventBus,
+                                   settings: settings) {
             return json(reserved)
         }
         guard let item = manager.store.item(named: target) else {
@@ -20,8 +22,16 @@ public enum Serialize {
     /// "bar"), and `apps` joins the list under that same rule rather than
     /// being matched after item lookup — one rule for the CLI and for Lua's
     /// `query_table`. Nil for anything else (an item name).
-    public static func reserved(target: String, manager: BarManager, eventBus: EventBus) -> Any? {
+    public static func reserved(target: String, manager: BarManager, eventBus: EventBus,
+                                settings: SettingsStore? = nil) -> Any? {
         switch target {
+        case "settings":
+            // The theme's declared knobs with the user's values merged in —
+            // what a settings UI renders. Absent headless, like `apps`
+            // without a workspace.
+            return settings?.queryDictionary()
+        case "themes":
+            return settings.map { themesArray($0.themeSource, running: $0.theme) }
         case "bar":
             return barDictionary(manager: manager)
         case "defaults":
@@ -60,6 +70,22 @@ public enum Serialize {
                     "hidden": app.isHidden,
                 ]
             }
+    }
+
+    /// Every theme the daemon could switch to, and which one is current:
+    /// the one running when it is in the list (a bar pinned with `-c`
+    /// records nothing, and `--reload <path>` can leave the record behind),
+    /// else the recorded selection. `--theme use` takes the same names.
+    static func themesArray(_ source: ThemeSource, running: String) -> [[String: Any]] {
+        let themes = source.themes()
+        let current = themes.contains { $0.name == running } ? running : source.current()
+        return themes.map { theme in
+            [
+                "name": theme.name,
+                "path": theme.entry.path,
+                "current": theme.name == current,
+            ]
+        }
     }
 
     static func barDictionary(manager: BarManager) -> [String: Any] {

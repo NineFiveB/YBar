@@ -16,7 +16,10 @@ local lock_w = 26
 local signal_w = 26
 local button_w = 96
 local gap = 12
-local max_rows = 6
+local max_rows = require("helpers.tunable")({
+  { key = "wifi.max_rows", type = "number", default = 6, min = 1, max = 12,
+    label = "Wi-Fi networks listed", section = "Widgets" },
+}).wifi.max_rows
 local max_hotspots = 3
 -- Rows in a group share one rounded plate. There is no bracket inside a popup
 -- — buildPopup lays every member out as a row — so the "frame" is each row's

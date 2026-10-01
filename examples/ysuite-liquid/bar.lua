@@ -27,8 +27,13 @@ local RIGHT_FLOOR = 8
 local PAD_LEFT = outer_gap("left", 8) + LEFT_BIAS
 local PAD_RIGHT = math.max(0, outer_gap("right", 8) - RIGHT_FLOOR)
 
+local B = require("helpers.tunable")({
+  { key = "bar.height", type = "number", default = 40, min = 24, max = 80,
+    label = "Bar height", section = "Bar" },
+}).bar
+
 sbar.bar({
-  height = 40,
+  height = B.height,
   -- No full-bleed material: a bar-wide NSGlassEffectView frosts the strip.
   -- Pills keep their own glass. The strip itself stays clear.
   color = colors.transparent,
