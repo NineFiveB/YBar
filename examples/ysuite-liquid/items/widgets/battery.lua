@@ -6,7 +6,10 @@ local rule = require("helpers.separator")
 -- capsule pill; 420pt wrap popup; blue segment tabs; green bar history
 -- (24h / 10d) with y-axis (engine) and x-axis labels; last-charged lines.
 
-local popup_width = 420
+local popup_width = require("helpers.tunable")({
+  { key = "battery.popup_width", type = "number", default = 420, min = 300, max = 700,
+    label = "Battery popup width", section = "Widgets" },
+}).battery.popup_width
 local inset = 12
 local plot_width = popup_width - 2 * inset - 36   -- room for engine y-axis strip
 local tab_track = colors.with_alpha(0xff000000, 0.38)

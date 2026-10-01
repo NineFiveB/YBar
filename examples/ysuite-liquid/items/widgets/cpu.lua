@@ -9,7 +9,10 @@ local rule = require("helpers.separator")
 local stats_script = (PORT_DIR or (os.getenv("HOME") .. "/.config/ybar"))
   .. "/helpers/system_stats_rich.sh"
 
-local popup_width = 320
+local popup_width = require("helpers.tunable")({
+  { key = "cpu.popup_width", type = "number", default = 320, min = 200, max = 600,
+    label = "System monitor popup width", section = "Widgets" },
+}).cpu.popup_width
 local inset = 12
 local card = colors.selection
 local sub = colors.with_alpha(colors.white, 0.55)
