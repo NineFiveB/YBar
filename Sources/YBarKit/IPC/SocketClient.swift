@@ -248,6 +248,9 @@ public enum CLIClient {
       --subscribe <name> <event>...         --trigger <event> [KEY=VAL...]
       --animate <curve> <frames>            --update
       --push <graph> <value>...             --query bar|defaults|events|displays|apps|<item>
+      --settings set <key>=<val>... | reset [<key>...]
+                                            --query settings|themes
+      --theme use <name> | reset            (switch themes from a running bar)
       --move <name> before|after <anchor>   --reorder <name>...
       --rename <old> <new>                  --clone <new> <source> [before|after]
       --reload [path]                       --hotload on|off

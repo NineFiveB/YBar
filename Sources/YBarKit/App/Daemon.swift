@@ -57,6 +57,11 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
     let networkProvider = NetworkProvider()
     let statsProvider = SystemStatsProvider()
     let recordingProvider = RecordingIndicatorProvider()
+    /// The theme's declared knobs and the user's overrides, by theme name.
+    let settingsStore = SettingsStore()
+    /// Which sidecar the running config reads: the recorded theme's name, or
+    /// the config directory's for a config of the user's own.
+    var settingsTheme = "default"
 
     var routineTimer: Timer?
     var configURL: URL?
@@ -111,6 +116,15 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
             scriptRunner: scriptRunner, scheduler: scheduler)
         commandHandler.onAliasAdded = { [weak self] _ in
             self?.aliasProvider.start()
+        }
+        commandHandler.settingsStore = settingsStore
+        commandHandler.onThemeReset = { [weak self] in
+            guard let self else { return }
+            // Discovery again, not a plain reload: the recorded theme is
+            // gone, so the user's own rc (or nothing) is what loads now.
+            let resolution = ConfigLocator.resolve(
+                explicitPath: self.explicitConfigPath, instanceName: self.instanceName)
+            self.reload(explicitPath: resolution?.url.path)
         }
         wireCommandHandler()
 
@@ -625,6 +639,8 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         }
         configURL = url
         let directory = url.deletingLastPathComponent()
+        settingsTheme = resolution.theme ?? directory.lastPathComponent
+        settingsStore.beginConfig(theme: settingsTheme)
         scriptRunner.configDirectory = directory
         scriptRunner.baseEnvironment = [
             "CONFIG_DIR": directory.path,
@@ -658,6 +674,7 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
                 runtime.handleCommand = { [weak self] arguments in
                     self?.commandHandler.handle(arguments: arguments) ?? ""
                 }
+                runtime.settingsStore = settingsStore
                 luaRuntime = runtime
             }
             if let error = luaRuntime?.runConfig(at: url) {
@@ -686,8 +703,13 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
             let url = URL(fileURLWithPath: (explicitPath as NSString).expandingTildeInPath)
             if FileManager.default.fileExists(atPath: url.path) {
                 configURL = url
+                // A theme's directory IS its name (ThemeCatalog lists
+                // directory entries), so `--theme use` and a hand-typed
+                // `--reload <path>` land on the same sidecar.
+                settingsTheme = url.deletingLastPathComponent().lastPathComponent
             }
         }
+        settingsStore.beginConfig(theme: settingsTheme)
         if let configURL {
             let directory = configURL.deletingLastPathComponent()
             scriptRunner.configDirectory = directory

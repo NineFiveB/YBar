@@ -107,10 +107,12 @@ sketchybar's UX (message-scoped `--animate <curve> <duration>`, duration in 60th
 --remove <name>                       --subscribe <name> <event>…
 --trigger <event> [KEY=VAL…]          --animate <curve> <frames>
 --update                              --push <graph> <value>…
---query bar|defaults|events|displays|apps|<item>
+--query bar|defaults|events|displays|apps|settings|themes|<item>
 --move <name> before|after <anchor>   --reorder <name>…
 --rename <old> <new>                  --clone <new> <source> [before|after]
 --reload [path]                       --hotload on|off
+--settings set <key>=<val>... | reset [<key>...]
+--theme use <name> | reset
 --volume <0-100|+N|-N>                --app <pid|bundle-id> activate|hide|quit|kill
 --ping                                --exit
 ```

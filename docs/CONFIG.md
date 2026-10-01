@@ -49,7 +49,8 @@ The verbs are sketchybar's: `--bar`, `--default`,
 `--add item|graph|slider|bracket|event|alias`, `--set`, `--subscribe`,
 `--trigger`, `--animate`, `--update`, `--query`, `--push`, `--remove`,
 `--move`, `--reorder`, `--rename`, `--clone`, `--reload`, `--hotload`,
-`--ping` and `--exit`. YBar adds `--volume` and `--app`. Property names are
+`--ping` and `--exit`. YBar adds `--volume`, `--app`, `--settings` and
+`--theme`. Property names are
 sketchybar's dotted namespace (`icon.background.shadow.color.alpha`), colors
 are `0xAARRGGBB`, booleans take `on`, `off` and `toggle`, `--query` returns
 sketchybar-shaped JSON, and `<name>` in `--set` and `--remove` may be a
@@ -109,6 +110,50 @@ ybar theme install <git-url>   # clone a community theme into ~/.config/ybar/the
 discovery honors it on every later start, the login agent included.
 [THEMES.md](THEMES.md) has the gallery, the theme roots, what a pinned `-c`
 does to a selection, and how to publish a theme of your own.
+
+## Settings a GUI can reach
+
+A theme is code, and nothing rewrites it. What a settings app edits instead
+is a short list of knobs the theme declares, with the user's choices kept
+apart from the theme in a sidecar file. The theme calls
+`ybar.settings` with that list and gets the merged values back:
+
+```lua
+local S = ybar.settings({
+  { key = "pill_height", type = "number", default = 32, min = 20, max = 60,
+    label = "Pill height", section = "Layout" },
+  { key = "colors.today", type = "color", default = 0xffff453a,
+    section = "Colors", apply = "live" },
+  { key = "widgets.wifi", type = "bool", default = true, section = "Widgets" },
+  { key = "icons", type = "enum", default = "sf-symbols",
+    options = { "sf-symbols", "nerd" } },
+})
+-- S.pill_height, S.colors.today, S.widgets.wifi, S.icons: the user's
+-- value where one is set, the default otherwise. Dotted keys nest.
+```
+
+Types are `number` (optional `min`/`max`), `string`, `bool`, `color`
+(`0xAARRGGBB`; a text field may also type `#RRGGBB` or `#AARRGGBB`),
+`enum` (with `options`) and `list` (strings, `a,b,c` on the CLI). `label`
+defaults to the key and `section` to `General`. `apply` is `reload` unless
+the theme says `live`: a reload key re-runs the config when it changes, a
+live key only fires `settings_change`, with `KEY`, `VALUE` (the CLI
+spelling) and `TYPE` in the environment, and the theme applies it from a
+handler. Heights, paddings and which widgets load are reload keys; a color
+or a font is a live one. Each file in a theme may declare its own entries.
+
+Over the socket, `--query settings` returns the theme name, the sidecar
+path, the schema in declared order (each row with its `default`, the
+effective `value` and whether it is `overridden`), plus `values` and
+`overrides` maps. `--settings set <key>=<value>...` validates against the
+schema and writes only the keys that differ from their defaults;
+`--settings reset [<key>...]` forgets them. The sidecar is
+`~/.config/ybar/settings/<theme>.json`, named after the selected theme or
+the config directory, re-read on every reload, and keys it carries that the
+running schema does not know are left untouched. `--query themes` lists what
+`--theme use <name>` can switch a running bar to; `--theme reset` forgets the
+selection and runs discovery again. These are the verbs a settings front end
+drives; they need no permissions of their own.
 
 ## Workspace adapters
 

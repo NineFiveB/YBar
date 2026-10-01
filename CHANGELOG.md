@@ -8,7 +8,21 @@ section and publishes the section as the GitHub Release notes.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- A settings layer for GUIs. A theme declares its user-tunable knobs with
+  `ybar.settings { ... }` (number, string, bool, color, enum, list; label,
+  section, range, options, `apply = live|reload`) and reads the merged
+  values back. The daemon keeps only the keys the user changed, in
+  `~/.config/ybar/settings/<theme>.json`, and never touches the theme's
+  Lua. `--query settings` returns the schema with current values,
+  `--settings set <key>=<value>` validates and persists, `--settings
+  reset` forgets. A changed reload key re-runs the config once; a live key
+  fires the new builtin event `settings_change` (`KEY`, `VALUE`, `TYPE`)
+  for the theme to apply itself.
+- `--query themes` and `--theme use <name> | reset`: list and switch
+  themes from a running bar over the socket, the same catalog and state
+  file `ybar theme` uses.
 
 ## [0.3.0] — 2026-09-30
 
