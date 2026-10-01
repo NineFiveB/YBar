@@ -1,5 +1,6 @@
 import { Action, ActionPanel, Form, useNavigation } from "@raycast/api";
-import { useState } from "react";
+import { useForm } from "@raycast/utils";
+import { ReactNode } from "react";
 import { reportFailure, reportSaved } from "./feedback";
 import { SettingRow, display, setSetting, tokenOf, validate } from "./ybar";
 
@@ -10,21 +11,19 @@ interface Props {
 
 /** One field, typed by the row. Heights, widths and colors are text fields on purpose. */
 export function EditSetting({ row, onDone }: Props) {
-  const { pop } = useNavigation();
-  const [error, setError] = useState<string | undefined>();
-  const [saving, setSaving] = useState(false);
+  switch (row.type) {
+    case "bool":
+      return <BoolEditor row={row} onDone={onDone} />;
+    case "enum":
+      return <EnumEditor row={row} onDone={onDone} />;
+    default:
+      return <TextEditor row={row} onDone={onDone} />;
+  }
+}
 
-  async function submit(values: { value: string | boolean }) {
-    const raw = values.value;
-    const token = typeof raw === "boolean" ? (raw ? "on" : "off") : String(raw).trim();
-    if (typeof raw !== "boolean") {
-      const problem = validate(row, token);
-      if (problem) {
-        setError(problem);
-        return;
-      }
-    }
-    setSaving(true);
+function useSave(row: SettingRow, onDone: () => void) {
+  const { pop } = useNavigation();
+  return async (token: string) => {
     try {
       await setSetting(row.key, token);
       await reportSaved(row);
@@ -32,44 +31,30 @@ export function EditSetting({ row, onDone }: Props) {
       pop();
     } catch (failure) {
       await reportFailure(`Could not save ${row.label}`, failure);
-    } finally {
-      setSaving(false);
     }
-  }
+  };
+}
 
-  const hint = hintFor(row);
-  const defaultText = `Theme default: ${display(row, row.default)}`;
-
+function Shell<T extends Form.Values>({
+  row,
+  children,
+  onSubmit,
+}: {
+  row: SettingRow;
+  children: ReactNode;
+  onSubmit: (values: T) => void | boolean | Promise<void | boolean>;
+}) {
   return (
     <Form
-      isLoading={saving}
       navigationTitle={row.label}
       actions={
         <ActionPanel>
-          <Action.SubmitForm title="Save" onSubmit={submit} />
+          <Action.SubmitForm<T> title="Save" onSubmit={onSubmit} />
         </ActionPanel>
       }
     >
       <Form.Description title="Setting" text={`${row.key} · ${row.section}`} />
-      {row.type === "bool" ? (
-        <Form.Checkbox id="value" label={row.label} defaultValue={Boolean(row.value)} info={defaultText} />
-      ) : row.type === "enum" ? (
-        <Form.Dropdown id="value" title={row.label} defaultValue={String(row.value)} info={defaultText}>
-          {(row.options ?? []).map((option) => (
-            <Form.Dropdown.Item key={option} value={option} title={option} />
-          ))}
-        </Form.Dropdown>
-      ) : (
-        <Form.TextField
-          id="value"
-          title={row.label}
-          defaultValue={tokenOf(row, row.value)}
-          placeholder={tokenOf(row, row.default)}
-          info={`${hint} ${defaultText}.`}
-          error={error}
-          onChange={(text) => setError(validate(row, text))}
-        />
-      )}
+      {children}
       <Form.Description
         text={
           row.apply === "reload"
@@ -78,6 +63,63 @@ export function EditSetting({ row, onDone }: Props) {
         }
       />
     </Form>
+  );
+}
+
+function TextEditor({ row, onDone }: Props) {
+  const save = useSave(row, onDone);
+  const { handleSubmit, itemProps } = useForm<{ value: string }>({
+    initialValues: { value: tokenOf(row, row.value) },
+    validation: { value: (text) => validate(row, text ?? "") },
+    onSubmit: (values) => save(values.value.trim()),
+  });
+  return (
+    <Shell row={row} onSubmit={handleSubmit}>
+      <Form.TextField
+        title={row.label}
+        placeholder={tokenOf(row, row.default)}
+        info={`${hintFor(row)} Theme default: ${display(row, row.default)}.`}
+        {...itemProps.value}
+      />
+    </Shell>
+  );
+}
+
+function BoolEditor({ row, onDone }: Props) {
+  const save = useSave(row, onDone);
+  const { handleSubmit, itemProps } = useForm<{ value: boolean }>({
+    initialValues: { value: Boolean(row.value) },
+    onSubmit: (values) => save(values.value ? "on" : "off"),
+  });
+  return (
+    <Shell row={row} onSubmit={handleSubmit}>
+      <Form.Checkbox
+        label={row.label}
+        info={`Theme default: ${display(row, row.default)}.`}
+        {...itemProps.value}
+      />
+    </Shell>
+  );
+}
+
+function EnumEditor({ row, onDone }: Props) {
+  const save = useSave(row, onDone);
+  const { handleSubmit, itemProps } = useForm<{ value: string }>({
+    initialValues: { value: String(row.value) },
+    onSubmit: (values) => save(values.value),
+  });
+  return (
+    <Shell row={row} onSubmit={handleSubmit}>
+      <Form.Dropdown
+        title={row.label}
+        info={`Theme default: ${display(row, row.default)}.`}
+        {...itemProps.value}
+      >
+        {(row.options ?? []).map((option) => (
+          <Form.Dropdown.Item key={option} value={option} title={option} />
+        ))}
+      </Form.Dropdown>
+    </Shell>
   );
 }
 

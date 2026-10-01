@@ -57,15 +57,13 @@ function Row({ row, file, onChanged }: { row: SettingRow; file?: string; onChang
     }
   }
 
-  const accessories: List.Item.Accessory[] = [
-    { text: display(row, row.value) },
-    row.overridden
-      ? {
-          tag: { value: "changed", color: Color.Orange },
-          tooltip: `Theme default: ${display(row, row.default)}`,
-        }
-      : { tag: { value: "theme default", color: Color.SecondaryText } },
-  ];
+  // The default stays readable without a mouse: tooltips are hover-only.
+  const accessories: List.Item.Accessory[] = row.overridden
+    ? [
+        { text: `${display(row, row.value)}  (default ${display(row, row.default)})` },
+        { tag: { value: "changed", color: Color.Orange } },
+      ]
+    : [{ text: display(row, row.value) }, { tag: { value: "theme default", color: Color.SecondaryText } }];
 
   return (
     <List.Item
