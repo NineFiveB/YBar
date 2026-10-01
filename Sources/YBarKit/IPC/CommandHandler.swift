@@ -339,7 +339,7 @@ public final class CommandHandler {
                             continue
                         }
                         switch store.set(key: key, token: value) {
-                        case .success(let change): changes.append(change)
+                        case .success(let change): if let change { changes.append(change) }
                         case .failure(let error): emit(error.message)
                         }
                     }
