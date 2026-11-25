@@ -123,4 +123,175 @@ import Testing
         // An empty sweep would pass vacuously: both adapters carry the switch.
         #expect(checked == 2, "expected the two spaces adapters, saw \(checked) subscribers")
     }
+
+    // MARK: - The clock and the recording dot
+
+    /// Lua preamble for the pure helper: the live geometry of the report
+    /// that started this — a 1512pt notched built-in (display 1) and a
+    /// 1103pt Sidecar (display 2), the clock pill ending 8pt from each
+    /// display's right edge — and a bar that covers the menu bar.
+    private var dotPreamble: String {
+        """
+        package.path = "\(Self.portRoot.path)/?.lua;" .. package.path
+        local dot = require("helpers.recording_dot")
+        local bar = { topmost = "on", position = "top", margin = 0, y_offset = 0, height = 40 }
+        local function rect(x, w) return { origin = { x, 0 }, size = { w, 40 } } end
+        local rects = { ["display-1"] = rect(1410, 94), ["display-2"] = rect(1001, 94) }
+        local function on(frames) return { RECORDING = "on", RECORDING_FRAMES = frames } end
+        local function eq(got, want, what)
+          assert(got == want, what .. ": got " .. tostring(got) .. ", want " .. tostring(want))
+        end
+
+        """
+    }
+
+    private func runDot(_ code: String) throws -> String? {
+        let stack = try makeStack()
+        defer { stack.runtime.shutdown() }
+        return run(dotPreamble + code, stack.runtime)
+    }
+
+    /// macOS draws the dot on every display and one clock item serves every
+    /// bar, so the pill opens by the largest room any of them needs: 18pt
+    /// for the built-in's dot (1504 - 1481 - 5), 9 for the Sidecar's.
+    @Test func theClockOpensForTheLargestIndicatorOnAnyOfItsBars() throws {
+        let error = try runDot("""
+        eq(dot.padding(on("1:1481,3,28,28 2:1081,-6,28,28"), rects, bar, 8), 18, "both displays")
+        eq(dot.padding(on("2:1081,-6,28,28 1:1481,3,28,28"), rects, bar, 8), 18, "either order")
+        eq(dot.padding(on("1:1481,3,28,28 2:1081,-6,28,28"),
+                       { ["display-2"] = rect(1001, 94) }, bar, 8), 9, "a bar on the Sidecar only")
+        eq(dot.padding(on("2:1081,-6,28,28"), rects, bar, 8), 9, "a dot on the Sidecar only")
+        eq(dot.padding(on("1:1481,3,28,28"), rects, bar, 8), 18, "a dot on the built-in only")
+        eq(dot.padding({ RECORDING = "off" }, rects, bar, 8), 8, "off")
+        eq(dot.padding({}, rects, bar, 8), 8, "an event that says nothing")
+        eq(dot.padding(nil, rects, bar, 8), 8, "no env")
+        """)
+        #expect(error == nil, "\(error ?? "")")
+    }
+
+    /// The regression itself. The Sidecar's dot sits at desktop x = -22; read
+    /// against display 1's bar that asked for a 1521pt hole, the pill crossed
+    /// the notch, and the next reading (from the displaced edge) asked for
+    /// 673. Neither number, nor the layout they left behind, opens anything.
+    @Test func anotherDisplaysCoordinatesOpenNothing() throws {
+        let error = try runDot("""
+        eq(dot.padding(on("1:-22,-6,28,28"), rects, bar, 8), 8, "the Sidecar's desktop x on display 1")
+        local exploded = { ["display-1"] = rect(-111, 767), ["display-2"] = rect(328, 767) }
+        eq(dot.padding(on("1:1481,3,28,28 2:1081,-6,28,28"), exploded, bar, 8), 9,
+           "the layout the bug left behind")
+        """)
+        #expect(error == nil, "\(error ?? "")")
+    }
+
+    /// Defence in depth: whatever the event carries, the pill opens by no
+    /// more than the ceiling. An ask past it is dropped, not clamped — room
+    /// opened for a dot that is not there is still wrong.
+    @Test func nothingOpensTheClockPastItsBound() throws {
+        let error = try runDot("""
+        local lo, hi = math.huge, -math.huge
+        local function see(pad)
+          assert(type(pad) == "number", "not a number: " .. tostring(pad))
+          lo, hi = math.min(lo, pad), math.max(hi, pad)
+        end
+        for _, right in ipairs({ 656, 1095, 1504, 1512, 3000 }) do
+          for _, margin in ipairs({ 0, 10, 300 }) do
+            local b = { topmost = "on", position = "top", margin = margin, y_offset = 0, height = 40 }
+            local r = { ["display-1"] = rect(right - 94, 94), ["display-2"] = rect(right - 94, 94) }
+            for x = -2000, 4000 do
+              see(dot.padding(on(string.format("1:%d,3,28,28 2:%d,-6,28,28", x, x)), r, b, 8))
+              see(dot.padding({ RECORDING = "on", RECORDING_X = tostring(x) }, r, b, 8))
+            end
+          end
+        end
+        eq(lo, 8, "never under the resting padding")
+        eq(hi, 40, "never over the ceiling")
+
+        eq(dot.padding(on("1:1459,3,28,28"), rects, bar, 8), 40, "exactly the ceiling")
+        eq(dot.padding(on("1:1458,3,28,28"), rects, bar, 8), 8, "one past it is not this pill's dot")
+
+        for _, junk in ipairs({ "", "abc", "1:nan,3,28,28", "1:1e999,3,28,28",
+                                "1:99999999999999999999999,3,28,28", "1:1481",
+                                "1:1481.5,3,28,28", "0x10:1481,3,28,28" }) do
+          local pad = dot.padding(on(junk), rects, bar, 8)
+          assert(type(pad) == "number" and pad >= 8 and pad <= 40,
+                 "junk '" .. junk .. "' gave " .. tostring(pad))
+        end
+
+        eq(dot.padding(on("1:1481,3,28,28"), rects, bar, 50), 50, "a larger resting padding is kept")
+        eq(dot.padding({ RECORDING = "off" }, rects, bar, 50), 50, "and off returns to it")
+        """)
+        #expect(error == nil, "\(error ?? "")")
+    }
+
+    /// An engine from before RECORDING_FRAMES reports one frame in desktop
+    /// coordinates, for whichever display came first. Only its on/off is
+    /// believed.
+    @Test func anOlderEngineGetsTheStandardRoom() throws {
+        let error = try runDot("""
+        for _, x in ipairs({ "-22", "1481", "184", "abc" }) do
+          eq(dot.padding({ RECORDING = "on", RECORDING_X = x }, rects, bar, 8), 18, "x = " .. x)
+          eq(dot.padding({ RECORDING = "on", RECORDING_X = x }, {}, bar, 8), 18, "no layout, x = " .. x)
+        end
+        eq(dot.padding({ RECORDING = "on" }, rects, bar, 24), 24, "a larger resting padding wins")
+        eq(dot.padding({ RECORDING = "off", RECORDING_X = "-22" }, rects, bar, 8), 8, "off")
+        """)
+        #expect(error == nil, "\(error ?? "")")
+    }
+
+    /// bounding_rects are in bar points and the event in display points: a
+    /// bar inset by its margin starts that far into the display.
+    @Test func theBarMarginCounts() throws {
+        let error = try runDot("""
+        local inset = { topmost = "on", position = "top", margin = 10, y_offset = 6, height = 40 }
+        -- The pill ends 8pt from the bar's right edge: 1484 in bar points,
+        -- 1494 on the display, 13pt past the window's left edge at 1481.
+        eq(dot.padding(on("1:1481,3,28,28"), { ["display-1"] = rect(1390, 94) }, inset, 4), 8, "margin 10")
+        """)
+        #expect(error == nil, "\(error ?? "")")
+    }
+
+    @Test func theClockIgnoresADotItsBarIsNotUnder() throws {
+        let error = try runDot("""
+        local frames = "1:1481,3,28,28 2:1081,-6,28,28"
+        local function with(changes)
+          local b = { topmost = "on", position = "top", margin = 0, y_offset = 0, height = 40 }
+          for k, v in pairs(changes) do b[k] = v end
+          return b
+        end
+        for what, b in pairs({
+          ["topmost off"] = with({ topmost = "off" }),
+          ["topmost window"] = with({ topmost = "window" }),
+          ["a bottom bar"] = with({ position = "bottom" }),
+          ["a bar below the dot"] = with({ y_offset = 40 }),
+        }) do
+          eq(dot.padding(on(frames), rects, b, 8), 8, what)
+          if what ~= "a bar below the dot" then
+            eq(dot.padding({ RECORDING = "on", RECORDING_X = "1481" }, rects, b, 8), 8, what .. " (older engine)")
+          end
+        end
+        eq(dot.padding(on(frames), rects, nil, 8), 8, "no bar")
+        assert(dot.covers_menu_bar(bar) and not dot.covers_menu_bar(nil))
+        """)
+        #expect(error == nil, "\(error ?? "")")
+    }
+
+    /// Bars that were only just built have laid nothing out yet. Guessing
+    /// then is how a wrong edge gets measured; nil says "ask again".
+    @Test func theClockWaitsForLayoutInsteadOfGuessing() throws {
+        let error = try runDot("""
+        eq(dot.padding(on("1:1481,3,28,28"), {}, bar, 8), nil, "no rects")
+        eq(dot.padding(on("1:1481,3,28,28"), nil, bar, 8), nil, "nil rects")
+        """)
+        #expect(error == nil, "\(error ?? "")")
+    }
+
+    /// The clock must go through the helper: the desktop-wide scalar and the
+    /// "display 1, or whichever rect comes first" fallback ARE the bug.
+    @Test func theClockRoutesTheDotThroughTheHelper() throws {
+        let source = try String(
+            contentsOf: Self.portRoot.appendingPathComponent("items/calendar.lua"), encoding: .utf8)
+        #expect(source.contains("recording_dot.padding("))
+        #expect(!source.contains("RECORDING_X"))
+        #expect(!source.contains(#"rect["display-1"]"#))
+    }
 }

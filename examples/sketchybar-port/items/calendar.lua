@@ -530,36 +530,61 @@ end)
 -- the pill grows leftwards with it, pushing the row along. Its right edge
 -- stays put — the circle already sits inside it, and reaching further right
 -- ran the plate off the screen. Off again, back to the value below.
+--
+-- macOS draws one on every display. The engine reports each in its own
+-- display's points, and the one pill — it serves every display's bar — takes
+-- the largest room any of them needs, never more than
+-- helpers/recording_dot's ceiling. (Reading one desktop-wide x against
+-- display 1's bar is what once opened the pill by the width of a screen,
+-- with a Sidecar on the left.)
+local recording_dot = require("helpers.recording_dot")
 local rest_label_pad = cal:query().label.padding_right or 8
 
 -- ~0.33s at 60Hz, both ways: the pill opening and closing is a motion, not
 -- a state change, and a snap back on stop read as a glitch.
 local DOT_FRAMES = 20
+-- What this handler last asked for. The engine says the same thing again
+-- after a reload and after the bars are rebuilt, and an event that changes
+-- nothing must animate nothing.
+local shown_pad = rest_label_pad
+-- Counts events, so a retry left over from an older one stands down.
+local fit_serial = 0
 
-local function fit_recording_dot(env)
-  if env.RECORDING ~= "on" then
-    sbar.animate("tanh", DOT_FRAMES, function()
-      cal:set({ label = { padding_right = rest_label_pad } })
-    end)
+local function fit_recording_dot(env, attempt)
+  attempt = attempt or 0
+  if attempt == 0 then fit_serial = fit_serial + 1 end
+  local serial = fit_serial
+  local pad = recording_dot.padding(
+    env, cal:query().bounding_rects, sbar.query("bar"), rest_label_pad)
+  if pad == nil then
+    -- A bar that was only just built has not laid the pill out yet.
+    if attempt < 5 then
+      sbar.delay(0.25, function()
+        if serial == fit_serial then fit_recording_dot(env, attempt + 1) end
+      end)
+    end
     return
   end
-  local dot_x = tonumber(env.RECORDING_X) or 0
-  local rect = cal:query().bounding_rects
-  rect = rect and (rect["display-1"] or next(rect) and select(2, next(rect)))
-  local right = rect and (rect.origin[1] + rect.size[1]) or 0
-  -- The indicator WINDOW is 28pt, but the purple circle inside it is about
-  -- 10, centred, so its left edge sits ~9pt into the window. The text ends
-  -- 4pt short of the circle — 5pt into the window — rather than 35pt away.
-  local hole = math.max(rest_label_pad, right - dot_x - 5)
+  if pad == shown_pad then return end
+  shown_pad = pad
   sbar.animate("tanh", DOT_FRAMES, function()
-    cal:set({ label = { padding_right = hole } })
+    cal:set({ label = { padding_right = pad } })
   end)
 end
 
 -- Only where the bar sits over the menu bar: elsewhere the dot lives in the
--- native bar and never touches the clock.
-if sbar.query("bar").topmost == "on" then
-  cal:subscribe("recording_change", fit_recording_dot)
+-- native bar and never touches the clock. An engine without the event has
+-- nothing to subscribe to.
+if recording_dot.covers_menu_bar(sbar.query("bar"))
+    and sbar.query("events").recording_change then
+  cal:subscribe("recording_change", function(env)
+    -- A bare `ybar --trigger recording_change` (or sbar.trigger with no
+    -- env) arrives with SENDER and nothing else. That is not news about the
+    -- dot, and reading it as "off" closed the pill under a recording that
+    -- was still running.
+    if env.RECORDING == nil then return end
+    fit_recording_dot(env)
+  end)
 end
 
 -- Paint the grid once at load. The dates and today's marker need nothing but
