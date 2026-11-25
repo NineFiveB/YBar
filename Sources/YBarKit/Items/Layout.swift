@@ -91,9 +91,15 @@ public enum Layout {
         // center ones. A long left flow — the app menus, on a busy app — used
         // to run straight under the housing, and whatever landed there was
         // invisible and unclickable. An item that would cross into the zone
-        // is placed on the far side of it instead; nothing is drawn under the
-        // notch. notchHalf is 0 on an un-notched display, so this is a no-op
-        // there.
+        // is placed on the far side of it instead. notchHalf is 0 on an
+        // un-notched display, so this is a no-op there.
+        //
+        // The hop is taken only when the item FITS on the far side. One item
+        // wider than the room beside the notch used to be thrown past the
+        // bar's edge, and since the cursor follows it, every item after it
+        // went off-screen too: a single oversized pill emptied a whole side
+        // of the bar. Such an item now stays where the flow put it (partly
+        // under the housing) and the items after it hop on their own.
         let deadLeft = width / 2 - notchHalf
         let deadRight = width / 2 + notchHalf
         func crossesNotch(_ minX: CGFloat, _ maxX: CGFloat) -> Bool {
@@ -107,7 +113,11 @@ public enum Layout {
             cursor += CGFloat(item.paddingLeft)
             let length = contentLength(item: item, measured: measured)
             if crossesNotch(cursor, cursor + length) {
-                cursor = deadRight + CGFloat(item.paddingLeft)
+                let hopped = deadRight + CGFloat(item.paddingLeft)
+                if hopped + length + CGFloat(item.paddingRight)
+                    <= width - CGFloat(settings.paddingRight) {
+                    cursor = hopped
+                }
             }
             place(item, x: cursor, measured: measured)
             cursor += length + CGFloat(item.paddingRight)
@@ -121,7 +131,10 @@ public enum Layout {
             let length = contentLength(item: item, measured: measured)
             cursor -= length
             if crossesNotch(cursor, cursor + length) {
-                cursor = deadLeft - CGFloat(item.paddingRight) - length
+                let hopped = deadLeft - CGFloat(item.paddingRight) - length
+                if hopped - CGFloat(item.paddingLeft) >= CGFloat(settings.paddingLeft) {
+                    cursor = hopped
+                }
             }
             place(item, x: cursor, measured: measured)
             cursor -= CGFloat(item.paddingLeft)

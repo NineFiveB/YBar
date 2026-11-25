@@ -563,6 +563,90 @@ import Testing
         }
     }
 
+    /// The hop is only taken when the item fits on the far side. One item
+    /// wider than the room beside the notch used to land past the bar's
+    /// edge and drag every item after it along: a clock stretched to 767pt
+    /// put the whole right-hand row at negative x on a notched display.
+    @Test func anItemTooWideToHopStaysAndTheRowStaysOnTheBar() {
+        let wide = makeItem("wide", .right)
+        wide.customWidth = 700
+        let followers = (1...4).map { makeItem("r\($0)", .right) }
+        var settings = BarSettings()
+        settings.notchWidth = 200
+        Layout.perform(items: [wide] + followers, barSize: CGSize(width: 1000, height: 30),
+                       settings: settings, measure: fixedMeasure)
+        // 700 does not fit in the 400 left of the notch: it stays put.
+        #expect(wide.frame.maxX == 1000)
+        #expect(wide.frame.minX == 300)
+        for item in followers {
+            #expect(item.frame.minX >= 0, "\(item.name) left the bar: \(item.frame)")
+            #expect(item.frame.maxX <= 400, "\(item.name) under the notch: \(item.frame)")
+        }
+        #expect(followers[0].frame.maxX == 300)
+    }
+
+    @Test func aLeftItemTooWideToHopStaysAndTheRowStaysOnTheBar() {
+        let wide = makeItem("wide", .left)
+        wide.customWidth = 700
+        let followers = (1...4).map { makeItem("l\($0)", .left) }
+        var settings = BarSettings()
+        settings.notchWidth = 200
+        Layout.perform(items: [wide] + followers, barSize: CGSize(width: 1000, height: 30),
+                       settings: settings, measure: fixedMeasure)
+        #expect(wide.frame.minX == 0)
+        #expect(wide.frame.maxX == 700)
+        for item in followers {
+            #expect(item.frame.maxX <= 1000, "\(item.name) left the bar: \(item.frame)")
+            #expect(item.frame.minX >= 600, "\(item.name) under the notch: \(item.frame)")
+        }
+    }
+
+    /// The room on the far side is what the bar's padding and the item's
+    /// own padding leave. An item that fits the bare 400pt beside the notch
+    /// but not the padded room does not hop.
+    @Test func theHopCountsTheBarPaddingAsRoom() {
+        var settings = BarSettings()
+        settings.notchWidth = 200
+        settings.paddingLeft = 20
+        // 380 wide: fits in 400 beside the notch, but not past a 20pt
+        // padding plus its own 5pt padding.
+        let tight = makeItem("tight", .right)
+        tight.customWidth = 380
+        tight.paddingLeft = 5
+        let lead = makeItem("lead", .right)
+        lead.customWidth = 390
+        Layout.perform(items: [lead, tight], barSize: CGSize(width: 1000, height: 30),
+                       settings: settings, measure: fixedMeasure)
+        #expect(lead.frame.minX == 610)
+        #expect(tight.frame.maxX == 610, "an item with no room on the far side must not hop")
+        #expect(tight.frame.minX >= 0)
+
+        // The left flow mirrors it against the bar's right padding.
+        var mirrored = BarSettings()
+        mirrored.notchWidth = 200
+        mirrored.paddingRight = 20
+        let leftLead = makeItem("leftLead", .left)
+        leftLead.customWidth = 390
+        let leftTight = makeItem("leftTight", .left)
+        leftTight.customWidth = 380
+        leftTight.paddingRight = 5
+        Layout.perform(items: [leftLead, leftTight], barSize: CGSize(width: 1000, height: 30),
+                       settings: mirrored, measure: fixedMeasure)
+        #expect(leftLead.frame.maxX == 390)
+        #expect(leftTight.frame.minX == 390, "an item with no room on the far side must not hop")
+        #expect(leftTight.frame.maxX <= 1000)
+
+        // With the room there, both still hop.
+        leftTight.customWidth = 375
+        tight.customWidth = 375
+        Layout.perform(items: [leftLead, leftTight], barSize: CGSize(width: 1000, height: 30),
+                       settings: mirrored, measure: fixedMeasure)
+        #expect(leftTight.frame.minX == 600)
+        Layout.perform(items: [lead, tight], barSize: CGSize(width: 1000, height: 30),
+                       settings: settings, measure: fixedMeasure)
+        #expect(tight.frame.minX == 20)
+    }
+
     /// An un-notched display passes 0 and the flow is untouched: no jump, no
     /// gap, exactly the layout it always had.
     @Test func edgeFlowsIgnoreAnAbsentNotch() {
