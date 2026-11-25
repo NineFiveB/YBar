@@ -175,6 +175,19 @@ environment into the trigger. The shipped themes probe for the binary at
 `/opt/homebrew/bin`, `/usr/local/bin`, then `PATH`, and hide the workspace
 module when it is missing, so the rest of the theme still works.
 
+A bar that covers the menu bar (`topmost = "on"`) reserves no screen space:
+the top gap is AeroSpace's to leave. On a notched display with the menu bar
+auto-hidden macOS still keeps the housing strip clear, so a small
+`gaps.outer.top` is enough there. A display without a notch — an external,
+a Sidecar iPad — keeps nothing clear, and the same gap puts every tiled
+window's title bar under the bar. Give those displays the bar's height plus
+the gap, per monitor:
+
+```toml
+[gaps]
+outer.top = [{ monitor."built-in" = 12 }, 44]   # 40pt bar + 4pt
+```
+
 **macOS: yabai.** `items/spaces_yabai.lua` reads `yabai -m query --spaces`
 for native Spaces. Reading them needs no scripting addition; clicking a
 pill to focus a space does. The signal recipes in
