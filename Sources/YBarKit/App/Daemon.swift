@@ -176,6 +176,10 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
         // display-policy change) would otherwise strand a running animation clock.
         barManager.onSurfacesRebuilt = { [weak self] in
             self?.scheduler.reattachDisplayLink()
+            // A widget fitted to the recording indicator measured it against
+            // bars that are gone now (a display came or went): say it again
+            // once the new ones are laid out.
+            self?.recordingProvider.republish()
         }
         // Late-activating fonts (per-user Nerd Fonts registering after login)
         // resolve to a fallback that would otherwise be cached forever.
@@ -272,17 +276,11 @@ public final class DaemonCore: NSObject, NSApplicationDelegate {
             self?.networkProvider.requestLocationAuthorization()
         }
 
-        recordingProvider.onChange = { [weak self] frame in
-            var environment = ["RECORDING": frame == nil ? "off" : "on"]
-            if let frame {
-                environment["RECORDING_X"] = String(format: "%.0f", frame.minX)
-                environment["RECORDING_Y"] = String(format: "%.0f", frame.minY)
-                environment["RECORDING_WIDTH"] = String(format: "%.0f", frame.width)
-                environment["RECORDING_HEIGHT"] = String(format: "%.0f", frame.height)
-            }
-            self?.eventBus.trigger(name: "recording_change",
-                                   info: frame == nil ? "off" : "on",
-                                   extraEnvironment: environment)
+        recordingProvider.onChange = { [weak self] indicators in
+            self?.eventBus.trigger(
+                name: "recording_change",
+                info: indicators.isEmpty ? "off" : "on",
+                extraEnvironment: RecordingIndicatorProvider.environment(for: indicators))
         }
 
         statsProvider.onSample = { [weak self] cpu, memory, gpu in

@@ -132,7 +132,12 @@ port](WINDOWS-PORT.md); only OS-facing providers and glyph fonts differ.
   `wifi_change`, `system_stats`, **`modifier_change`** (live ⌥-held UX),
   **`app_launched` / `app_terminated`**, **`media_change`** (Music/Spotify
   now-playing via distributed notifications — no private MediaRemote; state seeded
-  at startup so a bar launched mid-song shows it immediately)
+  at startup so a bar launched mid-song shows it immediately),
+  **`recording_change`** (macOS's screen-recording indicator, found in the
+  window list with no Screen Recording grant: `RECORDING=on|off`, and while
+  on `RECORDING_FRAMES` = one `<display>:<x>,<y>,<w>,<h>` per display showing
+  it, in that display's own points — macOS draws one on every display, so
+  never read it as a single desktop coordinate)
 - Native providers: NSWorkspace, IOKit battery, CoreAudio volume, NWPathMonitor,
   in-process CPU/memory stats
 - Output volume write path: `ybar --volume <0-100|+N|-N>` / `ybar.volume(pct)`

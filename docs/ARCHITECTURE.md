@@ -153,6 +153,7 @@ Boolean shape — pinned on both platforms, do not "fix" either side: sketchybar
 | Clock | (historical — no provider was built) | periodic items are `update_freq` off the 1 Hz routine timer; the Lua themes tick their clocks themselves |
 | Media | **out-of-process only** | MediaRemote is entitlement-dead since 15.3; distributed-notification listeners (Music/Spotify), armed on the first `media_change` subscription — the seed of already-running players goes through `osascript`, which is what raises the Automation prompt |
 | Alias | ScreenCaptureKit, 1 Hz capture timer | `--add alias`; Screen Recording on first capture |
+| Recording indicator | `CGWindowListCopyWindowInfo` poll (1.5 s) + `NSScreen` frames + `NSEvent.mouseLocation` | armed on the first `recording_change` subscription; one indicator per display, in that display's points; the cursor's own window is told apart by the pointer; re-sent after a reload and after a surface rebuild |
 | Workspaces (WM) | AeroSpace/yabai CLI+socket adapters behind `WorkspaceProvider` protocol | native SLS spaces = v2 opt-in |
 
 ## 9. Config layers (progressive disclosure)
