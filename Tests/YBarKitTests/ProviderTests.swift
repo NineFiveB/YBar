@@ -348,6 +348,100 @@ import Testing
     }
 }
 
+/// The SSID read is a synchronous XPC call that can stall for minutes while
+/// the Wi-Fi daemon is busy (a Sidecar or AirPlay link); made on the main
+/// thread it froze the bar. It now runs off-main and only its answer comes
+/// back, which makes ordering the thing to pin: the newest network state is
+/// the only one that may speak.
+@MainActor
+@Suite struct NetworkSSIDSequencingTests {
+    /// A provider whose SSID reads are held until the test answers them.
+    @MainActor
+    private final class Harness {
+        let provider = NetworkProvider()
+        var events: [String] = []
+        var pending: [@MainActor @Sendable (String?) -> Void] = []
+
+        init() {
+            provider.onEvent = { [unowned self] _, info in self.events.append(info) }
+            provider.readSSID = { [unowned self] completion in self.pending.append(completion) }
+        }
+
+        func answer(_ ssid: String?) {
+            pending.removeFirst()(ssid)
+        }
+    }
+
+    @Test func nothingIsReadOrBlockedForAStateWithoutWifi() {
+        let harness = Harness()
+        harness.provider.publish(satisfied: false, isWifi: true, forced: false)
+        #expect(harness.events == [""])
+        harness.provider.publish(satisfied: true, isWifi: false, forced: false)
+        #expect(harness.events == ["", "connected"])
+        #expect(harness.pending.isEmpty)
+    }
+
+    @Test func theSSIDArrivesWhenTheReadAnswers() {
+        let harness = Harness()
+        harness.provider.publish(satisfied: true, isWifi: true, forced: false)
+        #expect(harness.events.isEmpty, "publish must not wait for the read")
+        #expect(harness.pending.count == 1)
+        harness.answer("Home")
+        #expect(harness.events == ["Home"])
+        // Unchanged: deduped.
+        harness.provider.publish(satisfied: true, isWifi: true, forced: false)
+        harness.answer("Home")
+        #expect(harness.events == ["Home"])
+        // No Location grant: the read answers nil.
+        harness.provider.publish(satisfied: true, isWifi: true, forced: false)
+        harness.answer(nil)
+        #expect(harness.events == ["Home", "connected"])
+    }
+
+    /// The read for "on Wi-Fi" is still out when the network drops. Its
+    /// answer is for a state that is gone and must not overwrite "offline".
+    @Test func aStaleReadNeverOverwritesANewerState() {
+        let harness = Harness()
+        harness.provider.publish(satisfied: true, isWifi: true, forced: false)
+        harness.provider.publish(satisfied: false, isWifi: false, forced: false)
+        #expect(harness.events == [""])
+        harness.answer("Home")
+        #expect(harness.events == [""])
+        #expect(harness.pending.isEmpty, "offline wants no SSID: nothing to read again")
+    }
+
+    /// A stalled daemon must not collect a queue of reads: one is out at a
+    /// time, and a newer Wi-Fi state gets a fresh read when it lands.
+    @Test func onlyOneReadIsOutAndTheNewestStateGetsItsOwn() {
+        let harness = Harness()
+        for _ in 0..<5 { harness.provider.publish(satisfied: true, isWifi: true, forced: false) }
+        #expect(harness.pending.count == 1)
+        harness.answer("Old")
+        #expect(harness.events.isEmpty, "an answer from before the last change is not the answer")
+        #expect(harness.pending.count == 1)
+        harness.answer("New")
+        #expect(harness.events == ["New"])
+        #expect(harness.pending.isEmpty)
+    }
+
+    /// A forced publish emits even when nothing changed, and survives being
+    /// overtaken while its read is out.
+    @Test func aForcedPublishAlwaysSpeaksOnce() {
+        let harness = Harness()
+        harness.provider.publish(satisfied: true, isWifi: true, forced: false)
+        harness.answer("Home")
+        harness.provider.publish(satisfied: true, isWifi: true, forced: true)
+        harness.provider.publish(satisfied: true, isWifi: true, forced: false)
+        harness.answer("Home")
+        harness.answer("Home")
+        #expect(harness.events == ["Home", "Home"])
+        // And only once.
+        harness.provider.publish(satisfied: true, isWifi: true, forced: false)
+        harness.answer("Home")
+        #expect(harness.events == ["Home", "Home"])
+    }
+}
+
 @Suite struct MediaEnvironmentTests {
     @Test func notificationMapsToMediaKeys() {
         let userInfo: [AnyHashable: Any] = [

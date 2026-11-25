@@ -14,6 +14,33 @@ public final class NetworkProvider {
 
     private var monitor: NWPathMonitor?
     private var lastInfo: String?
+
+    /// Reads the SSID and hands it back on the main actor. The read is a
+    /// synchronous XPC round trip to the Wi-Fi daemon, and that daemon can
+    /// take seconds — minutes, while it is busy with a peer-to-peer link such
+    /// as Sidecar or AirPlay — to answer. Made on the main thread it froze
+    /// the whole bar for as long: no clock, no clicks, no socket. So it runs
+    /// on a queue of its own and only the answer comes back here. Injectable
+    /// so the sequencing below is testable without a Wi-Fi daemon.
+    var readSSID: (_ completion: @escaping @MainActor @Sendable (String?) -> Void) -> Void = { completion in
+        NetworkProvider.ssidQueue.async {
+            let ssid = NetworkProvider.currentSSID()
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { completion(ssid) }
+            }
+        }
+    }
+    private static let ssidQueue = DispatchQueue(label: "com.ybar.network.ssid", qos: .utility)
+    /// Bumped by every publish: an SSID read answers the state it was started
+    /// for, and only the newest state may speak.
+    private var generation = 0
+    /// One read at a time: a stalled daemon must not collect a queue of them.
+    private var ssidReadInFlight = false
+    /// Whether the newest state is one that wants an SSID (on Wi-Fi, online).
+    private var latestWantsSSID = false
+    /// A forced publish must emit even when nothing changed, and it must
+    /// survive being overtaken while its read is still out.
+    private var forcedPending = false
     /// Retained: authorization callbacks die with a released manager.
     private var locationManager: CLLocationManager?
     /// Retained: CLLocationManager holds its delegate weakly.
@@ -76,10 +103,43 @@ public final class NetworkProvider {
     }
 
     public func publish(satisfied: Bool, isWifi: Bool, forced: Bool) {
-        let info = NetworkProvider.info(
-            satisfied: satisfied, isWifi: isWifi,
-            ssid: satisfied && isWifi ? NetworkProvider.currentSSID() : nil)
-        guard forced || info != lastInfo else { return }
+        generation += 1
+        forcedPending = forcedPending || forced
+        latestWantsSSID = satisfied && isWifi
+        guard latestWantsSSID else {
+            // Offline or wired: nothing to read, the answer is known now. A
+            // read still out for an older state is dropped when it lands.
+            deliver(NetworkProvider.info(satisfied: satisfied, isWifi: isWifi, ssid: nil))
+            return
+        }
+        // A read already out answers an older state; when it lands it sees
+        // the newer generation and starts the one this state is owed.
+        guard !ssidReadInFlight else { return }
+        startSSIDRead()
+    }
+
+    private func startSSIDRead() {
+        ssidReadInFlight = true
+        let started = generation
+        readSSID { [weak self] ssid in
+            self?.finishSSIDRead(started: started, ssid: ssid)
+        }
+    }
+
+    private func finishSSIDRead(started: Int, ssid: String?) {
+        ssidReadInFlight = false
+        guard started == generation else {
+            // The network changed while the read was out. Its answer is for
+            // a state that is gone; read again only if the newest wants one.
+            if latestWantsSSID { startSSIDRead() }
+            return
+        }
+        deliver(NetworkProvider.info(satisfied: true, isWifi: true, ssid: ssid))
+    }
+
+    private func deliver(_ info: String) {
+        guard forcedPending || info != lastInfo else { return }
+        forcedPending = false
         lastInfo = info
         onEvent?("wifi_change", info)
     }
@@ -101,7 +161,8 @@ public final class NetworkProvider {
     }
 
     /// Requires Location authorization on macOS 14+; returns nil without it.
-    public static func currentSSID() -> String? {
+    /// Blocks on the Wi-Fi daemon: never call it on the main thread.
+    nonisolated public static func currentSSID() -> String? {
         CWWiFiClient.shared().interface()?.ssid()
     }
 }
