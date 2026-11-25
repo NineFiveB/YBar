@@ -283,6 +283,67 @@ private func mouse(_ kind: MouseEventKind, x: CGFloat = 50) -> MouseEventInfo {
         manager.handleMouse(mouse(.down, x: 20), on: second)
         #expect(manager.lastPressSurfaceIndex[host.id] == 2)
     }
+
+    /// Every shipped widget subscribes the click on a member and hangs the
+    /// popup off the bracket around it. hitTest returns the member first, so
+    /// the bracket never saw a press and its popup followed keyboard focus:
+    /// with a second display, a click on one bar opened the popup on the
+    /// other. A press on a member is a press on its brackets too.
+    @Test func aPressOnAMemberIsAPressOnTheBracketThatHostsItsPopup() throws {
+        let manager = try makeHeadlessManager()
+        let screen = try #require(NSScreen.screens.first)
+        let member = try #require(manager.store.add(name: "clock", position: .right))
+        let other = try #require(manager.store.add(name: "other", position: .right))
+        let bracket = try #require(manager.store.add(name: "clock.bracket", position: .right))
+        bracket.kind = .bracket
+        bracket.members = ["clock"]
+        let unrelated = try #require(manager.store.add(name: "other.bracket", position: .right))
+        unrelated.kind = .bracket
+        unrelated.members = ["other"]
+        let regex = try #require(manager.store.add(name: "all.bracket", position: .right))
+        regex.kind = .bracket
+        regex.members = ["/^clo.*/"]
+
+        let surfaces = [1, 2].map { index -> BarSurface in
+            let surface = BarSurface(screen: screen, arrangementIndex: index)
+            // The bracket spans its member exactly, as the live widgets do.
+            surface.itemFrames = [
+                (member.id, slot), (other.id, CGRect(x: 100, y: 0, width: 60, height: 25)),
+                (bracket.id, slot), (unrelated.id, CGRect(x: 100, y: 0, width: 60, height: 25)),
+                (regex.id, slot),
+            ]
+            return surface
+        }
+
+        manager.handleMouse(mouse(.down, x: 20), on: surfaces[1])
+        #expect(manager.lastPressSurfaceIndex[member.id] == 2)
+        #expect(manager.lastPressSurfaceIndex[bracket.id] == 2)
+        #expect(manager.lastPressSurfaceIndex[regex.id] == 2)
+        #expect(manager.lastPressSurfaceIndex[unrelated.id] == nil)
+        #expect(manager.lastPressSurfaceIndex[other.id] == nil)
+
+        // The popup's host is the bracket: it opens where the member was
+        // pressed even though focus is on the other display.
+        let chosen = BarManager.surfaceForPopup(
+            hostID: bracket.id, surfaces: surfaces,
+            preferredIndex: manager.lastPressSurfaceIndex[bracket.id],
+            activeScreen: surfaces[0].screen)
+        #expect(chosen?.arrangementIndex == 2)
+
+        // The release (the click itself) records it as well.
+        manager.handleMouse(mouse(.clicked, x: 20), on: surfaces[0])
+        #expect(manager.lastPressSurfaceIndex[bracket.id] == 1)
+
+        // The press is spent when the popup it opened closes — not while the
+        // host is still open — so a later CLI open follows focus again.
+        bracket.popup.isOpen = true
+        manager.forgetPress(ofClosedHost: bracket.id)
+        #expect(manager.lastPressSurfaceIndex[bracket.id] == 1)
+        bracket.popup.isOpen = false
+        manager.forgetPress(ofClosedHost: bracket.id)
+        #expect(manager.lastPressSurfaceIndex[bracket.id] == nil)
+        #expect(manager.lastPressSurfaceIndex[regex.id] == 1)
+    }
 }
 
 @Suite struct ScrollStepperTests {

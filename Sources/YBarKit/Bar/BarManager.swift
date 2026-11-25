@@ -350,9 +350,9 @@ public final class BarManager {
     }
 
     /// The bar surface a host's popup hangs off: the display it was last
-    /// pressed on, else the one holding keyboard focus (a popup opened from
-    /// the CLI or a script has no press behind it), else the first that
-    /// lays the host out.
+    /// pressed on (the press is forgotten when the popup it opened closes),
+    /// else the one holding keyboard focus (a popup opened from the CLI or a
+    /// script has no press behind it), else the first that lays the host out.
     private func surfaceForPopup(host: Item) -> BarSurface? {
         BarManager.surfaceForPopup(
             hostID: host.id, surfaces: surfaces,
@@ -465,6 +465,7 @@ public final class BarManager {
             // so a reopen finds the same panel and ramps it back up instead
             // of stacking a fresh one over the fading ghost.
             if popupSurface.isClosing { continue }
+            forgetPress(ofClosedHost: hostID)
             if pointerInsideSurfaces.remove(ObjectIdentifier(popupSurface)) != nil {
                 scheduleGlobalExitCheck()
             }
@@ -841,7 +842,7 @@ public final class BarManager {
             // note on warped cursors outrunning tracking-area enters).
             noteSurfaceEntered(ObjectIdentifier(surface))
             let hit = hitTest(point: info.point, on: surface)
-            if let hit { lastPressSurfaceIndex[hit.id] = surface.arrangementIndex }
+            if let hit { notePress(on: hit, surface: surface) }
             // A press anywhere that is not an open popup's host dismisses
             // auto-close popups (host presses defer to their toggle scripts).
             closeAutoClosePopups(except: hit?.id)
@@ -879,7 +880,7 @@ public final class BarManager {
                 return
             }
             if let item = hitTest(point: info.point, on: surface) {
-                lastPressSurfaceIndex[item.id] = surface.arrangementIndex
+                notePress(on: item, surface: surface)
                 onItemClicked?(item, info)
             }
         case .scrolled:
@@ -895,6 +896,32 @@ public final class BarManager {
             updateHover(surface: surface, to: nil)
             scheduleGlobalExitCheck()
         }
+    }
+
+    /// Remember which display an item was pressed on. The press belongs to
+    /// the item under the pointer AND to every bracket that lists it as a
+    /// member: themes subscribe the click on the member and hang the popup
+    /// off the bracket around it, and hitTest returns the member first, so
+    /// the bracket alone never saw a press. Its popup then fell back to the
+    /// display holding keyboard focus: with two displays, a click on one
+    /// bar opened the popup on the other.
+    private func notePress(on item: Item, surface: BarSurface) {
+        lastPressSurfaceIndex[item.id] = surface.arrangementIndex
+        guard item.kind != .bracket else { return }
+        for bracket in store.items where bracket.kind == .bracket
+            && ComponentGeometry.expandMembers(bracket.members, in: store.items)
+                .contains(where: { $0.id == item.id }) {
+            lastPressSurfaceIndex[bracket.id] = surface.arrangementIndex
+        }
+    }
+
+    /// The press that opened a popup is spent once the popup closes: one
+    /// opened later from the CLI or a script follows keyboard focus again
+    /// instead of the display its pill was last clicked on. A host that is
+    /// still open (its scene merely failed to render this pass) keeps it.
+    func forgetPress(ofClosedHost hostID: Int) {
+        guard store.items.first(where: { $0.id == hostID })?.popup.isOpen != true else { return }
+        lastPressSurfaceIndex[hostID] = nil
     }
 
     private func noteSurfaceEntered(_ id: ObjectIdentifier) {
