@@ -12,16 +12,17 @@ macOS 14 and 15 the same themes draw a blur in its place. Windows users:
 ## Homebrew (recommended)
 
 ```sh
-brew tap NineFiveB/ybar            # github.com/NineFiveB/homebrew-ybar
-brew install ybar               # latest tagged release
+brew tap NineFiveB/ybar                    # github.com/NineFiveB/homebrew-ybar
+brew install NineFiveB/ybar/ybar           # latest tagged release
 # or:
-brew install --HEAD ybar        # build from current main
+brew install --HEAD NineFiveB/ybar/ybar    # build from current main
 ```
 
-Recent Homebrew asks you to confirm trusting a third-party tap the first
-time you install from it; `brew trust NineFiveB/ybar` pre-approves it (useful
-in scripts, where the prompt would fail instead). Tapping the main repo
-directly also works: `brew tap NineFiveB/ybar https://github.com/NineFiveB/YBar.git`.
+Recent Homebrew refuses a third-party tap until it is trusted. The full
+name above trusts this one formula; `brew trust NineFiveB/ybar` trusts the
+whole tap, after which the short `brew install ybar` works too. Tapping the
+main repo directly also works:
+`brew tap NineFiveB/ybar https://github.com/NineFiveB/YBar.git`.
 
 This builds YBar from source and installs:
 

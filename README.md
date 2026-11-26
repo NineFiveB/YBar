@@ -46,12 +46,12 @@ Requirements: macOS 14 or later (Liquid Glass on macOS 26); Windows 11.
 
 ```sh
 brew tap NineFiveB/ybar
-brew install ybar           # tagged release; --HEAD builds current main
+brew install NineFiveB/ybar/ybar   # tagged release; --HEAD builds current main
 ybar start
 ybar theme use darxk        # any name from `ybar theme list`
 ```
 
-First install from a third-party tap asks for confirmation; `brew trust NineFiveB/ybar` pre-approves it. `ybar autostart enable` brings the bar back at every login. Privacy prompts say "YBar", not "Terminal", and only the widgets you turn on ask for anything. The full walkthrough is in [docs/INSTALL.md](docs/INSTALL.md).
+Homebrew refuses a third-party tap until it is trusted: the full `NineFiveB/ybar/ybar` name trusts this one formula, `brew trust NineFiveB/ybar` the whole tap. `ybar autostart enable` brings the bar back at every login. Privacy prompts say "YBar", not "Terminal", and only the widgets you turn on ask for anything. The full walkthrough is in [docs/INSTALL.md](docs/INSTALL.md).
 
 ### Windows 11
 

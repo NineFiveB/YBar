@@ -254,7 +254,7 @@ jobs:
             echo
             echo '```sh'
             echo 'brew tap NineFiveB/ybar'
-            echo 'brew install ybar'
+            echo 'brew install NineFiveB/ybar/ybar'
             echo '```'
             echo
             echo "Source tarball \`SHA256\` \`$SHA\` (pinned in \`packaging/homebrew/ybar.rb\`)."
