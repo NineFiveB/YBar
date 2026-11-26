@@ -279,7 +279,7 @@ public enum CLIClient {
 }
 
 public enum Version {
-    public static let current = "0.3.0"
+    public static let current = "0.4.0"
     /// The enclosing bundle's CFBundleVersion: the short commit hash that
     /// `make app`, `make release` and a `--HEAD` formula install stamp at
     /// assembly time, or the release build number the committed plist

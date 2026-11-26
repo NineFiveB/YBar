@@ -8,6 +8,8 @@ section and publishes the section as the GitHub Release notes.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-11-25
+
 ### Added
 
 - A settings layer for GUIs. A theme declares its user-tunable knobs with
@@ -31,6 +33,56 @@ section and publishes the section as the GitHub Release notes.
   Widgets and Reload commands that drive the running bar over its socket.
   Sizes and colors are text fields; switches toggle in place; untouched
   rows are marked as the theme's default.
+
+### Changed
+
+- `recording_change` reports every display. macOS draws the recording
+  indicator on each one, so `RECORDING_FRAMES` carries one
+  `<display>:<x>,<y>,<w>,<h>` per display showing it, in that display's own
+  points, and `RECORDING_DISPLAY` names the display that `RECORDING_X` /
+  `_Y` / `_WIDTH` / `_HEIGHT` describe (the lowest-numbered one). Those four
+  are in that display's points too, where they used to be desktop
+  coordinates; with one display nothing changes. The event is sent again
+  after a config reload and after the bars are rebuilt for a display change.
+
+### Fixed
+
+- With a second display attached (Sidecar, AirPlay, an external) the clock
+  no longer swallows the bar. `recording_change` reported whichever
+  display's indicator the window list returned first, in desktop
+  coordinates; with a display left of the main one the clock opened by the
+  width of a screen, which pushed the right-hand row off the notched display
+  and over the workspace pills on the other.
+- The clock's room for the recording dot is the largest any display's bar
+  needs, counts the bar's margin, and is never more than 40pt whatever the
+  event says.
+- The recording indicator is found on displays arranged above or below the
+  main one, and the pointer is no longer taken for it: while the screen is
+  captured the cursor is a window on the indicator's own layer, and a hand
+  or an I-beam near the top of a screen made the clock follow the mouse.
+- A theme reloaded during a recording is told about it, and a bare
+  `ybar --trigger recording_change` no longer closes the clock's room for
+  the dot.
+- A popup opens on the display whose bar was clicked. The press was
+  remembered for the item under the pointer but the shipped widgets hang
+  their popups off the bracket around it, so with two displays the popup
+  followed keyboard focus to the other screen. The press is forgotten when
+  the popup closes, so one opened later from the CLI or a script follows
+  focus again.
+- One item too wide for the room beside the notch no longer takes the rest
+  of its row off the bar. It stays where it was and the items after it hop
+  the notch on their own.
+- The bar no longer freezes while the Wi-Fi daemon is slow to answer. The
+  SSID read is a blocking call that can stall for minutes during a Sidecar
+  or AirPlay session; it ran on the main thread on every network change,
+  and now runs off it.
+- The formula builds on macOS 26 with the 27 toolchain. Homebrew hands
+  Swift 6.4 the macOS 26 SDK there, and a glass property that only the 27
+  SDK has was gated on the compiler instead of the SDK.
+- The install instructions name the formula in full,
+  `brew install NineFiveB/ybar/ybar`. Homebrew 6 and later refuses the
+  short name from a tap that has not been trusted; it never asked for
+  confirmation, as the README claimed.
 
 ## [0.3.0] — 2026-09-30
 
@@ -356,7 +408,9 @@ with the next release.
 
 First tagged release.
 
-[Unreleased]: https://github.com/NineFiveB/YBar/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/NineFiveB/YBar/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/NineFiveB/YBar/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/NineFiveB/YBar/compare/v0.2.0...v0.3.0
 [0.2.1]: https://github.com/NineFiveB/YBar/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/NineFiveB/YBar/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/NineFiveB/YBar/releases/tag/v0.1.0
