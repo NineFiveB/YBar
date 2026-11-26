@@ -13,11 +13,11 @@
 class Ybar < Formula
   desc "Metal-rendered, sketchybar-compatible macOS status bar"
   homepage "https://github.com/NineFiveB/YBar"
-  url "https://github.com/NineFiveB/YBar/archive/refs/tags/v0.3.0.tar.gz"
+  url "https://github.com/NineFiveB/YBar/archive/refs/tags/v0.4.0.tar.gz"
   # SOURCE tarball hash (curl -fL <url above> | shasum -a 256) - NOT the
   # app-zip hash that `make release` prints, which is a different,
   # machine-signed artifact. Pinned by the release workflow on every tag.
-  sha256 "989af87d20e5eb8e7472ecda5186721a907034a84bca9be1949a6a4a277d322c"
+  sha256 "87d99356ad2c64fb84e0d66dcd2a16feefc9c5dabdf45a5fdc751e7bc79afd96"
   license "GPL-3.0-only"
   head "https://github.com/NineFiveB/YBar.git", branch: "main"
 
