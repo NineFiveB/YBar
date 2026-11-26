@@ -270,10 +270,12 @@ public final class BarSurface {
             glass.style = .clear
         }
         glass.tintColor = tint.nsColor
-        // compiler(>=6.4) tracks the macOS 27 SDK the way compiler(>=6.2)
-        // tracks 26: effectIsInteractive is API_AVAILABLE(macos(27.0)), and an
-        // #available check alone cannot save a symbol the SDK does not have.
-        #if compiler(>=6.4)
+        // effectIsInteractive is API_AVAILABLE(macos(27.0)), and an #available
+        // check alone cannot save a symbol the SDK does not have. The gate asks
+        // the SDK (AppKit is 2685 in the macOS 26 SDK, 2775 in 27), not the
+        // compiler: Swift 6.4 also builds against the 26 SDK, which is what
+        // Homebrew hands it on macOS 26.
+        #if canImport(AppKit, _version: 2700)
         if #available(macOS 27.0, *) {
             glass.effectIsInteractive = true
         }

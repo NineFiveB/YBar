@@ -144,7 +144,7 @@ final class WifiPasswordPrompt: NSObject, NSWindowDelegate, NSTextFieldDelegate 
             let glass = NSGlassEffectView()
             glass.style = .regular
             glass.appearance = NSAppearance(named: .darkAqua)
-            #if compiler(>=6.4)  // SDK 27 symbol; see BarSurface
+            #if canImport(AppKit, _version: 2700)  // SDK 27 symbol; see BarSurface
             if #available(macOS 27.0, *) {
                 glass.effectIsInteractive = true
             }
